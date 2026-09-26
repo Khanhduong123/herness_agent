@@ -28,12 +28,13 @@ This repository uses a **Central Orchestrator Pattern**:
   - Complete type hints on all public interfaces (Pydantic v2 schemas)
   - No unused imports or silent exception swallowing
 
-## 3. Git Rules
+## 3. Git Operations: Direct agy-cli Control Only (No Programmatic Python Git)
 
-- Never commit directly to `main`.
-- Always work on a dedicated branch (`feat/...`, `fix/...`).
-- Current branch: `feat/orchestrator-architecture`.
-- Use conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`).
+- **Separation of Concerns**: Python source code (`src/`) must NEVER call Git programmatically (no `subprocess.run(["git", ...])` or `gitpython`).
+- **Direct agy CLI Execution**: All git actions (branching, commits, diff, status, push) are performed directly by `agy` CLI in the terminal under user direction.
+- **Branch Protection**: Never commit directly to `main`.
+- **Branch Conventions**: Always work on a dedicated branch (`feat/...`, `fix/...`). Current branch: `feat/orchestrator-architecture`.
+- **Conventional Commits**: Use `feat:`, `fix:`, `test:`, `docs:`, `refactor:`. Always inspect `git status` and `git diff` before committing.
 
 ## 4. Herdr Setup
 

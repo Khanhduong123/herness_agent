@@ -104,20 +104,33 @@ Mọi agent khi thực thi câu lệnh hoặc viết code phải tuân thủ ngh
 
 ---
 
-## 4. Quy Trình Git & Branching
+## 4. Quy Trình Git & Quản Lý Qua `agy` CLI Trực Tiếp (Không Gọi Bằng Code)
 
-1. **Tuyệt đối KHÔNG commit trực tiếp vào nhánh `main`**.
-2. **Luôn checkout nhánh mới** trước khi thực hiện thay đổi:
-   - Tính năng mới: `feat/<tên-tính-năng>` (ví dụ: `feat/orchestrator-architecture`)
-   - Sửa lỗi: `fix/<tên-lỗi>`
-   - Refactor: `refactor/<tên-module>`
-   - Test: `test/<tên-test>`
-3. **Quy ước Commit (Conventional Commits):**
-   - Format: `<type>(<scope>): <mô tả ngắn bằng tiếng Anh hoặc tiếng Việt>`
-   - Ví dụ:
-     - `feat(orchestrator): add DAG task resolution and worker prompt builder`
-     - `test(orchestrator): add unit tests for cyclic dependency detection`
-     - `docs(agent): add Agent.md compliance rules`
+Mọi thao tác Git (tạo nhánh, commit, kiểm tra diff, push) **phải được thực thi trực tiếp thông qua công cụ CLI của `agy` (Terminal / Command Tool)**, tuyệt đối không gọi qua code:
+
+1. **Nguyên tắc phân tách (Separation of Concerns):**
+   - Codebase Python (`src/harness_agent/`) **không chứa bất kỳ hàm nào gọi ngầm Git** (không dùng `subprocess.run(["git", ...])` hay thư viện như `GitPython` trong mã nguồn).
+   - Quyền điều khiển Git hoàn toàn do **`agy` CLI** thực hiện tương tác theo lệnh và sự giám sát của người dùng.
+2. **Quy tắc thao tác Git qua `agy`:**
+   - **Tuyệt đối KHÔNG commit trực tiếp vào nhánh `main`**.
+   - **Luôn bảo `agy` checkout nhánh mới** trước khi thực hiện task:
+     ```powershell
+     # Ví dụ lệnh prompt cho agy:
+     agy "Tạo và chuyển sang nhánh mới feat/ten-tinh-nang"
+     ```
+   - **Commit có chủ đích và tuân thủ Conventional Commits:**
+     - Trước khi commit, `agy` phải chạy `git status` và `git diff` để kiểm tra chính xác các file đã thay đổi.
+     - Sau đó `agy` chạy lệnh commit:
+       ```powershell
+       agy "Kiểm tra thay đổi và commit theo chuẩn conventional commit feat(scope): message"
+       ```
+   - **Quy ước đặt tên Conventional Commits:**
+     - `feat(...)`: Tính năng mới
+     - `fix(...)`: Sửa lỗi
+     - `refactor(...)`: Tái cấu trúc mã nguồn
+     - `test(...)`: Bổ sung hoặc cập nhật bài kiểm thử
+     - `docs(...)`: Cập nhật tài liệu / quy chuẩn
+
 
 ---
 
