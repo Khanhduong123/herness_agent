@@ -55,8 +55,9 @@ This repository uses a **Central Orchestrator Pattern**:
 ## 5. SDLC Skills Protocol (`.agents/skills/`)
 
 All agents must strictly adhere to the SDLC skills discovered in `.agents/skills/`:
-- **Pre-Task**: `sdlc-pretask-checklist` (clean git tree, branch checkout, requirement breakdown) & `sdlc-architecture-planner` (Pydantic models, DAG plan).
+- **Pre-Task**: `sdlc-pretask-checklist` (clean git tree, branch checkout, requirement breakdown), `sdlc-architecture-planner` (Pydantic models, DAG plan), and `sdlc-subtask-specifier` (formal sub-spec generation: criticality, risk, function signatures, test cases, status).
 - **In-Task**: `sdlc-clean-code-standards` (PEP 8, Black 100 cols, isort, flake8) & `sdlc-test-driven-development` (pytest unit & edge tests).
 - **Post-Task Quality Gate**: `sdlc-posttask-quality-gate` (100% pytest pass, linters, git diff), `sdlc-security-audit` (secret prevention, input sanitization), `sdlc-conventional-commit` (conventional commits via agy-cli).
+
 
 See full details in [Agent.md](file:///d:/herness_agent/Agent.md).

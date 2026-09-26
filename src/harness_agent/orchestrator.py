@@ -132,6 +132,50 @@ class AgentOrchestrator:
         if subtask.description:
             lines.extend(["", f"Context / Details:\n{subtask.description}"])
 
+        # Render formal Sub-Spec if present
+        if subtask.spec:
+            spec = subtask.spec
+            lines.extend(
+                [
+                    "",
+                    "## Technical Sub-Specification (SDLC Contract):",
+                    f"- Criticality: {spec.criticality.value.upper()}",
+                    f"- Risk Level: {spec.risk_level.value.upper()}",
+                    f"- Status: {spec.status.value.upper()}",
+                ]
+            )
+            if spec.blast_radius:
+                lines.append(f"- Blast Radius: {spec.blast_radius}")
+            if spec.risk_mitigation:
+                lines.append(f"- Risk Mitigation: {spec.risk_mitigation}")
+
+            if spec.functions:
+                lines.extend(["", "### Required Functions / Interfaces:"])
+                for fn in spec.functions:
+                    lines.append(f"```python\n{fn.signature}\n```")
+                    if fn.description:
+                        lines.append(f"  Docstring: {fn.description}")
+                    if fn.parameters:
+                        lines.append(f"  Parameters: {fn.parameters}")
+                    if fn.raises:
+                        lines.append(f"  Raises: {fn.raises}")
+
+            if spec.test_cases:
+                lines.extend(["", "### Required Test Cases (QA Acceptance):"])
+                for tc in spec.test_cases:
+                    lines.append(f"- [{tc.id}] {tc.description}")
+                    if tc.input_data:
+                        lines.append(f"    Inputs: {tc.input_data}")
+                    if tc.expected_output is not None:
+                        lines.append(f"    Expected Output: {tc.expected_output}")
+                    if tc.expected_exception:
+                        lines.append(f"    Expected Exception: {tc.expected_exception}")
+
+            if spec.acceptance_criteria:
+                lines.extend(["", "### SDLC Quality Acceptance Criteria:"])
+                for crit in spec.acceptance_criteria:
+                    lines.append(f"- [ ] {crit}")
+
         # Add context from upstream dependencies
         if subtask.depends_on:
             lines.extend(["", "## Upstream Task Outputs:"])

@@ -135,6 +135,97 @@ class WorkerAgentConfig(BaseModel):
     extra_flags: List[str] = Field(default_factory=list, description="Extra agy CLI flags")
 
 
+class CriticalityLevel(str, Enum):
+    """Criticality / priority level for a subtask in the SDLC workflow."""
+
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class RiskLevel(str, Enum):
+    """Assessed risk level for code implementation or changes."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class SpecStatus(str, Enum):
+    """Lifecycle status for a technical subtask specification (sub-spec)."""
+
+    DRAFT = "draft"
+    REVIEWED = "reviewed"
+    APPROVED = "approved"
+    IN_PROGRESS = "in_progress"
+    TESTING = "testing"
+    COMPLETED = "completed"
+    BLOCKED = "blocked"
+
+
+class FunctionSpec(BaseModel):
+    """Specification of a function or method to be implemented."""
+
+    name: str = Field(..., description="Function or method name")
+    signature: str = Field(..., description="Complete python signature including type annotations")
+    description: Optional[str] = Field(default=None, description="Detailed docstring or behavior")
+    parameters: Dict[str, str] = Field(
+        default_factory=dict, description="Parameter names mapped to their types/constraints"
+    )
+    return_type: str = Field(default="None", description="Expected return type annotation")
+    raises: List[str] = Field(
+        default_factory=list, description="Exceptions that the function is expected to raise"
+    )
+
+
+class TestCaseSpec(BaseModel):
+    """Specification of a required test case to validate the implementation."""
+
+    __test__ = False
+
+    id: str = Field(..., description="Unique test case identifier (e.g. TC-01)")
+    description: str = Field(..., description="Scenario and objective of the test")
+    input_data: Dict[str, Any] = Field(
+        default_factory=dict, description="Sample inputs or invocation parameters"
+    )
+    expected_output: Optional[Any] = Field(
+        default=None, description="Expected return value or system state"
+    )
+    expected_exception: Optional[str] = Field(
+        default=None, description="Expected exception class name if testing error path"
+    )
+
+
+class SubSpec(BaseModel):
+    """Comprehensive technical specification for a subtask prior to execution."""
+
+    criticality: CriticalityLevel = Field(
+        default=CriticalityLevel.HIGH, description="Importance level of the subtask"
+    )
+    risk_level: RiskLevel = Field(
+        default=RiskLevel.LOW, description="Assessed implementation risk level"
+    )
+    blast_radius: Optional[str] = Field(
+        default=None, description="Scope of files, modules, or APIs affected"
+    )
+    risk_mitigation: Optional[str] = Field(
+        default=None, description="Measures to avoid regressions or handle failures"
+    )
+    status: SpecStatus = Field(
+        default=SpecStatus.APPROVED, description="Current lifecycle state of the spec"
+    )
+    functions: List[FunctionSpec] = Field(
+        default_factory=list, description="Function / interface specifications to implement"
+    )
+    test_cases: List[TestCaseSpec] = Field(
+        default_factory=list, description="Test cases required to achieve 100% pass rate"
+    )
+    acceptance_criteria: List[str] = Field(
+        default_factory=list, description="SDLC quality gate criteria to satisfy"
+    )
+
+
 class SubTask(BaseModel):
     """A decomposed subtask to be executed by a designated worker agent."""
 
@@ -158,6 +249,9 @@ class SubTask(BaseModel):
         default=None, description="Override timeout for this subtask"
     )
     status: TaskStatus = Field(default=TaskStatus.PENDING, description="Current execution state")
+    spec: Optional[SubSpec] = Field(
+        default=None, description="Detailed SDLC technical specification (sub-spec)"
+    )
     tags: List[str] = Field(default_factory=list, description="Tags for categorization")
 
 
