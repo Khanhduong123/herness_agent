@@ -6,7 +6,7 @@
 ## 1. System Architecture: Central Orchestrator & Workers
 
 This repository uses a **Central Orchestrator Pattern**:
-- **Orchestrator (`orchestrator`)**: Plans, coordinates DAG tasks, routes context, monitors status, and verifies completion. **CRITICAL RULE:** The Orchestrator MUST NEVER write, modify, or edit code files directly. It must ONLY: 1) Generate Sub-Specs and save them to `.ai/[task_id].md`, 2) Wait for User approval, 3) Spawn Sub-Agents using `invoke_subagent` and explicitly instruct them to use the `sdlc-git-worktree-worker` skill to create a Herdr workspace/worktree BEFORE coding.
+- **Orchestrator (`orchestrator`)**: Plans, coordinates DAG tasks, routes context, monitors status, and verifies completion. **CRITICAL RULE:** The Orchestrator MUST NEVER write, modify, or edit code files directly. It must ONLY: 1) Generate Sub-Specs and save them to `.ai/[task_id].md`, 2) Wait for User approval, 3) **Run `herdr workspace create agent/[task_id]` via terminal to create the worktree**, 4) Spawn Sub-Agents using `invoke_subagent` and explicitly instruct them to `cd` into that workspace before coding.
 - **Researcher (`researcher`)**: Explores codebase, dependencies, and requirements.
 - **Coder (`coder`)**: Implements code, adheres to PEP 8, Black, typing, and architectural specs.
 - **Tester (`tester`)**: Writes and runs `pytest` tests; validates 100% pass rate.
