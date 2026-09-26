@@ -34,9 +34,29 @@ tasks:
   - id: "step_02_implementation"
     name: "Feature Implementation"
     role: "coder"
-    instruction: "Implement the feature following the design provided by the researcher. Ensure adherence to Agent.md code standards."
+    instruction: "Implement the feature following the design and sub-spec. Ensure adherence to Agent.md code standards."
     depends_on: ["step_01_research"]
     tags: ["coding", "implementation"]
+    spec:
+      criticality: "high"
+      risk_level: "low"
+      blast_radius: "src/harness_agent/runner.py"
+      risk_mitigation: "Ensure backward compatibility with existing command arguments"
+      status: "approved"
+      functions:
+        - name: "build_command"
+          signature: "def build_command(prompt: str, task: Optional[Task] = None) -> List[str]:"
+          description: "Construct CLI arguments for agy invocation"
+          return_type: "List[str]"
+      test_cases:
+        - id: "TC-01"
+          description: "Verify happy path agy argument formatting"
+          input_data:
+            prompt: "hello"
+      acceptance_criteria:
+        - "Adhere to Black 100 char limit and Flake8 compliance"
+        - "Achieve 100% pytest pass rate"
+
 
   - id: "step_03_testing"
     name: "Unit and Regression Testing"

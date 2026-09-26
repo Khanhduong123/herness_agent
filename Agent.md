@@ -170,6 +170,13 @@ Mọi AI Agent làm việc trong repository này (hoặc repository phái sinh) 
    - Khảo sát codebase, kiểm tra các model/hàm có sẵn để tái sử dụng.
    - Định nghĩa schema dữ liệu với Pydantic v2 và typing đầy đủ trước khi viết logic thực thi.
    - Lập kế hoạch DAG các bước thực hiện.
+3. **`sdlc-subtask-specifier` (Bắt Buộc Trước Khi Giao Việc Cho Worker)**:
+   - Orchestrator/Researcher lập bản đặc tả kỹ thuật con (`sub-spec`) cho từng subtask.
+   - Đánh giá **mức độ quan trọng (Criticality)**: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`.
+   - Đánh giá **rủi ro (Risk Assessment)**: mức độ rủi ro, khả năng lỗi, blast radius, phương án rollback.
+   - Quản lý **trạng thái (Status)**: `DRAFT`, `APPROVED`, `IN_PROGRESS`, `TESTING`, `COMPLETED`, `BLOCKED`.
+   - Đặc tả chi tiết **chữ ký hàm (Function Specs)**: tên hàm, tham số, kiểu trả về, ngoại lệ ném ra.
+   - Liệt kê trước **danh sách testcase (TestCase Specs)**: happy path, boundary/edge cases, error cases.
 
 ### 6.2. Giai Đoạn 2: Trong Khi Làm Task (Implementation Phase)
 1. **`sdlc-clean-code-standards`**:
