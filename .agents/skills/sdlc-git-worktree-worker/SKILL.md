@@ -11,15 +11,11 @@ This protocol enforces that every Worker Agent (e.g., Coder, Tester) must perfor
 
 ## 1. Entering the Isolated Workspace
 
-When a Worker Agent receives a subtask from the Orchestrator, it must **not** modify the main working directory directly. The Orchestrator should have already created a workspace named `agent/[task_id]` using Herdr.
+When a Worker Agent receives a subtask from the Orchestrator, it must **not** modify the main working directory directly. The Orchestrator should have already created a git worktree (`git worktree add agent/[task_id] -b agent/[task_id]`), created a visible workspace (`herdr workspace create --cwd ...`), and launched the agent (`herdr pane run <pane_id> ...`) inside that workspace.
 
 1. Identify the task ID (e.g., `subtask_01_feature`).
 2. The mandatory naming convention for the branch and workspace is: `agent/[task_id]`.
-3. Change directory to the newly created worktree/workspace before executing any file edits or commands:
-   ```powershell
-   cd ../agent/subtask_01_feature
-   ```
-   *(Note: Adjust the `cd` path depending on where `herdr` provisions the workspace).*
+3. Because the Orchestrator runs the agent *inside* the Herdr workspace pane, your current working directory (`cwd`) should already be the worktree. Verify this by running `pwd` or checking git status, and avoid `cd ../agent/...` unless absolutely necessary.
 
 ## 2. Implementing the Task
 
