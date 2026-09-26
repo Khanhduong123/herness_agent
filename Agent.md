@@ -205,6 +205,15 @@ conda run -n pytorch harness-agent check
 # Khởi tạo bộ rules & skills cho một repo mới
 conda run -n pytorch harness-agent init "..\du-an-moi"
 
+# Đồng bộ cập nhật quy chuẩn & SDLC skills sang repo làm việc
+conda run -n pytorch harness-agent sync "..\du-an-moi"
+
+# Hoặc đồng bộ TẤT CẢ các repo đã khởi tạo
+conda run -n pytorch harness-agent sync --all
+
+# Đồng bộ với liên kết tự động cập nhật (Live Symlink/Junction)
+conda run -n pytorch harness-agent sync "..\du-an-moi" --link
+
 # Chạy một kế hoạch điều phối Orchestrator từ file YAML
 conda run -n pytorch harness-agent orchestrate examples/orchestrator_plan.yaml -o runs/orchestrator_report.json
 

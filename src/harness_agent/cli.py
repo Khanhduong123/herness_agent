@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Set
 
 import click
 
@@ -230,10 +231,121 @@ def init_cmd(
         click.secho("  [✓] Created .agents/skills/ (SDLC Skills)", fg="green")
         copied += 1
 
+    _register_project(repo_root, target_path)
     click.secho(f"\n✓ Successfully initialized {copied} items in {target_path}", fg="cyan")
     click.echo(
         "agy-cli is now configured to automatically discover rules and context in this repository."
     )
+
+
+def _get_registry_path(repo_root: Path) -> Path:
+    return repo_root / ".harness_projects.json"
+
+
+def _register_project(repo_root: Path, project_path: Path) -> None:
+    reg_file = _get_registry_path(repo_root)
+    projects: Set[str] = set()
+    if reg_file.exists():
+        try:
+            with open(reg_file, "r", encoding="utf-8") as f:
+                projects = set(json.load(f))
+        except Exception:
+            projects = set()
+    projects.add(str(project_path.resolve()))
+    with open(reg_file, "w", encoding="utf-8") as f:
+        json.dump(sorted(list(projects)), f, indent=2)
+
+
+def _get_registered_projects(repo_root: Path) -> List[str]:
+    reg_file = _get_registry_path(repo_root)
+    if reg_file.exists():
+        try:
+            with open(reg_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+
+def _sync_single_project(repo_root: Path, target_path: Path, link: bool = False) -> int:
+    target_path.mkdir(parents=True, exist_ok=True)
+    files_to_copy = ["Agent.md", "AGENTS.md", ".pre-commit-config.yaml"]
+    copied = 0
+
+    for filename in files_to_copy:
+        src = repo_root / filename
+        dest = target_path / filename
+        if src.exists():
+            shutil.copy2(src, dest)
+            click.secho(f"  [+] Updated {filename}", fg="green")
+            copied += 1
+
+    examples_src = repo_root / "examples" / "orchestrator_plan.yaml"
+    if examples_src.exists():
+        target_examples = target_path / "examples"
+        target_examples.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(examples_src, target_examples / "orchestrator_plan.yaml")
+        click.secho("  [+] Updated examples/orchestrator_plan.yaml", fg="green")
+        copied += 1
+
+    agents_src = repo_root / ".agents"
+    if agents_src.exists():
+        target_agents = target_path / ".agents"
+        if link:
+            target_skills = target_agents / "skills"
+            src_skills = agents_src / "skills"
+            target_agents.mkdir(parents=True, exist_ok=True)
+            if target_skills.exists() and not target_skills.is_symlink():
+                shutil.rmtree(target_skills)
+            try:
+                target_skills.symlink_to(src_skills, target_is_directory=True)
+                click.secho("  [+] Linked .agents/skills/ (Live auto-sync enabled)", fg="green")
+                copied += 1
+            except (OSError, NotImplementedError):
+                shutil.copytree(agents_src, target_agents, dirs_exist_ok=True)
+                click.secho("  [+] Synced .agents/skills/ (Copied)", fg="green")
+                copied += 1
+        else:
+            shutil.copytree(agents_src, target_agents, dirs_exist_ok=True)
+            click.secho("  [+] Synced .agents/skills/ (SDLC Skills updated)", fg="green")
+            copied += 1
+
+    _register_project(repo_root, target_path)
+    return copied
+
+
+@main.command(name="sync")
+@click.argument("target_dir", required=False, default=None)
+@click.option("--all", "sync_all", is_flag=True, help="Sync all registered working projects")
+@click.option("--link", is_flag=True, help="Create live symlink/junction for SDLC skills")
+def sync_cmd(target_dir: Optional[str], sync_all: bool, link: bool) -> None:
+    """Synchronize Agent.md, AGENTS.md, and SDLC skills to working projects."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    targets: List[Path] = []
+
+    if sync_all:
+        registered = _get_registered_projects(repo_root)
+        if not registered:
+            click.secho("Chua co du an nao duoc dang ky trong danh sach.", fg="yellow")
+            return
+        targets = [Path(p) for p in registered]
+    elif target_dir:
+        targets = [Path(target_dir).resolve()]
+    else:
+        click.secho("Vui long chi dinh thu muc du an can dong bo hoac dung co --all.", fg="yellow")
+        return
+
+    total_synced = 0
+    for target_path in targets:
+        if not target_path.exists():
+            click.secho(f"[-] Khong tim thay thu muc: {target_path}", fg="red")
+            continue
+
+        click.echo(f"\n--> Dang dong bo quy chuan & skills toi: {target_path}")
+        _sync_single_project(repo_root, target_path, link=link)
+        total_synced += 1
+
+    click.secho(f"\n[+] Hoan tat dong bo {total_synced} du an!", fg="cyan")
 
 
 if __name__ == "__main__":
