@@ -1,3 +1,6 @@
+# Local AI Agent Specs
+.ai/
+
 # Byte-compiled / optimized / C-extension files
 __pycache__/
 *.py[cod]

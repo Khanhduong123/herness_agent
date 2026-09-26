@@ -89,6 +89,11 @@ Concrete test scenarios must be defined before code implementation:
 - [ ] 100% pass rate in pytest (`conda run -n pytorch pytest`).
 - [ ] No unhandled exceptions or silent error swallowing.
 
+### 2.7. Storage & Approval Workflow
+- **Storage**: The Orchestrator MUST save every generated `sub-spec` locally as a Markdown file in the `.ai/` directory (e.g., `.ai/subtask_01_feature.md`).
+- **User Approval**: After saving the file, the Orchestrator MUST ask the User for approval (e.g., *"Please review the sub-spec at `.ai/subtask_01_feature.md`"*).
+- **Execution**: The Orchestrator MUST NOT spawn the Sub-Agent until the User explicitly approves the Sub-Spec.
+
 ---
 
 ## 3. Sub-Spec Markdown Template
