@@ -7,20 +7,41 @@ from harness_agent.evaluator import (
     TextMatchEvaluator,
 )
 from harness_agent.harness import AgentHarness
-from harness_agent.models import AgyConfig, EvalReport, RunResult, Task
+from harness_agent.models import (
+    AgentRole,
+    AgyConfig,
+    EvalReport,
+    OrchestrationPlan,
+    OrchestrationResult,
+    RunResult,
+    SubTask,
+    Task,
+    TaskCheck,
+    TaskStatus,
+    WorkerAgentConfig,
+)
+from harness_agent.orchestrator import AgentOrchestrator
 from harness_agent.runner import AgyRunner
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "AgentHarness",
+    "AgentOrchestrator",
+    "AgentRole",
     "AgyConfig",
     "AgyRunner",
-    "AgentHarness",
     "BaseEvaluator",
     "CommandEvaluator",
     "EvalReport",
     "FileExistsEvaluator",
+    "OrchestrationPlan",
+    "OrchestrationResult",
     "RunResult",
+    "SubTask",
     "Task",
+    "TaskCheck",
+    "TaskStatus",
     "TextMatchEvaluator",
+    "WorkerAgentConfig",
 ]

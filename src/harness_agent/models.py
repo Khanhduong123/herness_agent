@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -98,3 +99,94 @@ class EvalReport(BaseModel):
     duration_seconds: float
     pass_rate: float
     results: List[RunResult] = Field(default_factory=list)
+
+
+class AgentRole(str, Enum):
+    """Specialized roles for worker agents in the orchestrator architecture."""
+
+    ORCHESTRATOR = "orchestrator"
+    CODER = "coder"
+    TESTER = "tester"
+    REVIEWER = "reviewer"
+    RESEARCHER = "researcher"
+
+
+class TaskStatus(str, Enum):
+    """Execution status for subtasks handled by the orchestrator."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+    SKIPPED = "skipped"
+
+
+class WorkerAgentConfig(BaseModel):
+    """Configuration for a specialized worker agent."""
+
+    role: AgentRole = Field(..., description="Role assigned to this worker")
+    name: str = Field(..., description="Identifier name of the worker agent")
+    model: Optional[str] = Field(default=None, description="Model to use (e.g. gemini-2.5-pro)")
+    effort: Optional[str] = Field(default=None, description="Reasoning effort level")
+    system_prompt: Optional[str] = Field(
+        default=None, description="Custom system prompt or role guidance"
+    )
+    extra_flags: List[str] = Field(default_factory=list, description="Extra agy CLI flags")
+
+
+class SubTask(BaseModel):
+    """A decomposed subtask to be executed by a designated worker agent."""
+
+    id: str = Field(..., description="Unique subtask identifier")
+    name: str = Field(..., description="Human-readable subtask name")
+    role: AgentRole = Field(
+        default=AgentRole.CODER, description="Worker role responsible for this subtask"
+    )
+    instruction: str = Field(..., description="Detailed instructions for the worker agent")
+    description: Optional[str] = Field(default=None, description="Detailed background or context")
+    workspace_dir: Optional[str] = Field(
+        default=None, description="Working directory for execution"
+    )
+    depends_on: List[str] = Field(
+        default_factory=list, description="IDs of tasks that must complete before this starts"
+    )
+    checks: List[TaskCheck] = Field(
+        default_factory=list, description="Validation checks to run after subtask finishes"
+    )
+    timeout_seconds: Optional[int] = Field(
+        default=None, description="Override timeout for this subtask"
+    )
+    status: TaskStatus = Field(default=TaskStatus.PENDING, description="Current execution state")
+    tags: List[str] = Field(default_factory=list, description="Tags for categorization")
+
+
+class OrchestrationPlan(BaseModel):
+    """A master plan consisting of subtasks and worker configurations to achieve a goal."""
+
+    plan_id: str = Field(..., description="Unique identifier for the orchestration plan")
+    goal: str = Field(..., description="Overall goal or objective to be achieved")
+    tasks: List[SubTask] = Field(
+        default_factory=list, description="List of subtasks in the execution graph"
+    )
+    workers: Dict[str, WorkerAgentConfig] = Field(
+        default_factory=dict, description="Worker configurations keyed by role or worker name"
+    )
+    stop_on_failure: bool = Field(
+        default=True, description="Whether to abort remaining dependent tasks if a subtask fails"
+    )
+
+
+class OrchestrationResult(BaseModel):
+    """Outcome of an orchestration run with detailed status per subtask."""
+
+    plan_id: str
+    goal: str
+    success: bool
+    total_tasks: int
+    completed_tasks: int
+    failed_tasks: int
+    duration_seconds: float
+    task_results: Dict[str, RunResult] = Field(default_factory=dict)
+    task_statuses: Dict[str, TaskStatus] = Field(default_factory=dict)
+    summary: str = ""
