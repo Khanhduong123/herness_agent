@@ -101,34 +101,38 @@ Concrete test scenarios must be defined before code implementation:
 ```markdown
 # SUB-SPEC: [Task-ID] - [Task Name]
 
-## 1. Overview & Metadata
+## 1. Environment & Setup (MANDATORY FIRST STEP)
+- **Worktree Name:** `agent/[Task-ID]`
+- **Command:** The Sub-Agent MUST start by running `herdr workspace create agent/[Task-ID]` via terminal, and then `cd` into it to do the work.
+
+## 2. Overview & Metadata
 - **Task ID:** subtask_01_feature_name
 - **Assigned Role:** coder
 - **Criticality:** HIGH
 - **Status:** APPROVED
 - **Depends On:** []
 
-## 2. Risk Assessment
+## 3. Risk Assessment
 - **Risk Level:** MEDIUM
 - **Blast Radius:** `src/harness_agent/runner.py` only
 - **Failure Vulnerability:** Subprocess timeout when running commands on Windows.
 - **Mitigation Strategy:** Implement `asyncio.wait_for` with explicit timeout handling.
 
-## 3. Function & Interface Specifications
+## 4. Function & Interface Specifications
 ### Function: `build_command`
 - **Location:** `src/harness_agent/runner.py`
 - **Signature:** `def build_command(prompt: str, task: Optional[Task] = None) -> List[str]:`
 - **Purpose:** Constructs command-line arguments for agy CLI invocation.
 - **Raises:** `ValueError` if prompt is empty.
 
-## 4. Test Case Specifications (QA Acceptance)
+## 5. Test Case Specifications (QA Acceptance)
 | Test ID | Scenario | Input | Expected Output |
 | :--- | :--- | :--- | :--- |
 | **TC-01** | Happy path command building | `prompt="hello"` | `['agy', '--print', 'hello', ...]` |
 | **TC-02** | Empty prompt validation | `prompt=""` | Raises `ValueError` |
 | **TC-03** | Sandbox flag injection | `extra_flags=['--sandbox']` | Command contains `'--sandbox'` |
 
-## 5. SDLC Quality Gate Checklist
+## 6. SDLC Quality Gate Checklist
 - [ ] Complete type annotations adhering to Python 3.10+.
 - [ ] 100% pass rate in `conda run -n pytorch pytest`.
 - [ ] No unused imports or dead code.
