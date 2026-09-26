@@ -6,7 +6,7 @@
 ## 1. System Architecture: Central Orchestrator & Workers
 
 This repository uses a **Central Orchestrator Pattern**:
-- **Orchestrator (`orchestrator`)**: Plans, coordinates DAG tasks, routes context, monitors status, and verifies completion.
+- **Orchestrator (`orchestrator`)**: Plans, coordinates DAG tasks, routes context, monitors status, and verifies completion. **CRITICAL RULE:** The Orchestrator MUST NEVER write, modify, or edit code files directly. It must ONLY generate Sub-Specs and delegate execution by spawning isolated Sub-Agents (using `invoke_subagent` or Herdr workspaces).
 - **Researcher (`researcher`)**: Explores codebase, dependencies, and requirements.
 - **Coder (`coder`)**: Implements code, adheres to PEP 8, Black, typing, and architectural specs.
 - **Tester (`tester`)**: Writes and runs `pytest` tests; validates 100% pass rate.
