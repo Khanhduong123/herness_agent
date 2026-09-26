@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 import sys
+from pathlib import Path
 from typing import Optional
 
 import click
@@ -168,6 +170,40 @@ def orchestrate_cmd(
 
     if not result.success:
         sys.exit(1)
+
+
+@main.command(name="init")
+@click.argument("target_dir", default=".", type=click.Path())
+def init_cmd(target_dir: str) -> None:
+    """Initialize harness agent rules, Agent.md, and workflow templates in a target directory."""
+    target_path = Path(target_dir).resolve()
+    target_path.mkdir(parents=True, exist_ok=True)
+
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    files_to_copy = ["Agent.md", "AGENTS.md", ".pre-commit-config.yaml"]
+    click.echo(f"Initializing Harness Agent rules in: {target_path}")
+
+    copied = 0
+    for filename in files_to_copy:
+        src = repo_root / filename
+        dest = target_path / filename
+        if src.exists():
+            shutil.copy2(src, dest)
+            click.secho(f"  [✓] Created {filename}", fg="green")
+            copied += 1
+
+    examples_src = repo_root / "examples" / "orchestrator_plan.yaml"
+    if examples_src.exists():
+        target_examples = target_path / "examples"
+        target_examples.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(examples_src, target_examples / "orchestrator_plan.yaml")
+        click.secho("  [✓] Created examples/orchestrator_plan.yaml", fg="green")
+        copied += 1
+
+    click.secho(f"\n✓ Successfully initialized {copied} files in {target_path}", fg="cyan")
+    click.echo(
+        "agy-cli is now configured to automatically discover rules and context in this repository."
+    )
 
 
 if __name__ == "__main__":
