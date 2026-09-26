@@ -203,6 +203,7 @@ def init_cmd(
                 return
 
     target_path.mkdir(parents=True, exist_ok=True)
+    _ensure_gitignore(target_path)
     repo_root = Path(__file__).resolve().parent.parent.parent
     files_to_copy = ["Agent.md", "AGENTS.md", ".pre-commit-config.yaml"]
     click.echo(f"Đang thiết lập Harness Agent & SDLC rules tại: {target_path}")
@@ -267,8 +268,29 @@ def _get_registered_projects(repo_root: Path) -> List[str]:
     return []
 
 
+def _ensure_gitignore(target_path: Path) -> None:
+    gitignore_path = target_path / ".gitignore"
+    entries = [
+        "\n# AI Orchestrator & Configs\n",
+        ".agents/\n",
+        "Agent.md\n",
+        "AGENTS.md\n",
+        ".ai/\n",
+    ]
+    if not gitignore_path.exists():
+        with open(gitignore_path, "w", encoding="utf-8") as f:
+            f.writelines(entries)
+    else:
+        with open(gitignore_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        if ".agents/" not in content:
+            with open(gitignore_path, "a", encoding="utf-8") as f:
+                f.writelines(entries)
+
+
 def _sync_single_project(repo_root: Path, target_path: Path, link: bool = False) -> int:
     target_path.mkdir(parents=True, exist_ok=True)
+    _ensure_gitignore(target_path)
     files_to_copy = ["Agent.md", "AGENTS.md", ".pre-commit-config.yaml"]
     copied = 0
 
