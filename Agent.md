@@ -157,13 +157,53 @@ Mọi thao tác Git (tạo nhánh, commit, kiểm tra diff, push) **phải đư�
 
 ---
 
-## 6. Lệnh CLI Orchestrator Nhanh
+## 6. Tuân Thủ Bộ SDLC Skills Trước & Sau Khi Làm Task
+
+Mọi AI Agent làm việc trong repository này (hoặc repository phái sinh) **BẮT BUỘC** phải tuân thủ quy trình SDLC chuẩn hóa thông qua các skills nằm trong thư mục `.agents/skills/`:
+
+### 6.1. Giai Đoạn 1: Trước Khi Làm Task (Pre-Task Phase)
+1. **`sdlc-pretask-checklist`**:
+   - Chạy `git status` đảm bảo working tree sạch sẽ.
+   - Kiểm tra nhánh hiện tại; nếu đang ở `main`, bắt buộc checkout sang nhánh mới: `git checkout -b feat/...` hoặc `fix/...`.
+   - Phân rã yêu cầu thành các tiêu chí nghiệm thu (Acceptance Criteria).
+2. **`sdlc-architecture-planner`**:
+   - Khảo sát codebase, kiểm tra các model/hàm có sẵn để tái sử dụng.
+   - Định nghĩa schema dữ liệu với Pydantic v2 và typing đầy đủ trước khi viết logic thực thi.
+   - Lập kế hoạch DAG các bước thực hiện.
+
+### 6.2. Giai Đoạn 2: Trong Khi Làm Task (Implementation Phase)
+1. **`sdlc-clean-code-standards`**:
+   - Tuân thủ PEP 8, Black (100 ký tự), isort, flake8.
+   - Không nuốt ngoại lệ (silent errors), xử lý lỗi tường minh.
+   - Giữ nguyên vẹn comments và docstrings của mã nguồn hiện hữu.
+2. **`sdlc-test-driven-development` (TDD / QA)**:
+   - Viết bài test tương ứng trong `tests/` với `pytest` và `pytest-asyncio`.
+   - Bao quát happy path, edge cases và error cases.
+
+### 6.3. Giai Đoạn 3: Sau Khi Làm Task (Post-Task Phase / Quality Gate)
+1. **`sdlc-posttask-quality-gate`**:
+   - **Bắt buộc:** Chạy `conda run -n pytorch pytest` ➔ Phải pass 100%.
+   - Chạy lint checks: Black, isort, flake8.
+   - Chạy `git diff` kiểm tra dòng thay đổi, đảm bảo không sót file rác hoặc debug print.
+2. **`sdlc-security-audit`**:
+   - Kiểm tra không để lọt API keys, mật khẩu, credentials vào file code.
+   - Rà soát các lệnh subprocess, sanitize input chống injection.
+3. **`sdlc-conventional-commit`**:
+   - Thao tác Git trực tiếp qua `agy-cli` terminal.
+   - Viết commit message theo chuẩn Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`).
+
+---
+
+## 7. Lệnh CLI Orchestrator Nhanh
 
 Trong repository này, bạn có thể chạy Orchestrator trực tiếp qua CLI:
 
 ```powershell
 # Chạy kiểm tra kết nối agy CLI
 conda run -n pytorch harness-agent check
+
+# Khởi tạo bộ rules & skills cho một repo mới
+conda run -n pytorch harness-agent init "..\du-an-moi"
 
 # Chạy một kế hoạch điều phối Orchestrator từ file YAML
 conda run -n pytorch harness-agent orchestrate examples/orchestrator_plan.yaml -o runs/orchestrator_report.json

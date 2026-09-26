@@ -173,15 +173,38 @@ def orchestrate_cmd(
 
 
 @main.command(name="init")
-@click.argument("target_dir", default=".", type=click.Path())
-def init_cmd(target_dir: str) -> None:
+@click.argument("project_name", required=False, default=None)
+@click.option("--target-dir", "-t", default=None, help="Specific target directory path")
+@click.option("--force", "-f", is_flag=True, help="Force update without prompt if directory exists")
+def init_cmd(
+    project_name: Optional[str],
+    target_dir: Optional[str],
+    force: bool,
+) -> None:
     """Initialize harness agent rules, Agent.md, and workflow templates in a target directory."""
-    target_path = Path(target_dir).resolve()
-    target_path.mkdir(parents=True, exist_ok=True)
+    if not project_name and not target_dir:
+        project_name = click.prompt("Nhập tên dự án của bạn", type=str)
 
+    if target_dir:
+        target_path = Path(target_dir).resolve()
+    else:
+        target_path = Path("..").resolve() / (project_name or "new-agent-project")
+
+    if target_path.exists() and any(target_path.iterdir()):
+        click.secho(f"\n[CẢNH BÁO] Thư mục '{target_path}' ĐÃ TỒN TẠI trên máy!", fg="yellow")
+        if not force:
+            confirmed = click.confirm(
+                "Bạn có muốn cập nhật/bổ sung quy chuẩn (Agent.md, skills) vào dự án hiện có?",
+                default=True,
+            )
+            if not confirmed:
+                click.secho("Đã hủy thiết lập.", fg="red")
+                return
+
+    target_path.mkdir(parents=True, exist_ok=True)
     repo_root = Path(__file__).resolve().parent.parent.parent
     files_to_copy = ["Agent.md", "AGENTS.md", ".pre-commit-config.yaml"]
-    click.echo(f"Initializing Harness Agent rules in: {target_path}")
+    click.echo(f"Đang thiết lập Harness Agent & SDLC rules tại: {target_path}")
 
     copied = 0
     for filename in files_to_copy:
@@ -200,7 +223,14 @@ def init_cmd(target_dir: str) -> None:
         click.secho("  [✓] Created examples/orchestrator_plan.yaml", fg="green")
         copied += 1
 
-    click.secho(f"\n✓ Successfully initialized {copied} files in {target_path}", fg="cyan")
+    agents_src = repo_root / ".agents"
+    if agents_src.exists():
+        target_agents = target_path / ".agents"
+        shutil.copytree(agents_src, target_agents, dirs_exist_ok=True)
+        click.secho("  [✓] Created .agents/skills/ (SDLC Skills)", fg="green")
+        copied += 1
+
+    click.secho(f"\n✓ Successfully initialized {copied} items in {target_path}", fg="cyan")
     click.echo(
         "agy-cli is now configured to automatically discover rules and context in this repository."
     )
