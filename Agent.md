@@ -31,7 +31,7 @@ graph TD
 
 | Vai Trò | Tên Định Danh | Trách Nhiệm Chính |
 | :--- | :--- | :--- |
-| **Orchestrator** | `orchestrator` | • Là đầu mối trung tâm nhận mục tiêu từ User.<br/>• Phân rã mục tiêu thành Task DAG (Directed Acyclic Graph) có thứ tự phụ thuộc (`depends_on`).<br/>• Điều phối context từ output của task trước sang task sau.<br/>• Quản lý trạng thái (`PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `BLOCKED`).<br/>• **Không trực tiếp viết code tính năng** nếu đã có worker đảm nhiệm. |
+| **Orchestrator** | `orchestrator` | • Là đầu mối trung tâm nhận mục tiêu từ User.<br/>• Phân rã mục tiêu thành Task DAG (Directed Acyclic Graph) có thứ tự phụ thuộc (`depends_on`).<br/>• Điều phối context từ output của task trước sang task sau.<br/>• Quản lý trạng thái (`PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `BLOCKED`).<br/>• **CẤM TUYỆT ĐỐI KHÔNG TRỰC TIẾP VIẾT CODE**. Chỉ được phép tạo Sub-Spec và spawn Sub-Agents (Worker) để thực hiện code qua công cụ `invoke_subagent` hoặc Herdr. |
 | **Researcher** | `researcher` | • Khảo sát codebase, file liên quan, thư viện, tài liệu.<br/>• Lên kế hoạch kiến trúc chi tiết trước khi code. |
 | **Coder** | `coder` | • Viết code tính năng sạch sẽ, tuân thủ chặt chẽ tiêu chuẩn PEP 8 và Typing.<br/>• Chỉ chỉnh sửa trong phạm vi task được giao, không sửa lan man ngoài phạm vi. |
 | **Tester** | `tester` | • Viết unit test, integration test với `pytest` và `pytest-asyncio`.<br/>• Chạy test và bảo đảm 100% test pass trước khi chuyển giao. |

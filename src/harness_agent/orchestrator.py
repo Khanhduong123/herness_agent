@@ -126,6 +126,8 @@ class AgentOrchestrator:
             f"Overall Objective: {plan.goal}",
             "",
             f"## Assigned SubTask: {subtask.name} (ID: {subtask.id})",
+            "**MANDATORY FIRST STEP:** Read the `AGENTS.md` file in the repository "
+            "root to understand architectural rules, environment setup, and Git protocols.",
             f"Instruction:\n{subtask.instruction}",
         ]
 

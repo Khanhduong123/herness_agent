@@ -12,6 +12,11 @@ This skill defines the mandatory protocol every AI agent must execute **BEFORE**
 
 ---
 
+## 0. Read Architecture & Guidelines
+- [ ] **Read `AGENTS.md`**: Before doing anything else, the Agent (Orchestrator or Worker) must read `AGENTS.md` in the repository root to align with system architecture, Git rules, environment setup, and SDLC standards.
+
+---
+
 ## 1. Git & Environment Verification
 - [ ] **Working Tree Check**: Run `git status` to verify there are no uncommitted or conflicting changes.
 - [ ] **Branch Protection**: Verify current branch is NOT `main`.
