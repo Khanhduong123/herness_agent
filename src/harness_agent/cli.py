@@ -10,6 +10,7 @@ import click
 
 from harness_agent.harness import AgentHarness
 from harness_agent.models import AgyConfig, Task
+from harness_agent.orchestrator import AgentOrchestrator
 from harness_agent.runner import AgyRunner
 
 
@@ -120,6 +121,53 @@ def run_suite_cmd(
         )
         if not res.success and res.error_message:
             click.echo(f"       Reason: {res.error_message}")
+
+
+@main.command(name="orchestrate")
+@click.argument("plan_file", type=click.Path(exists=True))
+@click.option(
+    "--output", "-o", default="runs/orchestration_report.json", help="Path to save JSON report"
+)
+@click.option("--model", default=None, help="Override default model for workers")
+@click.option("--effort", default=None, help="Override reasoning effort")
+def orchestrate_cmd(
+    plan_file: str,
+    output: str,
+    model: Optional[str],
+    effort: Optional[str],
+) -> None:
+    """Execute an orchestrator plan coordinating multi-agent subtasks."""
+    config = AgyConfig(model=model, effort=effort)
+    orchestrator = AgentOrchestrator(base_config=config)
+
+    click.echo(f"Loading orchestration plan from {plan_file}...")
+    plan = orchestrator.load_plan_from_yaml(plan_file)
+    click.echo(f"Goal: {plan.goal}")
+    click.echo(f"Total SubTasks: {len(plan.tasks)}")
+
+    result = asyncio.run(orchestrator.run_plan(plan))
+    orchestrator.save_result(result, output)
+
+    click.echo("\n================ Orchestration Summary ================")
+    click.echo(f"Plan ID:         {result.plan_id}")
+    click.echo(f"Goal:            {result.goal}")
+    click.echo(f"Overall Success: {'✓ YES' if result.success else '✗ NO'}")
+    click.echo(f"Total SubTasks:  {result.total_tasks}")
+    click.echo(f"Completed:       {result.completed_tasks}")
+    click.echo(f"Failed/Blocked:  {result.failed_tasks}")
+    click.echo(f"Duration:        {result.duration_seconds}s")
+    click.echo(f"Report saved:    {output}")
+
+    for task_id, status in result.task_statuses.items():
+        color = "green" if status == "completed" else "red" if status == "failed" else "yellow"
+        res = result.task_results.get(task_id)
+        dur = f" ({res.duration_seconds}s)" if res else ""
+        click.secho(f"[{status.value.upper()}] SubTask '{task_id}'{dur}", fg=color)
+        if res and not res.success and res.error_message:
+            click.echo(f"       Reason: {res.error_message}")
+
+    if not result.success:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
