@@ -11,7 +11,7 @@ This protocol enforces that every Worker Agent (e.g., Coder, Tester) must perfor
 
 ## 1. Entering the Isolated Workspace
 
-When a Worker Agent receives a subtask from the Orchestrator, it must **not** modify the main working directory directly. The Orchestrator should have already created a git worktree (`git worktree add agent/[task_id] -b agent/[task_id]`), created a visible workspace (`herdr workspace create --cwd ...`), and launched the agent (`herdr pane run <pane_id> ...`) inside that workspace.
+When a Worker Agent receives a subtask from the Orchestrator, it must **not** modify the main working directory directly. The Orchestrator should have already created a git worktree (`git worktree add agent/[task_id] -b agent/[task_id]`), created a visible workspace (`herdr workspace create --cwd ...`), and launched the agent interactively (`herdr agent start ...` and `herdr agent prompt ...`) inside that workspace.
 
 1. Identify the task ID (e.g., `subtask_01_feature`).
 2. The mandatory naming convention for the branch and workspace is: `agent/[task_id]`.
