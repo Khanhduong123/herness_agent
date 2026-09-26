@@ -214,9 +214,28 @@ conda run -n pytorch harness-agent sync --all
 # Đồng bộ với liên kết tự động cập nhật (Live Symlink/Junction)
 conda run -n pytorch harness-agent sync "..\du-an-moi" --link
 
-# Chạy một kế hoạch điều phối Orchestrator từ file YAML
-conda run -n pytorch harness-agent orchestrate examples/orchestrator_plan.yaml -o runs/orchestrator_report.json
-
-# Chạy toàn bộ test suite
-conda run -n pytorch pytest
-```
+### 7.1. Quy Tắc Cập Nhật Quy Chuẩn (Chỉ Cập Nhật Trên Nhánh `main`)
+- **Nguyên tắc an toàn:** Mọi thao tác đồng bộ (`sync.ps1`, `sync.sh`, hoặc `harness-agent sync`) **CHỈ ĐƯỢC PHÉP THỰC HIỆN TRÊN NHÁNH `main`** của repo làm việc.
+- **Lý do:** Tuyệt đối không cập nhật quy chuẩn thẳng vào các nhánh tính năng (`feat/...`) đang code dở để tránh gây xung đột mã nguồn (git conflict) hoặc làm rối loạn lịch sử commit của tính năng.
+- **Quy trình chuẩn khi có bản cập nhật mới từ `harness_agent`:**
+  1. Chuyển về nhánh `main` của repo làm việc:
+     ```powershell
+     cd ..\du-an-moi
+     git checkout main
+     ```
+  2. Kéo cập nhật từ repo gốc:
+     ```powershell
+     cd ..\herness_agent
+     .\sync.ps1 -TargetDir "..\du-an-moi"
+     ```
+  3. Commit bản cập nhật trên nhánh `main`:
+     ```powershell
+     cd ..\du-an-moi
+     git add .
+     git commit -m "chore: sync latest SDLC rules and skills from harness_agent"
+     ```
+  4. Nếu bạn đang làm việc trên nhánh tính năng `feat/xyz`, hãy merge `main` vào nhánh của bạn:
+     ```powershell
+     git checkout feat/xyz
+     git merge main
+     ```

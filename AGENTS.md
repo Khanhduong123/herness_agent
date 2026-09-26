@@ -35,6 +35,7 @@ This repository uses a **Central Orchestrator Pattern**:
 - **Branch Protection**: Never commit directly to `main`.
 - **Branch Conventions**: Always work on a dedicated branch (`feat/...`, `fix/...`). Current branch: `feat/orchestrator-architecture`.
 - **Conventional Commits**: Use `feat:`, `fix:`, `test:`, `docs:`, `refactor:`. Always inspect `git status` and `git diff` before committing.
+- **Rule Sync on Main Only**: Standard rules and SDLC skills updates must only be pulled/synced into the `main` branch of working repositories, never into in-flight feature branches. Feature branches subsequently merge from `main`.
 
 ## 4. Herdr Setup
 
