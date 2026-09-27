@@ -31,9 +31,9 @@ graph TD
 
 | Vai Trò | Tên Định Danh | Trách Nhiệm Chính |
 | :--- | :--- | :--- |
-| **Orchestrator** | `orchestrator` | • Nhận mục tiêu từ User. **LƯU Ý:** Chỉ đọc những file (skill) cần thiết dựa trên yêu cầu của User.<br/>• Phân rã mục tiêu thành Task DAG.<br/>• **CẤM TRỰC TIẾP VIẾT CODE**. Chỉ được: 1) Viết Sub-Spec vào `.ai/[task_id].md`, 2) Chờ duyệt, 3) Tạo worktree, 4) Tạo & focus workspace Herdr. 5) **KHÔNG CHẠY `agy` NGẦM**. Chạy: `herdr agent start worker_[task_id] --kind agy --pane <pane_id>`. TRUYỀN LỆNH (nhập prompt vô để chạy) bằng `herdr agent prompt worker_[task_id] "..."`. **QUAN TRỌNG:** Orchestrator BẮT BUỘC phải check xem CLI ở sub-agent đã chạy chưa và chờ nhận tín hiệu hoàn thành từ sub-agent trước khi tiến hành bước tiếp theo hoặc trả về kết quả, KHÔNG ĐƯỢC trả về ngay. |
+| **Orchestrator** | `orchestrator` | • Nhận mục tiêu từ User. **LƯU Ý:** Chỉ đọc những file (skill) cần thiết dựa trên yêu cầu của User.<br/>• Phân rã mục tiêu thành Task DAG.<br/>• **CẤM TRỰC TIẾP VIẾT CODE**. Chỉ được: 1) Viết Sub-Spec vào `.ai/plan/[task_id].md`, 2) Chờ duyệt, 3) Tạo worktree, 4) Tạo & focus workspace Herdr. 5) **KHÔNG CHẠY `agy` NGẦM**. Chạy: `herdr agent start worker_[task_id] --kind agy --pane <pane_id>`. TRUYỀN LỆNH (nhập prompt vô để chạy) bằng `herdr agent prompt worker_[task_id] "..."`. **QUAN TRỌNG:** Orchestrator BẮT BUỘC phải check xem CLI ở sub-agent đã chạy chưa và chờ nhận tín hiệu hoàn thành từ sub-agent trước khi tiến hành bước tiếp theo hoặc trả về kết quả, KHÔNG ĐƯỢC trả về ngay. |
 | **Researcher** | `researcher` | • Khảo sát codebase, file liên quan, thư viện, tài liệu.<br/>• Lên kế hoạch kiến trúc chi tiết trước khi code. |
-| **Coder** | `coder` | • Viết code tính năng sạch sẽ, tuân thủ chặt chẽ tiêu chuẩn PEP 8 và Typing.<br/>• Chỉ chỉnh sửa trong phạm vi task được giao, không sửa lan man ngoài phạm vi. |
+| **Coder / Specialist Agent** | `coder` (hoặc tên chuyên biệt như `agent-backend`, `agent-frontend`) | • Viết code tính năng sạch sẽ, tuân thủ chặt chẽ tiêu chuẩn PEP 8 và Typing.<br/>• **Quy tắc Chuyên gia:** Khi tạo sub-agent, Orchestrator phải định hình và đề xuất cho user tạo sub-agent đó với vai trò là một chuyên gia thực thụ trong lĩnh vực của task (VD: "Tôi sẽ khởi tạo `agent-backend` để xử lý logic API"). Sub-agent khi được tạo ra chỉ cần đóng vai trò chuyên gia tập trung xử lý đúng domain đó.<br/>• Chỉ chỉnh sửa trong phạm vi task được giao. |
 | **Tester** | `tester` | • Viết unit test, integration test với `pytest` và `pytest-asyncio`.<br/>• Chạy test và bảo đảm 100% test pass trước khi chuyển giao. |
 | **Reviewer** | `reviewer` | • Đánh giá code diffs, kiểm tra lint, typing, convention, security và chất lượng tổng thể. |
 
@@ -159,7 +159,8 @@ Mọi thao tác Git (tạo nhánh, commit, kiểm tra diff, push) **phải đư�
 
 ## 6. Tuân Thủ Bộ SDLC Skills Trước & Sau Khi Làm Task
 
-Mọi AI Agent làm việc trong repository này (hoặc repository phái sinh) **BẮT BUỘC** phải tuân thủ quy trình SDLC chuẩn hóa thông qua các skills nằm trong thư mục `.agents/skills/`:
+Mọi AI Agent (bao gồm Orchestrator và các sub-agent) làm việc trong repository này (hoặc repository phái sinh) **BẮT BUỘC** phải tuân thủ quy trình SDLC chuẩn hóa thông qua các skills nằm trong thư mục `.agents/skills/`.
+**QUY TẮC QUAN TRỌNG:** Agent CHỈ ĐƯỢC PHÉP đọc và sử dụng những skill thực sự cần thiết và liên quan trực tiếp đến nhiệm vụ được giao. TUYỆT ĐỐI KHÔNG đọc mù quáng tất cả các skill.
 
 ### 6.1. Giai Đoạn 1: Trước Khi Làm Task (Pre-Task Phase)
 1. **`sdlc-pretask-checklist`**:
@@ -246,3 +247,8 @@ conda run -n pytorch harness-agent sync "..\du-an-moi" --link
      git checkout feat/xyz
      git merge main
      ```
+
+## 8. Quy Chuẩn Ngôn Ngữ & Giao Tiếp
+
+- **Tài liệu & Kế hoạch (Docs & Plans)**: Mọi file kế hoạch (plan), đặc tả kỹ thuật (sub-spec), mã nguồn (code) và tài liệu hệ thống (docs) **BẮT BUỘC** phải được sinh ra bằng **Tiếng Anh** (trừ trường hợp người dùng yêu cầu ngôn ngữ khác cho một file cụ thể).
+- **Giao tiếp (Chat)**: Agent phải trao đổi, trả lời và giao tiếp với người dùng trên khung chat bằng **ngôn ngữ của người dùng** (ví dụ: Tiếng Việt).

@@ -30,9 +30,9 @@ Before writing any code or Sub-Spec, operate in read-only mode:
 - Map dependencies between components
 - Note risks and unknowns
 
-**Do NOT write code during planning.** The output is a plan document saved to `.ai/plan.md` (or `.ai/todo.md`), which outlines the sequence of Sub-Specs to generate.
+**Do NOT write code during planning.** The output is a plan document saved to the project folder at `.ai/plan/plan.md` (or `.ai/plan/[plan_name].md`), which outlines the sequence of Sub-Specs to generate.
 
-### Step 2: Identify the Dependency Graph (DAG)
+### Step 2: Identify Dependencies & Parallel Execution (DAG)
 
 Map what depends on what:
 
@@ -53,6 +53,7 @@ Database schema
 ```
 
 Implementation order follows the dependency graph bottom-up: build foundations first.
+**Crucial Analysis:** Explicitly check which tasks do NOT have dependencies on each other. If tasks are independent (e.g., building Frontend UI components while Backend API is being built against a mocked interface), highlight that they can be executed **in parallel** by multiple specialized agents to accelerate progress. You MUST include this parallelism analysis in the plan document before execution.
 
 ### Step 3: Slice Vertically
 
@@ -76,7 +77,7 @@ Each vertical slice delivers working, testable functionality.
 
 ### Step 4: Write Task Breakdown (Before Generating Sub-Specs)
 
-Each task defined in `.ai/plan.md` should follow this structure. Later, each task will be formally expanded using the `sdlc-subtask-specifier` skill into its own `.ai/subtask_[id].md` file.
+Each task defined in the plan should follow this structure. Later, each task will be formally expanded using the `sdlc-subtask-specifier` skill into its own `.ai/plan/subtask_[id].md` file.
 
 ```markdown
 ## Task [N]: [Short descriptive title]
@@ -88,6 +89,7 @@ Each task defined in `.ai/plan.md` should follow this structure. Later, each tas
 - [ ] [Specific, testable condition]
 
 **Dependencies:** [Task numbers this depends on, or "None"]
+**Parallelizable With:** [List of task numbers that can be run at the same time, or "None"]
 
 **Files likely touched:**
 - `src/path/to/file.py`
@@ -130,8 +132,8 @@ If a task is L or larger, it should be broken into smaller tasks.
 
 ## Output Files
 
-- **Plan document:** Save the implementation plan to `.ai/plan.md`.
-- **Next Step:** Once the plan is approved by the user, the Orchestrator will use `sdlc-subtask-specifier` to generate individual `.ai/subtask_[task_id].md` files for each task in the plan.
+- **Plan document:** Save the implementation plan to the project folder at `.ai/plan/plan.md` (do not save it to a separate artifact folder).
+- **Next Step:** Once the plan is approved by the user, the Orchestrator will use `sdlc-subtask-specifier` to generate individual `.ai/plan/subtask_[task_id].md` files for each task in the plan.
 
 ## Verification
 
@@ -139,4 +141,4 @@ Before finishing the planning phase, confirm:
 - [ ] Task dependencies are identified and ordered correctly (DAG).
 - [ ] No task touches more than ~5 files (M size max).
 - [ ] Tasks are sliced vertically (delivering complete features).
-- [ ] The human has reviewed and approved the plan in `.ai/plan.md`.
+- [ ] The human has reviewed and approved the plan in `.ai/plan/plan.md`.

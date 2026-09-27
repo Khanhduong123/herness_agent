@@ -15,7 +15,7 @@ When starting a new working session or day, jumping straight into code without r
 
 ### 1. Morning Check-in (Review Past Progress)
 Before writing new code, you MUST:
-- Read the overarching plan or sub-spec (e.g., `.ai/[task_id].md` or the PoC timeline).
+- Read the overarching plan or sub-spec (e.g., `.ai/plan/[task_id].md` or the PoC timeline).
 - Inspect recent git commits or working tree status (`git log -n 5`, `git status`) to understand what was completed in the previous session.
 - **Report Status:** Inform the user if the project is currently **On-track** (Đúng hạn) or **Delayed** (Trễ hạn) based on the original timeline.
 
@@ -30,7 +30,7 @@ Before writing new code, you MUST:
 
 ### 4. End-of-Day Wrap-up (Optional)
 - When the user indicates the day/session is over, review the day's commits.
-- Update the main plan (`.ai/[task_id].md`) to cross off completed items.
+- Update the main plan (`.ai/plan/[task_id].md`) to cross off completed items.
 - Note down any unfinished work as the starting point for the next day.
 
 ## Anti-Patterns
