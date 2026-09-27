@@ -36,7 +36,7 @@ Test specific uncertainty in the most realistic environment possible.
 - If PoC doesn't hit criteria, don't ship.
 
 ### 4. Timeline and Effort
-- **MANDATORY**: You MUST explicitly ask the user for the exact timeline/duration (how long the PoC will take, how much time is allocated) and define it clearly with them BEFORE writing any plan.
+- **MANDATORY**: You MUST explicitly ask the user for the exact timeline/duration (how long the PoC will take, how much time is allocated). Define it clearly with the user, and then write a specific plan for it.
 - PoCs typically take 1-3 sprints max (depending on team size).
 - If a PoC takes too long, you've started implementation, not validation. Keep the PoC tight.
 
