@@ -5,38 +5,14 @@
 
 ---
 
-## 1. System Architecture: Central Orchestrator Pattern
+## 1. System Architecture: Central Orchestrator & Workers
 
-The system uses a **Central Orchestrator Pattern** to coordinate specialized **Worker Agents**:
-
-```mermaid
-graph TD
-    User["User / Task Request"] --> Orchestrator["Central Orchestrator (AgentHarness / Orchestrator)"]
-
-    subgraph "Herdr Terminal Multiplexer / Workspaces"
-        Orchestrator -->|Decomposes & Dispatches| Researcher["Researcher Agent<br/>(Analyze & Blueprint)"]
-        Orchestrator -->|Assigns Feature Code| Coder["Coder Agent<br/>(Implementation)"]
-        Orchestrator -->|Dispatches Test Suite| Tester["Tester Agent<br/>(QA & Pytest)"]
-        Orchestrator -->|Requests Verification| Reviewer["Reviewer Agent<br/>(Code Quality & Gate)"]
-    end
-
-    Researcher -->|Context & Specs| Orchestrator
-    Coder -->|Code Diffs & Artifacts| Orchestrator
-    Tester -->|Test Reports & Tracebacks| Orchestrator
-    Reviewer -->|Approval / Feedback| Orchestrator
-
-    Orchestrator -->|Final Result & Verification| Output["Validated Deliverable"]
-```
-
-| Role | Identifier | Key Responsibilities |
-| :--- | :--- | :--- |
-| **Orchestrator** | `orchestrator` | • Receives the goal from the User.<br/>• Decomposes the goal into a Task DAG.<br/>• **CRITICAL RULE:** NEVER write or edit code files directly. Only generate Sub-Specs (`.ai/plan/[task_id].md`), wait for approval, create a git worktree, and setup a Herdr workspace.<br/>• **DO NOT run `agy` in the background**. Launch interactively (`herdr agent start worker_[task_id] --kind agy --pane <pane_id>`) and send prompts via `herdr agent prompt`.<br/>• **MANDATORY:** Must check if the CLI ran and wait for the completion signal before proceeding. |
-| **Researcher** | `researcher` | • Explores the codebase, dependencies, and available libraries.<br/>• Designs architectural blueprints before implementation begins. |
-| **Coder** | `coder`, `agent-backend`, etc. | • Implements feature code, strictly adhering to PEP 8, typing, and the provided spec.<br/>• **Expert Rule:** The Orchestrator should dynamically configure this sub-agent as a domain expert (e.g., `agent-backend` for APIs). |
-| **Tester** | `tester` | • Writes unit and integration tests using `pytest` and `pytest-asyncio`.<br/>• Validates a 100% pass rate before hand-off. |
-| **Reviewer** | `reviewer` | • Evaluates code diffs, linting, typing, conventions, and security. |
-
----
+This repository uses a **Central Orchestrator Pattern**:
+- **Orchestrator (`orchestrator`)**: Plans, coordinates DAG tasks, routes context, monitors status, and verifies completion. **IMPORTANT NOTE:** Only read/apply skills specifically needed based on user requests, do not blindly read all skills. **CRITICAL RULE:** The Orchestrator MUST NEVER write, modify, or edit code files directly. It must ONLY: 1) Generate Sub-Specs and save them to `.ai/[task_id].md`, 2) Wait for User approval, 3) Create a git worktree (`git worktree add agent/[task_id]`), 4) Create and focus a visible Herdr workspace using `herdr workspace create --cwd $(pwd)/agent/[task_id] --focus`, 5) **DO NOT run `agy` in the background**. Launch the agent interactively: `herdr agent start worker_[task_id] --kind agy --pane <pane_id>`. 6) Send instructions to the agent's input using `herdr agent prompt worker_[task_id] "..."`. **MANDATORY CHECK:** The Orchestrator MUST check if the sub-agent CLI actually ran and MUST wait to receive a completion signal/status from the sub-agent before proceeding or returning results. Do not return results immediately after sending the prompt.
+- **Researcher (`researcher`)**: Explores codebase, dependencies, and requirements.
+- **Coder (`coder`)**: Implements code, adheres to PEP 8, Black, typing, and architectural specs.
+- **Tester (`tester`)**: Writes and runs `pytest` tests; validates 100% pass rate.
+- **Reviewer (`reviewer`)**: Conducts code review and compliance checks.
 
 ## 2. Environment & Tooling Standards
 
