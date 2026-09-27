@@ -66,6 +66,7 @@ Desktop.ini
 
 # Harness agent run outputs, traces and evaluation results
 runs/
+.runs/
 eval_results/
 benchmark_outputs/
 logs/

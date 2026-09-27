@@ -203,9 +203,16 @@ def init_cmd(
                 return
 
     target_path.mkdir(parents=True, exist_ok=True)
+
+    # Setup 3-tier architecture directories
+    (target_path / ".runs").mkdir(parents=True, exist_ok=True)
+    (target_path / ".ai" / "plans").mkdir(parents=True, exist_ok=True)
+    (target_path / ".ai" / "decisions").mkdir(parents=True, exist_ok=True)
+    (target_path / ".ai" / "context").mkdir(parents=True, exist_ok=True)
+
     _ensure_gitignore(target_path)
     repo_root = Path(__file__).resolve().parent.parent.parent
-    files_to_copy = ["Agent.md", "AGENTS.md", ".pre-commit-config.yaml"]
+    files_to_copy = ["AGENTS.md", ".pre-commit-config.yaml"]
     click.echo(f"Đang thiết lập Harness Agent & SDLC rules tại: {target_path}")
 
     copied = 0
@@ -240,7 +247,9 @@ def init_cmd(
 
 
 def _get_registry_path(repo_root: Path) -> Path:
-    return repo_root / ".harness_projects.json"
+    harness_dir = Path.home() / ".harness"
+    harness_dir.mkdir(parents=True, exist_ok=True)
+    return harness_dir / "projects.json"
 
 
 def _register_project(repo_root: Path, project_path: Path) -> None:
@@ -271,11 +280,77 @@ def _get_registered_projects(repo_root: Path) -> List[str]:
 def _ensure_gitignore(target_path: Path) -> None:
     gitignore_path = target_path / ".gitignore"
     entries = [
-        "\n# AI Orchestrator & Configs\n",
+        "# ========================================\n",
+        "# AI Orchestrator & Configs\n",
+        "# ========================================\n",
         ".agents/\n",
-        "Agent.md\n",
-        "AGENTS.md\n",
+        ".runs/\n",
         ".ai/\n",
+        "\n# ========================================\n",
+        "# OS & IDE\n",
+        "# ========================================\n",
+        ".DS_Store\n",
+        ".vscode/\n",
+        ".idea/\n",
+        "*.swp\n",
+        "*.log\n",
+        ".expo/\n",
+        ".expo-shared/\n",
+        "dist/\n",
+        "web-build/\n",
+        "node_modules/\n",
+        "\n# ========================================\n",
+        "# Python / FastAPI Backend\n",
+        "# ========================================\n",
+        "venv/\n",
+        "env/\n",
+        ".env\n",
+        ".env.*\n",
+        "! .env.example\n",
+        "__pycache__/\n",
+        "*.py[cod]\n",
+        "*$py.class\n",
+        "*.pyc\n",
+        "token.json\n",
+        "**/token.json\n",
+        "credentials.json\n",
+        "**/credentials.json\n",
+        "\n# Pytest / Coverage\n",
+        ".pytest_cache/\n",
+        "htmlcov/\n",
+        ".coverage\n",
+        ".mypy_cache/\n",
+        "\n# ========================================\n",
+        "# AI / Data Science / Models\n",
+        "# ========================================\n",
+        "*.pt\n",
+        "*.pth\n",
+        "*.onnx\n",
+        "*.h5\n",
+        "*.pb\n",
+        "*.tflite\n",
+        "*.safetensors\n",
+        "*.ckpt\n",
+        "\n*.csv\n",
+        "*.tsv\n",
+        "*.mp4\n",
+        "*.avi\n",
+        "*.jpeg\n",
+        "*.jpg\n",
+        "*.png\n",
+        "img/\n",
+        "video/\n",
+        "\n# Jupyter Notebook temporary data\n",
+        ".ipynb_checkpoints/\n",
+        "*/.ipynb_checkpoints/*\n",
+        "\n# Keystores (DO NOT COMMIT SECRETS)\n",
+        "*.jks\n",
+        "*.keystore\n",
+        "*.p12\n",
+        "*.key\n",
+        "*.mobileprovision\n",
+        "\n#antigravitycli\n",
+        ".antigravitycli/\n",
     ]
     if not gitignore_path.exists():
         with open(gitignore_path, "w", encoding="utf-8") as f:
