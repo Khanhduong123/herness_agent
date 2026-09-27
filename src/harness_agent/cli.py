@@ -203,9 +203,16 @@ def init_cmd(
                 return
 
     target_path.mkdir(parents=True, exist_ok=True)
+
+    # Setup 3-tier architecture directories
+    (target_path / ".runs").mkdir(parents=True, exist_ok=True)
+    (target_path / ".ai" / "plans").mkdir(parents=True, exist_ok=True)
+    (target_path / ".ai" / "decisions").mkdir(parents=True, exist_ok=True)
+    (target_path / ".ai" / "context").mkdir(parents=True, exist_ok=True)
+
     _ensure_gitignore(target_path)
     repo_root = Path(__file__).resolve().parent.parent.parent
-    files_to_copy = ["Agent.md", "AGENTS.md", ".pre-commit-config.yaml"]
+    files_to_copy = ["AGENTS.md", ".pre-commit-config.yaml"]
     click.echo(f"Đang thiết lập Harness Agent & SDLC rules tại: {target_path}")
 
     copied = 0
@@ -240,7 +247,9 @@ def init_cmd(
 
 
 def _get_registry_path(repo_root: Path) -> Path:
-    return repo_root / ".harness_projects.json"
+    harness_dir = Path.home() / ".harness"
+    harness_dir.mkdir(parents=True, exist_ok=True)
+    return harness_dir / "projects.json"
 
 
 def _register_project(repo_root: Path, project_path: Path) -> None:
@@ -275,8 +284,7 @@ def _ensure_gitignore(target_path: Path) -> None:
         "# AI Orchestrator & Configs\n",
         "# ========================================\n",
         ".agents/\n",
-        "Agent.md\n",
-        "AGENTS.md\n",
+        ".runs/\n",
         ".ai/\n",
         "\n# ========================================\n",
         "# OS & IDE\n",
