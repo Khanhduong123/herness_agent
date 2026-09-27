@@ -286,6 +286,7 @@ def _ensure_gitignore(target_path: Path) -> None:
         ".agents/\n",
         ".runs/\n",
         ".ai/\n",
+        "AGENTS.md\n",
         "\n# ========================================\n",
         "# OS & IDE\n",
         "# ========================================\n",
