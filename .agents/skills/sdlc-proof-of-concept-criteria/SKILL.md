@@ -36,11 +36,17 @@ Test specific uncertainty in the most realistic environment possible.
 - If PoC doesn't hit criteria, don't ship.
 
 ### 4. Timeline and Effort
-- **MANDATORY**: You MUST explicitly ask the user for the exact timeline/duration (how long the PoC will take, how much time is allocated) and define it clearly with them BEFORE writing any plan.
+- **MANDATORY**: You MUST explicitly ask the user for the exact timeline/duration (how long the PoC will take, how much time is allocated). Define it clearly with the user, and then write a specific plan for it.
 - PoCs typically take 1-3 sprints max (depending on team size).
 - If a PoC takes too long, you've started implementation, not validation. Keep the PoC tight.
 
-### 5. Go/No-Go Decision Process
+### 5. Categorize PoC Type (AI vs Backend)
+Before building a PoC, explicitly determine if it is for AI or Backend:
+- **Backend PoC**: Focuses on architecture, system design, load testing, or integration viability.
+- **AI PoC**: You MUST explicitly ask the user if they already have the required **data**.
+  - If they do NOT have data: Ask how they plan to evaluate the PoC (e.g., using synthetic data, public datasets, or qualitative assessment) before proceeding. Data strategy is critical for AI PoCs.
+
+### 6. Go/No-Go Decision Process
 At PoC end, explicitly decide:
 - Ship to production.
 - Iterate PoC.
