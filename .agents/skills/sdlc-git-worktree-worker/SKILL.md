@@ -32,11 +32,12 @@ git add .
 git commit -m "feat(subtask_01): implement feature according to sub-spec"
 ```
 
-## 4. Signalling the Orchestrator
+## 4. Signalling the Orchestrator (CRITICAL STEP)
 
-After the commit is successful, the Worker Agent must notify the Central Orchestrator that the subtask is complete.
-1. The notification must include the exact workspace name/path (`agent/[task_id]`), so the Orchestrator can merge or review it.
-2. The Worker Agent must return the execution control, updating the task status to `COMPLETED`.
+After the commit is successful, the Worker Agent **MUST** explicitly notify the Central Orchestrator that the subtask is complete.
+1. **Explicit Signal**: The Worker Agent MUST write to a `.completed` file or print a clear message (e.g., "TASK_COMPLETED_SUCCESSFULLY") so the Orchestrator knows the task is truly finished. If you do not send this signal, the Orchestrator will be stuck waiting.
+2. The notification must include the exact workspace name/path (`agent/[task_id]`), so the Orchestrator can merge or review it.
+3. The Worker Agent must return the execution control, updating the task status to `COMPLETED`.
 
 ## 5. Cleanup (By Orchestrator)
 
