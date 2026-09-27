@@ -52,7 +52,17 @@ herness_agent/
 
 ## ⚡ Quickstart
 
-### 1. Activate Environment
+### 1. Installation
+
+Clone the repository and install the package in editable mode:
+
+```powershell
+git clone https://github.com/Khanhduong123/herness_agent.git
+cd herness_agent
+pip install -e .
+```
+
+### 2. Activate Environment
 
 This repository is configured to run inside the Conda `pytorch` environment:
 
@@ -60,7 +70,7 @@ This repository is configured to run inside the Conda `pytorch` environment:
 conda activate pytorch
 ```
 
-### 2. Install Development & Pre-commit Hooks
+### 3. Install Development & Pre-commit Hooks
 
 Install the git hook scripts so that every `git commit` automatically triggers code formatting and checks:
 
@@ -74,7 +84,7 @@ To run all pre-commit hooks manually across all files:
 pre-commit run --all-files
 ```
 
-### 3. Verify `agy` CLI Installation
+### 4. Verify `agy` CLI Installation
 
 Ensure that `agy` is installed and on your PATH:
 
