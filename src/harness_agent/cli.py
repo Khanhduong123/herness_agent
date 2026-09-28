@@ -367,7 +367,7 @@ def _ensure_gitignore(target_path: Path) -> None:
 def _sync_single_project(repo_root: Path, target_path: Path, link: bool = False) -> int:
     target_path.mkdir(parents=True, exist_ok=True)
     _ensure_gitignore(target_path)
-    files_to_copy = ["Agent.md", "AGENTS.md", ".pre-commit-config.yaml"]
+    files_to_copy = ["AGENTS.md", ".pre-commit-config.yaml"]
     copied = 0
 
     for filename in files_to_copy:

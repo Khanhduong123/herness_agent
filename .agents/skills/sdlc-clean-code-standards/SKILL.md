@@ -29,3 +29,10 @@ This skill enforces coding quality standards during the implementation phase.
 - **Documentation**: Provide module docstrings and class/method docstrings.
 - **Preserve Comments**: Never strip existing comments or unrelated code during file edits.
 - **Atomic Edits**: Keep changes minimal, focused solely on the task requirements.
+
+---
+
+## 3. Patch-Only Rule & Tool-Locking Policy ("Patch, Never Regenerate")
+- **Mandatory Tooling**: Coders and Reviewers MUST ONLY use patch-based tools (`apply_patch`, `replace_file_content`, or `multi_replace_file_content`) to modify existing files.
+- **Tool-Locking Restriction**: Full-file rewrites (e.g. using `write_to_file` on existing files) are strictly prohibited and locked.
+- **Hunk-Based Editing**: All changes must be emitted as bounded diff hunks. Do not regenerate surrounding unchanged code.

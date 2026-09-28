@@ -88,6 +88,8 @@ Concrete test scenarios must be defined before code implementation:
 - [ ] Zero `flake8` lint errors (`E501`, `F401`, `F821`).
 - [ ] 100% pass rate in pytest (`conda run -n pytorch pytest`).
 - [ ] No unhandled exceptions or silent error swallowing.
+- [ ] Strictly follow "Patch, never regenerate" rule (use diff hunks, no full-file rewrites).
+
 
 ### 2.7. Storage & Approval Workflow
 - **Storage**: The Orchestrator MUST save every generated `sub-spec` locally as a Markdown file in the project's `.ai/plan/` directory (e.g., `.ai/plan/subtask_01_feature.md`).

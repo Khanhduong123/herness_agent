@@ -74,10 +74,83 @@ class CommandEvaluator(BaseEvaluator):
             return False, f"Failed to execute verification command '{command}': {exc}"
 
 
+class PatchOnlyEvaluator(BaseEvaluator):
+    """Checks that the agent followed the 'Patch, never regenerate' rule.
+
+    Validates that:
+    1. The output contains diff hunks or unified diff headers (e.g. @@ ... @@).
+    2. No full-file overwrite tool calls were performed on existing files.
+    3. The changes are minimal diff patches rather than whole-file regenerations.
+    """
+
+    def evaluate(self, check: TaskCheck, result: RunResult, workspace_dir: str) -> Tuple[bool, str]:
+        # Check tool calls first
+        for tc in result.tool_calls:
+            if tc.name in ("write_to_file", "write_file", "create_file"):
+                target_file = (
+                    tc.args.get("target_file") or tc.args.get("TargetFile") or tc.args.get("path")
+                )
+                if target_file:
+                    target_path = (
+                        os.path.join(workspace_dir, target_file)
+                        if not os.path.isabs(target_file)
+                        else target_file
+                    )
+                    if os.path.exists(target_path):
+                        return False, (
+                            f"Agent used disallowed full-file write tool '{tc.name}' "
+                            f"on existing file '{target_file}'"
+                        )
+
+        # Check output text for diff hunks or patch content
+        output = result.output_text
+        diff_pattern = r"(@@\s+-\d+.*?\+\d+.*?@@|--- [ab]/.+\n\+\+\+ [ab]/.+)"
+        has_diff = bool(re.search(diff_pattern, output, re.MULTILINE))
+
+        # Check if tool calls contain patch tools
+        has_patch_tool = any(
+            tc.name in ("apply_patch", "replace_file_content", "multi_replace_file_content")
+            for tc in result.tool_calls
+        )
+
+        if not (has_diff or has_patch_tool):
+            return False, (
+                "Output does not contain diff hunks or patch tool calls "
+                "(Patch, never regenerate rule violated)"
+            )
+
+        return True, "Output complies with Patch-Only policy"
+
+
+class ToolLockEvaluator(BaseEvaluator):
+    """Validates that all executed tool calls comply with configured tool-locking policies."""
+
+    def evaluate(self, check: TaskCheck, result: RunResult, workspace_dir: str) -> Tuple[bool, str]:
+        from harness_agent.patch import validate_tool_call
+
+        disallowed = (
+            [t.strip() for t in check.target.split(",") if t.strip()] if check.target else []
+        )
+        for tc in result.tool_calls:
+            valid, reason = validate_tool_call(
+                tool_name=tc.name,
+                args=tc.args,
+                workspace_dir=workspace_dir,
+                disallowed_tools=disallowed,
+                enforce_patch_only=True,
+            )
+            if not valid:
+                return False, f"ToolLock violation: {reason}"
+
+        return True, "All tool calls satisfied tool-locking policies"
+
+
 EVALUATOR_REGISTRY: Dict[str, BaseEvaluator] = {
     "file_exists": FileExistsEvaluator(),
     "text_match": TextMatchEvaluator(),
     "command_exit_zero": CommandEvaluator(),
+    "patch_only": PatchOnlyEvaluator(),
+    "tool_lock": ToolLockEvaluator(),
 }
 
 

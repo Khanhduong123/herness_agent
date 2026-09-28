@@ -4,7 +4,9 @@ from harness_agent.evaluator import (
     BaseEvaluator,
     CommandEvaluator,
     FileExistsEvaluator,
+    PatchOnlyEvaluator,
     TextMatchEvaluator,
+    ToolLockEvaluator,
 )
 from harness_agent.harness import AgentHarness
 from harness_agent.models import (
@@ -27,6 +29,17 @@ from harness_agent.models import (
     WorkerAgentConfig,
 )
 from harness_agent.orchestrator import AgentOrchestrator
+from harness_agent.patch import (
+    DisallowedFullFileOverwriteError,
+    PatchHunk,
+    PatchResult,
+    ToolLockViolationError,
+    apply_patch,
+    apply_unified_diff,
+    multi_replace_file_content,
+    parse_unified_diff,
+    validate_tool_call,
+)
 from harness_agent.runner import AgyRunner
 
 __version__ = "0.1.0"
@@ -40,11 +53,15 @@ __all__ = [
     "BaseEvaluator",
     "CommandEvaluator",
     "CriticalityLevel",
+    "DisallowedFullFileOverwriteError",
     "EvalReport",
     "FileExistsEvaluator",
     "FunctionSpec",
     "OrchestrationPlan",
     "OrchestrationResult",
+    "PatchHunk",
+    "PatchOnlyEvaluator",
+    "PatchResult",
     "RiskLevel",
     "RunResult",
     "SpecStatus",
@@ -55,5 +72,12 @@ __all__ = [
     "TaskStatus",
     "TestCaseSpec",
     "TextMatchEvaluator",
+    "ToolLockEvaluator",
+    "ToolLockViolationError",
     "WorkerAgentConfig",
+    "apply_patch",
+    "apply_unified_diff",
+    "multi_replace_file_content",
+    "parse_unified_diff",
+    "validate_tool_call",
 ]

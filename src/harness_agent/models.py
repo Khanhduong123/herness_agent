@@ -133,6 +133,15 @@ class WorkerAgentConfig(BaseModel):
         default=None, description="Custom system prompt or role guidance"
     )
     extra_flags: List[str] = Field(default_factory=list, description="Extra agy CLI flags")
+    allowed_tools: Optional[List[str]] = Field(
+        default=None, description="Permitted tools under tool-locking policy"
+    )
+    disallowed_tools: List[str] = Field(
+        default_factory=list, description="Forbidden tools under tool-locking policy"
+    )
+    enforce_patch_only: bool = Field(
+        default=False, description="Enforce 'Patch, never regenerate' rule for file modifications"
+    )
 
 
 class CriticalityLevel(str, Enum):
@@ -251,6 +260,15 @@ class SubTask(BaseModel):
     status: TaskStatus = Field(default=TaskStatus.PENDING, description="Current execution state")
     spec: Optional[SubSpec] = Field(
         default=None, description="Detailed SDLC technical specification (sub-spec)"
+    )
+    allowed_tools: Optional[List[str]] = Field(
+        default=None, description="Override allowed tools for this subtask"
+    )
+    disallowed_tools: List[str] = Field(
+        default_factory=list, description="Override disallowed tools for this subtask"
+    )
+    enforce_patch_only: Optional[bool] = Field(
+        default=None, description="Override patch-only enforcement for this subtask"
     )
     tags: List[str] = Field(default_factory=list, description="Tags for categorization")
 

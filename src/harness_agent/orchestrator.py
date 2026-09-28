@@ -45,8 +45,21 @@ class AgentOrchestrator:
             effort="high",
             system_prompt=(
                 "You are a senior software engineering agent. "
-                "Write clean, modular, and PEP 8 compliant code."
+                "Strict Rule: Follow the 'Patch, never regenerate' principle. "
+                "You must ONLY use patch-based tools (apply_patch, replace_file_content, "
+                "multi_replace_file_content) to modify existing files via minimal diff hunks. "
+                "Never overwrite or regenerate entire files."
             ),
+            allowed_tools=[
+                "apply_patch",
+                "replace_file_content",
+                "multi_replace_file_content",
+                "view_file",
+                "run_command",
+                "ask_question",
+            ],
+            disallowed_tools=["write_to_file_overwrite", "full_file_rewrite"],
+            enforce_patch_only=True,
         ),
         AgentRole.TESTER: WorkerAgentConfig(
             role=AgentRole.TESTER,
@@ -178,6 +191,28 @@ class AgentOrchestrator:
                 for crit in spec.acceptance_criteria:
                     lines.append(f"- [ ] {crit}")
 
+        # Tool Policy and Patch-Only Guard instructions
+        patch_only = (
+            subtask.enforce_patch_only
+            if subtask.enforce_patch_only is not None
+            else worker.enforce_patch_only
+        )
+        if patch_only or worker.role == AgentRole.CODER:
+            lines.extend(
+                [
+                    "",
+                    "## Tool Policy & Strict Patch-Only Rule (Tool-Locking):",
+                    "- **PATCH, NEVER REGENERATE**: You are STRICTLY FORBIDDEN from "
+                    "rewriting or regenerating entire existing files.",
+                    "- You MUST ONLY use patch-based tools (`apply_patch`, `replace_file_content`, "
+                    "or `multi_replace_file_content`) to apply minimal diff hunks.",
+                    "- Overwriting entire existing files (e.g. using `write_to_file` on "
+                    "existing files) is tool-locked and strictly blocked.",
+                    "- When fixing bugs or modifying features, locate the exact lines and "
+                    "emit only the targeted diff patch.",
+                ]
+            )
+
         # Add context from upstream dependencies
         if subtask.depends_on:
             lines.extend(["", "## Upstream Task Outputs:"])
@@ -231,6 +266,32 @@ class AgentOrchestrator:
 
         workspace_dir = task_def.workspace_dir or os.getcwd()
         result = await runner.execute_task(task_def)
+
+        # Validate tool-locking policies if configured
+        patch_only = (
+            subtask.enforce_patch_only
+            if subtask.enforce_patch_only is not None
+            else worker.enforce_patch_only
+        )
+        allowed_tools = subtask.allowed_tools or worker.allowed_tools
+        disallowed_tools = subtask.disallowed_tools or worker.disallowed_tools
+
+        if result.success and (patch_only or allowed_tools or disallowed_tools):
+            from harness_agent.patch import validate_tool_call
+
+            for tc in result.tool_calls:
+                valid, reason = validate_tool_call(
+                    tool_name=tc.name,
+                    args=tc.args,
+                    workspace_dir=workspace_dir,
+                    allowed_tools=allowed_tools,
+                    disallowed_tools=disallowed_tools,
+                    enforce_patch_only=patch_only,
+                )
+                if not valid:
+                    result.success = False
+                    result.error_message = reason
+                    break
 
         # Perform evaluation checks if defined
         if task_def.checks:

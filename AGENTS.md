@@ -35,9 +35,9 @@ graph TD
 | :--- | :--- | :--- |
 | **Orchestrator** | `orchestrator` | • Receives the goal from the User.<br/>• Decomposes the goal into a Task DAG.<br/>• **CRITICAL RULE:** NEVER write or edit code files directly. Wait for approval, create a git worktree, and setup a Herdr workspace.<br/>• **CRITICAL RULE:** DO NOT create UI Artifacts. MUST explicitly write all plans directly to the workspace directory `.ai/plan/` using standard file paths. Use distinct naming: `.ai/plan/main_[goal].md` for the high-level Task DAG, and `.ai/plan/subtask_[id].md` for individual Sub-Specs.<br/>• **DO NOT run `agy` in the background**. Launch interactively (`herdr agent start worker_[task_id] --kind agy --pane <pane_id>`) and send prompts via `herdr agent prompt`.<br/>• **MANDATORY:** Must check if the CLI ran and wait for the completion signal before proceeding. |
 | **Researcher** | `researcher` | • Explores the codebase, dependencies, and available libraries.<br/>• Designs architectural blueprints before implementation begins. |
-| **Coder** | `coder`, `agent-backend`, etc. | • Implements feature code, strictly adhering to PEP 8, typing, and the provided spec.<br/>• **Expert Rule:** The Orchestrator should dynamically configure this sub-agent as a domain expert (e.g., `agent-backend` for APIs). |
+| **Coder** | `coder`, `agent-backend`, etc. | • Implements feature code, strictly adhering to PEP 8, typing, and the provided spec.<br/>• **CRITICAL RULE ("Patch, Never Regenerate"):** MUST NEVER rewrite or overwrite entire existing files. MUST ONLY apply minimal diff hunks using patch-based tools (`apply_patch`, `replace_file_content`, `multi_replace_file_content`). Full-file overwrites are tool-locked and strictly forbidden.<br/>• **Expert Rule:** The Orchestrator should dynamically configure this sub-agent as a domain expert (e.g., `agent-backend` for APIs). |
 | **Tester** | `tester` | • Writes unit and integration tests using `pytest` and `pytest-asyncio`.<br/>• Validates a 100% pass rate before hand-off. |
-| **Reviewer** | `reviewer` | • Evaluates code diffs, linting, typing, conventions, and security. |
+| **Reviewer** | `reviewer` | • Evaluates code diffs, linting, typing, conventions, and security.<br/>• Verifies that code modifications are atomic diff patches rather than full-file regenerations. |
 
 ---
 
@@ -60,33 +60,15 @@ All agents must strictly adhere to the following environment rules:
 - Run tests via `conda run -n pytorch pytest`.
 - **Gatekeeper Rule:** A task cannot be marked as complete if any tests fail.
 
----
-
-## 3. Git Operations: Direct agy-cli Control
-All agents must strictly adhere to the following environment rules:
-
-### 2.1. Conda Environment
-- **Mandatory:** Always use the **`pytorch`** conda environment.
-- Run commands using: `conda run -n pytorch <command>`
-
-### 2.2. Python Standards
-- **Version:** `>= 3.10`
-- **Typing:** 100% type hints on all public interfaces (use Pydantic v2 for schemas).
-- **Style:** Black (100 line length), isort (profile black), flake8 (no unused imports or silent exception swallowing).
-- **Documentation:** Do not delete existing, unrelated comments or docstrings.
-
-### 2.3. Testing Gates
-- All new features or bug fixes must include unit tests.
-- Run tests via `conda run -n pytorch pytest`.
-- **Gatekeeper Rule:** A task cannot be marked as complete if any tests fail.
+### 2.4. Tool-Locking & Patching Policy ("Patch, Never Regenerate")
+- **Patch-Only Rule:** All code modifications to existing files must be executed exclusively via diff hunks. Regenerating or rewriting whole files causes context rot, hallucination, and loss of unrelated comments/functions.
+- **Tool-Locking:** Worker agents (especially Coder and Reviewer) are tool-locked against full-file overwrites (e.g., `write_to_file` on existing files). Any attempt to overwrite an entire file in one go will be rejected by the orchestrator and fail the quality gate.
+- **Permitted Edit Tools:** `apply_patch`, `replace_file_content`, `multi_replace_file_content`.
 
 ---
 
 ## 3. Git Operations: Direct agy-cli Control
 
-- **Separation of Concerns**: Python source code (`src/`) must NEVER call Git programmatically (e.g., no `subprocess` or `GitPython`).
-- **Direct Execution**: All Git actions must be performed directly via the `agy` CLI in the terminal.
-- **Branch Protection**: Never commit directly to `main`. Always work on a dedicated branch (`feat/...`, `fix/...`).
 - **Separation of Concerns**: Python source code (`src/`) must NEVER call Git programmatically (e.g., no `subprocess` or `GitPython`).
 - **Direct Execution**: All Git actions must be performed directly via the `agy` CLI in the terminal.
 - **Branch Protection**: Never commit directly to `main`. Always work on a dedicated branch (`feat/...`, `fix/...`).
