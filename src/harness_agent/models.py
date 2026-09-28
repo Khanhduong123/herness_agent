@@ -74,6 +74,67 @@ class ToolCallRecord(BaseModel):
     output: Optional[str] = Field(default=None, description="Tool execution result")
 
 
+class AgentRole(str, Enum):
+    """Specialized roles for worker agents in the orchestrator architecture."""
+
+    ORCHESTRATOR = "orchestrator"
+    CODER = "coder"
+    TESTER = "tester"
+    REVIEWER = "reviewer"
+    RESEARCHER = "researcher"
+    SECURITY_REVIEWER = "security_reviewer"
+    PERFORMANCE_REVIEWER = "performance_reviewer"
+    REQUIREMENT_REVIEWER = "requirement_reviewer"
+
+    @classmethod
+    def _missing_(cls, value: object):
+        if isinstance(value, str):
+            normalized = value.replace("-", "_").lower()
+            for member in cls:
+                if member.value == normalized:
+                    return member
+        return super()._missing_(value)
+
+
+class CriticFeedback(BaseModel):
+    """Feedback and evaluation result from an individual adversarial critic."""
+
+    role: AgentRole = Field(..., description="Critic role that produced this feedback")
+    critic_name: str = Field(..., description="Name of the critic agent")
+    approved: bool = Field(default=True, description="Whether the critic approves the changes")
+    issues: List[str] = Field(
+        default_factory=list, description="Specific issues or vulnerabilities caught by this critic"
+    )
+    feedback: str = Field(default="", description="Detailed commentary and recommendations")
+    run_result: Optional[RunResult] = Field(
+        default=None, description="Raw execution result from the agent runner if executed"
+    )
+
+
+class AggregatedCriticReview(BaseModel):
+    """Aggregated feedback from parallel adversarial critics."""
+
+    approved: bool = Field(default=True, description="True only if all critics approve the changes")
+    critics_feedback: Dict[str, CriticFeedback] = Field(
+        default_factory=dict, description="Feedback indexed by critic role"
+    )
+    summary: str = Field(
+        default="", description="Combined markdown report summarizing feedback from all critics"
+    )
+
+    @property
+    def security_critic(self) -> Optional[CriticFeedback]:
+        return self.critics_feedback.get(AgentRole.SECURITY_REVIEWER.value)
+
+    @property
+    def performance_critic(self) -> Optional[CriticFeedback]:
+        return self.critics_feedback.get(AgentRole.PERFORMANCE_REVIEWER.value)
+
+    @property
+    def requirement_critic(self) -> Optional[CriticFeedback]:
+        return self.critics_feedback.get(AgentRole.REQUIREMENT_REVIEWER.value)
+
+
 class RunResult(BaseModel):
     """Result of running an agy task."""
 
@@ -87,6 +148,7 @@ class RunResult(BaseModel):
     tool_calls: List[ToolCallRecord] = Field(default_factory=list)
     check_results: Dict[str, bool] = Field(default_factory=dict)
     error_message: Optional[str] = None
+    critic_review: Optional[AggregatedCriticReview] = None
 
 
 class EvalReport(BaseModel):
@@ -101,21 +163,12 @@ class EvalReport(BaseModel):
     results: List[RunResult] = Field(default_factory=list)
 
 
-class AgentRole(str, Enum):
-    """Specialized roles for worker agents in the orchestrator architecture."""
-
-    ORCHESTRATOR = "orchestrator"
-    CODER = "coder"
-    TESTER = "tester"
-    REVIEWER = "reviewer"
-    RESEARCHER = "researcher"
-
-
 class TaskStatus(str, Enum):
     """Execution status for subtasks handled by the orchestrator."""
 
     PENDING = "pending"
     RUNNING = "running"
+    VALIDATING = "validating"
     COMPLETED = "completed"
     FAILED = "failed"
     BLOCKED = "blocked"
@@ -206,6 +259,19 @@ class TestCaseSpec(BaseModel):
     )
 
 
+class UntrustedSource(BaseModel):
+    """External untrusted source (web page, PDF, issue, file) to be safely injected."""
+
+    content: str = Field(..., description="Raw external text content")
+    source_type: str = Field(
+        default="web", description="Type of source: web, pdf, issue, file, etc."
+    )
+    source_id: Optional[str] = Field(default=None, description="Identifier, URL, or filepath")
+    warning_instruction: Optional[str] = Field(
+        default=None, description="Custom instruction override"
+    )
+
+
 class SubSpec(BaseModel):
     """Comprehensive technical specification for a subtask prior to execution."""
 
@@ -271,6 +337,26 @@ class SubTask(BaseModel):
         default=None, description="Override patch-only enforcement for this subtask"
     )
     tags: List[str] = Field(default_factory=list, description="Tags for categorization")
+    plan_file: Optional[str] = Field(
+        default=None,
+        description="Path to specific subtask plan markdown file (e.g. .ai/plan/subtask_[id].md)",
+    )
+    plan_content: Optional[str] = Field(
+        default=None,
+        description="Explicit plan markdown content for this subtask",
+    )
+    interface_files: List[str] = Field(
+        default_factory=list,
+        description="Specific interface or schema files relevant to this task (e.g. models.py)",
+    )
+    interface_contents: Dict[str, str] = Field(
+        default_factory=dict,
+        description="In-memory interface file contents mapping path to code content",
+    )
+    external_sources: List[UntrustedSource] = Field(
+        default_factory=list,
+        description="Untrusted external sources (web pages, PDFs, issues) to inject into context",
+    )
 
 
 class OrchestrationPlan(BaseModel):
@@ -287,6 +373,16 @@ class OrchestrationPlan(BaseModel):
     stop_on_failure: bool = Field(
         default=True, description="Whether to abort remaining dependent tasks if a subtask fails"
     )
+    enable_adversarial_critics: bool = Field(
+        default=False,
+        description=(
+            "Whether to automatically dispatch parallel adversarial critics when Coder completes"
+        ),
+    )
+    lazy_context: bool = Field(
+        default=True,
+        description="Enable lazy context loading: pass only assigned subtask spec and interfaces",
+    )
 
 
 class OrchestrationResult(BaseModel):
@@ -301,4 +397,13 @@ class OrchestrationResult(BaseModel):
     duration_seconds: float
     task_results: Dict[str, RunResult] = Field(default_factory=dict)
     task_statuses: Dict[str, TaskStatus] = Field(default_factory=dict)
+    critic_reviews: Dict[str, AggregatedCriticReview] = Field(
+        default_factory=dict, description="Critic reviews indexed by subtask id"
+    )
     summary: str = ""
+
+
+RunResult.model_rebuild()
+CriticFeedback.model_rebuild()
+AggregatedCriticReview.model_rebuild()
+OrchestrationResult.model_rebuild()

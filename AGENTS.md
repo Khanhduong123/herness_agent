@@ -4,9 +4,6 @@
 > This is the unified system rule file outlining the architectural guidelines, roles, and strict compliance rules for all AI Agents operating within this repository.
 
 ---
-> This is the unified system rule file outlining the architectural guidelines, roles, and strict compliance rules for all AI Agents operating within this repository.
-
----
 
 ## 1. System Architecture: Central Orchestrator Pattern
 
@@ -20,14 +17,20 @@ graph TD
         Orchestrator -->|Decomposes & Dispatches| Researcher["Researcher Agent<br/>(Analyze & Blueprint)"]
         Orchestrator -->|Assigns Feature Code| Coder["Coder Agent<br/>(Implementation)"]
         Orchestrator -->|Dispatches Test Suite| Tester["Tester Agent<br/>(QA & Pytest)"]
-        Orchestrator -->|Requests Verification| Reviewer["Reviewer Agent<br/>(Code Quality & Gate)"]
+        Orchestrator -->|Dispatches Diff in Parallel| Critics["Parallel Adversarial Critics"]
+        Critics --> SecurityReviewer["Security Reviewer Agent<br/>(Vulnerabilities & Injections)"]
+        Critics --> PerformanceReviewer["Performance Reviewer Agent<br/>(Complexity & O(N^2) Loops)"]
+        Critics --> RequirementReviewer["Requirement Reviewer Agent<br/>(Spec & Acceptance Criteria)"]
     end
 
     Researcher -->|Context & Specs| Orchestrator
     Coder -->|Code Diffs & Artifacts| Orchestrator
     Tester -->|Test Reports & Tracebacks| Orchestrator
-    Reviewer -->|Approval / Feedback| Orchestrator
+    SecurityReviewer -->|Security Feedback| Orchestrator
+    PerformanceReviewer -->|Performance Feedback| Orchestrator
+    RequirementReviewer -->|Requirement Feedback| Orchestrator
 
+    Orchestrator -->|Aggregated Review Feedback| Coder
     Orchestrator -->|Final Result & Verification| Output["Validated Deliverable"]
 ```
 
@@ -37,7 +40,17 @@ graph TD
 | **Researcher** | `researcher` | • Explores the codebase, dependencies, and available libraries.<br/>• Designs architectural blueprints before implementation begins. |
 | **Coder** | `coder`, `agent-backend`, etc. | • Implements feature code, strictly adhering to PEP 8, typing, and the provided spec.<br/>• **CRITICAL RULE ("Patch, Never Regenerate"):** MUST NEVER rewrite or overwrite entire existing files. MUST ONLY apply minimal diff hunks using patch-based tools (`apply_patch`, `replace_file_content`, `multi_replace_file_content`). Full-file overwrites are tool-locked and strictly forbidden.<br/>• **Expert Rule:** The Orchestrator should dynamically configure this sub-agent as a domain expert (e.g., `agent-backend` for APIs). |
 | **Tester** | `tester` | • Writes unit and integration tests using `pytest` and `pytest-asyncio`.<br/>• Validates a 100% pass rate before hand-off. |
-| **Reviewer** | `reviewer` | • Evaluates code diffs, linting, typing, conventions, and security.<br/>• Verifies that code modifications are atomic diff patches rather than full-file regenerations. |
+| **Security Reviewer** | `security_reviewer`, `security-reviewer` | • Evaluates code diffs and files for vulnerabilities, injection flaws (SQLi, shell injection, XSS), hardcoded secrets, and unsafe deserialization. |
+| **Performance Reviewer** | `performance_reviewer`, `performance-reviewer` | • Evaluates code diffs for algorithmic efficiency, nested loops (O(N^2) complexity), memory leaks, and performance bottlenecks. |
+| **Requirement Reviewer** | `requirement_reviewer`, `requirement-reviewer` | • Evaluates code against functional specifications, acceptance criteria, and sub-spec contracts. |
+| **Reviewer** | `reviewer` | • Evaluates code diffs, linting, typing, conventions, and security.<br/>• Verifies that code modifications are atomic diff patches rather than full-file regenerations (retained for backward compatibility). |
+
+### 1.1. Adversarial Critics Review Protocol
+When a **Coder** completes a feature implementation or code change:
+1. **Parallel Dispatch**: The Orchestrator automatically extracts the code diff / output and dispatches it concurrently to all 3 adversarial critics (`Security Reviewer`, `Performance Reviewer`, `Requirement Reviewer`) in parallel via `asyncio.gather`.
+2. **Specialized Scrutiny**: Each critic focuses exclusively on its domain of expertise without overlapping biases.
+3. **Feedback Aggregation**: The Orchestrator aggregates all critic evaluations into an `AggregatedCriticReview`.
+4. **Coder / Patcher Remediation**: If defects or vulnerabilities are detected (e.g., SQL injection or quadratic loops), the aggregated feedback is routed directly back to the Coder / Patcher for remediation.
 
 ---
 

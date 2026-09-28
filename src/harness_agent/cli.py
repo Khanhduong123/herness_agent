@@ -12,7 +12,7 @@ from typing import List, Optional, Set
 import click
 
 from harness_agent.harness import AgentHarness
-from harness_agent.models import AgyConfig, Task
+from harness_agent.models import AgyConfig, OrchestrationResult, Task, TaskStatus
 from harness_agent.orchestrator import AgentOrchestrator
 from harness_agent.runner import AgyRunner
 
@@ -126,31 +126,7 @@ def run_suite_cmd(
             click.echo(f"       Reason: {res.error_message}")
 
 
-@main.command(name="orchestrate")
-@click.argument("plan_file", type=click.Path(exists=True))
-@click.option(
-    "--output", "-o", default="runs/orchestration_report.json", help="Path to save JSON report"
-)
-@click.option("--model", default=None, help="Override default model for workers")
-@click.option("--effort", default=None, help="Override reasoning effort")
-def orchestrate_cmd(
-    plan_file: str,
-    output: str,
-    model: Optional[str],
-    effort: Optional[str],
-) -> None:
-    """Execute an orchestrator plan coordinating multi-agent subtasks."""
-    config = AgyConfig(model=model, effort=effort)
-    orchestrator = AgentOrchestrator(base_config=config)
-
-    click.echo(f"Loading orchestration plan from {plan_file}...")
-    plan = orchestrator.load_plan_from_yaml(plan_file)
-    click.echo(f"Goal: {plan.goal}")
-    click.echo(f"Total SubTasks: {len(plan.tasks)}")
-
-    result = asyncio.run(orchestrator.run_plan(plan))
-    orchestrator.save_result(result, output)
-
+def _print_orchestration_summary(result: OrchestrationResult, output: str) -> None:
     click.echo("\n================ Orchestration Summary ================")
     click.echo(f"Plan ID:         {result.plan_id}")
     click.echo(f"Goal:            {result.goal}")
@@ -162,15 +138,101 @@ def orchestrate_cmd(
     click.echo(f"Report saved:    {output}")
 
     for task_id, status in result.task_statuses.items():
-        color = "green" if status == "completed" else "red" if status == "failed" else "yellow"
+        color = (
+            "green"
+            if status == TaskStatus.COMPLETED
+            else "red" if status == TaskStatus.FAILED else "yellow"
+        )
         res = result.task_results.get(task_id)
         dur = f" ({res.duration_seconds}s)" if res else ""
         click.secho(f"[{status.value.upper()}] SubTask '{task_id}'{dur}", fg=color)
         if res and not res.success and res.error_message:
             click.echo(f"       Reason: {res.error_message}")
 
+
+@main.command(name="orchestrate")
+@click.argument("plan_file", type=click.Path(exists=True))
+@click.option(
+    "--output", "-o", default="runs/orchestration_report.json", help="Path to save JSON report"
+)
+@click.option("--model", default=None, help="Override default model for workers")
+@click.option("--effort", default=None, help="Override reasoning effort")
+@click.option(
+    "--resume", is_flag=True, help="Resume execution from existing disk state if available"
+)
+@click.option("--db", default=None, help="Path to SQLite state database")
+def orchestrate_cmd(
+    plan_file: str,
+    output: str,
+    model: Optional[str],
+    effort: Optional[str],
+    resume: bool,
+    db: Optional[str],
+) -> None:
+    """Execute an orchestrator plan coordinating multi-agent subtasks."""
+    config = AgyConfig(model=model, effort=effort)
+    orchestrator = AgentOrchestrator(base_config=config, db_path=db)
+
+    click.echo(f"Loading orchestration plan from {plan_file}...")
+    plan = orchestrator.load_plan(plan_file)
+    click.echo(f"Goal: {plan.goal}")
+    click.echo(f"Total SubTasks: {len(plan.tasks)}")
+
+    result = asyncio.run(orchestrator.run_plan(plan, resume=resume, plan_file=plan_file))
+    orchestrator.save_result(result, output)
+    _print_orchestration_summary(result, output)
+
     if not result.success:
         sys.exit(1)
+
+
+@click.command(name="resume")
+@click.argument("plan_or_id", required=False, default=None)
+@click.option("--db", default=None, help="Path to SQLite state database")
+@click.option(
+    "--output", "-o", default="runs/orchestration_report.json", help="Path to save JSON report"
+)
+@click.option("--model", default=None, help="Override default model for workers")
+@click.option("--effort", default=None, help="Override reasoning effort")
+def resume_cmd(
+    plan_or_id: Optional[str],
+    db: Optional[str],
+    output: str,
+    model: Optional[str],
+    effort: Optional[str],
+) -> None:
+    """Resume an interrupted or pending orchestration run from disk state."""
+    config = AgyConfig(model=model, effort=effort)
+    orchestrator = AgentOrchestrator(base_config=config, db_path=db)
+
+    target_str = f" for '{plan_or_id}'" if plan_or_id else " (latest active run)"
+    click.echo(f"Resuming orchestration run{target_str}...")
+
+    try:
+        result = asyncio.run(orchestrator.resume_plan(plan_or_id=plan_or_id))
+    except Exception as exc:
+        click.secho(f"✗ Failed to resume orchestration: {exc}", fg="red")
+        sys.exit(1)
+
+    orchestrator.save_result(result, output)
+    _print_orchestration_summary(result, output)
+
+    if not result.success:
+        sys.exit(1)
+
+
+# Register resume command at top level: harness-agent resume
+main.add_command(resume_cmd)
+
+
+# Register run command group: harness-agent run resume
+@main.group(name="run")
+def run_group() -> None:
+    """Execution and run management commands."""
+    pass
+
+
+run_group.add_command(resume_cmd, name="resume")
 
 
 @main.command(name="init")
@@ -212,12 +274,14 @@ def init_cmd(
 
     _ensure_gitignore(target_path)
     repo_root = Path(__file__).resolve().parent.parent.parent
-    files_to_copy = ["AGENTS.md", ".pre-commit-config.yaml"]
+    files_to_copy = ["AGENTS.md", "Agent.md", ".pre-commit-config.yaml"]
     click.echo(f"Đang thiết lập Harness Agent & SDLC rules tại: {target_path}")
 
     copied = 0
     for filename in files_to_copy:
         src = repo_root / filename
+        if not src.exists() and filename == "Agent.md":
+            src = repo_root / "AGENTS.md"
         dest = target_path / filename
         if src.exists():
             shutil.copy2(src, dest)
@@ -367,11 +431,13 @@ def _ensure_gitignore(target_path: Path) -> None:
 def _sync_single_project(repo_root: Path, target_path: Path, link: bool = False) -> int:
     target_path.mkdir(parents=True, exist_ok=True)
     _ensure_gitignore(target_path)
-    files_to_copy = ["AGENTS.md", ".pre-commit-config.yaml"]
+    files_to_copy = ["AGENTS.md", "Agent.md", ".pre-commit-config.yaml"]
     copied = 0
 
     for filename in files_to_copy:
         src = repo_root / filename
+        if not src.exists() and filename == "Agent.md":
+            src = repo_root / "AGENTS.md"
         dest = target_path / filename
         if src.exists():
             shutil.copy2(src, dest)

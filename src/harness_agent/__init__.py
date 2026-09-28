@@ -1,5 +1,13 @@
 """Harness Agent: A benchmark and execution harness for agents running via the agy CLI."""
 
+from harness_agent.critics import (
+    aggregate_critic_feedback,
+    build_critic_prompt,
+    detect_performance_issues,
+    detect_requirement_issues,
+    detect_security_issues,
+    dispatch_parallel_critics,
+)
 from harness_agent.evaluator import (
     BaseEvaluator,
     CommandEvaluator,
@@ -11,8 +19,10 @@ from harness_agent.evaluator import (
 from harness_agent.harness import AgentHarness
 from harness_agent.models import (
     AgentRole,
+    AggregatedCriticReview,
     AgyConfig,
     CriticalityLevel,
+    CriticFeedback,
     EvalReport,
     FunctionSpec,
     OrchestrationPlan,
@@ -26,6 +36,7 @@ from harness_agent.models import (
     TaskCheck,
     TaskStatus,
     TestCaseSpec,
+    UntrustedSource,
     WorkerAgentConfig,
 )
 from harness_agent.orchestrator import AgentOrchestrator
@@ -40,7 +51,23 @@ from harness_agent.patch import (
     parse_unified_diff,
     validate_tool_call,
 )
+from harness_agent.researcher import (
+    extract_text_from_html,
+    fetch_web_page,
+    read_external_file,
+    read_external_source,
+    read_issue_tracker,
+    read_pdf_document,
+)
 from harness_agent.runner import AgyRunner
+from harness_agent.security import (
+    UNTRUSTED_SOURCE_INSTRUCTION,
+    detect_injection_risk,
+    extract_untrusted_content,
+    sanitize_delimiters,
+    wrap_untrusted_content,
+)
+from harness_agent.state import DAGStateStore
 
 __version__ = "0.1.0"
 
@@ -48,11 +75,14 @@ __all__ = [
     "AgentHarness",
     "AgentOrchestrator",
     "AgentRole",
+    "AggregatedCriticReview",
     "AgyConfig",
     "AgyRunner",
     "BaseEvaluator",
     "CommandEvaluator",
+    "CriticFeedback",
     "CriticalityLevel",
+    "DAGStateStore",
     "DisallowedFullFileOverwriteError",
     "EvalReport",
     "FileExistsEvaluator",
@@ -74,10 +104,28 @@ __all__ = [
     "TextMatchEvaluator",
     "ToolLockEvaluator",
     "ToolLockViolationError",
+    "UNTRUSTED_SOURCE_INSTRUCTION",
+    "UntrustedSource",
     "WorkerAgentConfig",
+    "aggregate_critic_feedback",
     "apply_patch",
     "apply_unified_diff",
+    "build_critic_prompt",
+    "detect_injection_risk",
+    "detect_performance_issues",
+    "detect_requirement_issues",
+    "detect_security_issues",
+    "dispatch_parallel_critics",
+    "extract_text_from_html",
+    "extract_untrusted_content",
+    "fetch_web_page",
     "multi_replace_file_content",
     "parse_unified_diff",
+    "read_external_file",
+    "read_external_source",
+    "read_issue_tracker",
+    "read_pdf_document",
+    "sanitize_delimiters",
     "validate_tool_call",
+    "wrap_untrusted_content",
 ]
