@@ -226,6 +226,19 @@ class SubSpec(BaseModel):
     )
 
 
+class UntrustedSource(BaseModel):
+    """External untrusted source (web page, PDF, issue, file) to be safely injected."""
+
+    content: str = Field(..., description="Raw external text content")
+    source_type: str = Field(
+        default="web", description="Type of source: web, pdf, issue, file, etc."
+    )
+    source_id: Optional[str] = Field(default=None, description="Identifier, URL, or filepath")
+    warning_instruction: Optional[str] = Field(
+        default=None, description="Custom instruction override"
+    )
+
+
 class SubTask(BaseModel):
     """A decomposed subtask to be executed by a designated worker agent."""
 
@@ -251,6 +264,10 @@ class SubTask(BaseModel):
     status: TaskStatus = Field(default=TaskStatus.PENDING, description="Current execution state")
     spec: Optional[SubSpec] = Field(
         default=None, description="Detailed SDLC technical specification (sub-spec)"
+    )
+    external_sources: List[UntrustedSource] = Field(
+        default_factory=list,
+        description="Untrusted external sources (web pages, PDFs, issues) to inject into context",
     )
     tags: List[str] = Field(default_factory=list, description="Tags for categorization")
 

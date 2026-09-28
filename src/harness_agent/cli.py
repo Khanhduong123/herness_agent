@@ -212,12 +212,14 @@ def init_cmd(
 
     _ensure_gitignore(target_path)
     repo_root = Path(__file__).resolve().parent.parent.parent
-    files_to_copy = ["AGENTS.md", ".pre-commit-config.yaml"]
+    files_to_copy = ["AGENTS.md", "Agent.md", ".pre-commit-config.yaml"]
     click.echo(f"Đang thiết lập Harness Agent & SDLC rules tại: {target_path}")
 
     copied = 0
     for filename in files_to_copy:
         src = repo_root / filename
+        if not src.exists() and filename == "Agent.md":
+            src = repo_root / "AGENTS.md"
         dest = target_path / filename
         if src.exists():
             shutil.copy2(src, dest)
@@ -372,6 +374,8 @@ def _sync_single_project(repo_root: Path, target_path: Path, link: bool = False)
 
     for filename in files_to_copy:
         src = repo_root / filename
+        if not src.exists() and filename == "Agent.md":
+            src = repo_root / "AGENTS.md"
         dest = target_path / filename
         if src.exists():
             shutil.copy2(src, dest)
