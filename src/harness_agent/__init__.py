@@ -28,6 +28,7 @@ from harness_agent.models import (
 )
 from harness_agent.orchestrator import AgentOrchestrator
 from harness_agent.runner import AgyRunner
+from harness_agent.state import DAGStateStore
 
 __version__ = "0.1.0"
 
@@ -40,6 +41,7 @@ __all__ = [
     "BaseEvaluator",
     "CommandEvaluator",
     "CriticalityLevel",
+    "DAGStateStore",
     "EvalReport",
     "FileExistsEvaluator",
     "FunctionSpec",

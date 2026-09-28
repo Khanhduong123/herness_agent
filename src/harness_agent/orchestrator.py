@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import Dict, List, Optional, Set
 
@@ -22,6 +23,7 @@ from harness_agent.models import (
     WorkerAgentConfig,
 )
 from harness_agent.runner import AgyRunner
+from harness_agent.state import DAGStateStore
 
 
 class AgentOrchestrator:
@@ -71,20 +73,39 @@ class AgentOrchestrator:
         self,
         base_config: Optional[AgyConfig] = None,
         runner: Optional[AgyRunner] = None,
+        state_store: Optional[DAGStateStore] = None,
+        db_path: Optional[str] = None,
     ) -> None:
         self.base_config = base_config or AgyConfig()
         self.runner = runner or AgyRunner(self.base_config)
+        self.state_store = state_store or DAGStateStore(db_path=db_path)
+
+    @classmethod
+    def load_plan(cls, file_path: str) -> OrchestrationPlan:
+        """Load an orchestration plan from a YAML file or Markdown with YAML frontmatter."""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Plan file not found: {file_path}")
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Check for YAML frontmatter in Markdown (e.g. .ai/plan/main_[goal].md)
+        if file_path.endswith(".md") or content.startswith("---"):
+            match = re.search(r"^---\s*\n(.*?)\n---", content, flags=re.DOTALL)
+            if match:
+                frontmatter_data = yaml.safe_load(match.group(1))
+                if isinstance(frontmatter_data, dict) and "plan_id" in frontmatter_data:
+                    return OrchestrationPlan(**frontmatter_data)
+
+        data = yaml.safe_load(content)
+        if not isinstance(data, dict):
+            raise ValueError(f"Invalid plan format in {file_path}")
+        return OrchestrationPlan(**data)
 
     @classmethod
     def load_plan_from_yaml(cls, yaml_path: str) -> OrchestrationPlan:
         """Load an orchestration plan from a YAML file."""
-        if not os.path.exists(yaml_path):
-            raise FileNotFoundError(f"Plan file not found: {yaml_path}")
-
-        with open(yaml_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-
-        return OrchestrationPlan(**data)
+        return cls.load_plan(yaml_path)
 
     def resolve_execution_order(self, tasks: List[SubTask]) -> List[SubTask]:
         """Order tasks topologically based on their depends_on declarations."""
@@ -238,58 +259,167 @@ class AgentOrchestrator:
 
         return result
 
-    async def run_plan(self, plan: OrchestrationPlan) -> OrchestrationResult:
-        """Execute the complete orchestration plan according to the dependency DAG."""
+    async def run_plan(
+        self,
+        plan: OrchestrationPlan,
+        resume: bool = False,
+        plan_file: Optional[str] = None,
+        initial_statuses: Optional[Dict[str, TaskStatus]] = None,
+        initial_results: Optional[Dict[str, RunResult]] = None,
+    ) -> OrchestrationResult:
+        """Execute the orchestration plan with continuous state serialization and resume support."""
         start_time = time.time()
         ordered_tasks = self.resolve_execution_order(plan.tasks)
 
         task_results: Dict[str, RunResult] = {}
-        task_statuses: Dict[str, TaskStatus] = {t.id: TaskStatus.PENDING for t in plan.tasks}
+        task_statuses: Dict[str, TaskStatus] = {}
 
-        completed_count = 0
-        failed_count = 0
+        if resume:
+            if initial_statuses is None:
+                saved = self.state_store.load_run_state(plan.plan_id)
+                if saved:
+                    initial_statuses = saved.get("task_statuses")
+                    initial_results = saved.get("task_results")
+
+            if initial_statuses:
+                task_statuses = dict(initial_statuses)
+                task_results = dict(initial_results or {})
+
+                # Ensure any newly declared tasks in plan are tracked as PENDING
+                for t in plan.tasks:
+                    if t.id not in task_statuses:
+                        task_statuses[t.id] = TaskStatus.PENDING
+
+                # Re-dispatch rule: tasks that were RUNNING, VALIDATING, BLOCKED, or SKIPPED
+                # when the orchestrator halted/crashed are reset to PENDING for re-dispatch
+                for tid, st in list(task_statuses.items()):
+                    if st in (
+                        TaskStatus.RUNNING,
+                        TaskStatus.VALIDATING,
+                        TaskStatus.BLOCKED,
+                        TaskStatus.SKIPPED,
+                    ):
+                        task_statuses[tid] = TaskStatus.PENDING
+            else:
+                task_statuses = {t.id: TaskStatus.PENDING for t in plan.tasks}
+        else:
+            task_statuses = {t.id: TaskStatus.PENDING for t in plan.tasks}
+
+        # Continuously persist initial state to SQLite and Markdown
+        self.state_store.save_run_state(
+            plan=plan,
+            task_statuses=task_statuses,
+            task_results=task_results,
+            status="running",
+            plan_file=plan_file,
+        )
+
+        completed_count = sum(1 for st in task_statuses.values() if st == TaskStatus.COMPLETED)
+        failed_count = sum(1 for st in task_statuses.values() if st == TaskStatus.FAILED)
         aborted = False
 
         for subtask in ordered_tasks:
-            if aborted:
-                task_statuses[subtask.id] = TaskStatus.SKIPPED
+            # Skip already completed tasks when resuming
+            if task_statuses.get(subtask.id) == TaskStatus.COMPLETED:
                 continue
 
-            # Verify if any dependencies failed
+            if aborted:
+                task_statuses[subtask.id] = TaskStatus.SKIPPED
+                self.state_store.update_task_status(
+                    plan_id=plan.plan_id,
+                    task_id=subtask.id,
+                    status=TaskStatus.SKIPPED,
+                    plan_file=plan_file,
+                )
+                continue
+
+            # Verify if any dependencies failed or are not completed
             has_failed_dep = any(
                 task_statuses.get(dep_id) != TaskStatus.COMPLETED for dep_id in subtask.depends_on
             )
 
             if has_failed_dep:
                 task_statuses[subtask.id] = TaskStatus.BLOCKED
-                task_results[subtask.id] = RunResult(
+                blocked_res = RunResult(
                     task_id=subtask.id,
                     success=False,
                     exit_code=-1,
                     duration_seconds=0.0,
                     error_message=f"Blocked by upstream dependency failure in {subtask.depends_on}",
                 )
+                task_results[subtask.id] = blocked_res
                 failed_count += 1
+                self.state_store.update_task_status(
+                    plan_id=plan.plan_id,
+                    task_id=subtask.id,
+                    status=TaskStatus.BLOCKED,
+                    result=blocked_res,
+                    plan_file=plan_file,
+                )
                 if plan.stop_on_failure:
                     aborted = True
                 continue
 
-            # Execute subtask
+            # 1. State: RUNNING
             task_statuses[subtask.id] = TaskStatus.RUNNING
+            self.state_store.update_task_status(
+                plan_id=plan.plan_id,
+                task_id=subtask.id,
+                status=TaskStatus.RUNNING,
+                plan_file=plan_file,
+            )
+
+            # 2. Execute subtask
             result = await self.execute_subtask(plan, subtask, task_results)
+
+            # 3. State: VALIDATING
+            task_statuses[subtask.id] = TaskStatus.VALIDATING
+            self.state_store.update_task_status(
+                plan_id=plan.plan_id,
+                task_id=subtask.id,
+                status=TaskStatus.VALIDATING,
+                result=result,
+                plan_file=plan_file,
+            )
+
             task_results[subtask.id] = result
 
+            # 4. State: COMPLETED or FAILED
             if result.success:
                 task_statuses[subtask.id] = TaskStatus.COMPLETED
                 completed_count += 1
+                self.state_store.update_task_status(
+                    plan_id=plan.plan_id,
+                    task_id=subtask.id,
+                    status=TaskStatus.COMPLETED,
+                    result=result,
+                    plan_file=plan_file,
+                )
             else:
                 task_statuses[subtask.id] = TaskStatus.FAILED
                 failed_count += 1
+                self.state_store.update_task_status(
+                    plan_id=plan.plan_id,
+                    task_id=subtask.id,
+                    status=TaskStatus.FAILED,
+                    result=result,
+                    plan_file=plan_file,
+                )
                 if plan.stop_on_failure:
                     aborted = True
 
         total_duration = round(time.time() - start_time, 2)
         overall_success = (failed_count == 0) and (completed_count == len(plan.tasks))
+        final_status = "completed" if overall_success else "failed"
+
+        # Final persistent update
+        self.state_store.save_run_state(
+            plan=plan,
+            task_statuses=task_statuses,
+            task_results=task_results,
+            status=final_status,
+            plan_file=plan_file,
+        )
 
         summary = (
             f"Orchestration completed with {completed_count}/{len(plan.tasks)} tasks successful."
@@ -308,6 +438,51 @@ class AgentOrchestrator:
             task_results=task_results,
             task_statuses=task_statuses,
             summary=summary,
+        )
+
+    async def resume_plan(
+        self,
+        plan_or_id: Optional[str] = None,
+        plan_file: Optional[str] = None,
+    ) -> OrchestrationResult:
+        """Resume an interrupted or pending orchestration run from disk state."""
+        state_data = None
+        resolved_plan_file = plan_file
+
+        if plan_or_id and (
+            plan_or_id.endswith(".yaml")
+            or plan_or_id.endswith(".yml")
+            or plan_or_id.endswith(".md")
+            or os.path.exists(plan_or_id)
+        ):
+            resolved_plan_file = plan_or_id
+            loaded_plan = self.load_plan(plan_or_id)
+            state_data = self.state_store.load_run_state(loaded_plan.plan_id)
+            if not state_data:
+                # No previous run in SQLite, start fresh
+                return await self.run_plan(
+                    plan=loaded_plan,
+                    resume=False,
+                    plan_file=resolved_plan_file,
+                )
+        elif plan_or_id:
+            state_data = self.state_store.load_run_state(plan_or_id)
+        else:
+            state_data = self.state_store.load_run_state()
+
+        if not state_data:
+            target_desc = f" for '{plan_or_id}'" if plan_or_id else ""
+            raise ValueError(f"No saved orchestration run found to resume{target_desc}")
+
+        plan = state_data["plan"]
+        resolved_plan_file = resolved_plan_file or state_data.get("plan_file")
+
+        return await self.run_plan(
+            plan=plan,
+            resume=True,
+            plan_file=resolved_plan_file,
+            initial_statuses=state_data["task_statuses"],
+            initial_results=state_data["task_results"],
         )
 
     def save_result(self, result: OrchestrationResult, output_path: str) -> None:
