@@ -87,6 +87,68 @@ class RunResult(BaseModel):
     tool_calls: List[ToolCallRecord] = Field(default_factory=list)
     check_results: Dict[str, bool] = Field(default_factory=dict)
     error_message: Optional[str] = None
+    critic_review: Optional[AggregatedCriticReview] = None
+
+
+class AgentRole(str, Enum):
+    """Specialized roles for worker agents in the orchestrator architecture."""
+
+    ORCHESTRATOR = "orchestrator"
+    CODER = "coder"
+    TESTER = "tester"
+    REVIEWER = "reviewer"
+    RESEARCHER = "researcher"
+    SECURITY_REVIEWER = "security_reviewer"
+    PERFORMANCE_REVIEWER = "performance_reviewer"
+    REQUIREMENT_REVIEWER = "requirement_reviewer"
+
+    @classmethod
+    def _missing_(cls, value: object):
+        if isinstance(value, str):
+            normalized = value.replace("-", "_").lower()
+            for member in cls:
+                if member.value == normalized:
+                    return member
+        return super()._missing_(value)
+
+
+class CriticFeedback(BaseModel):
+    """Feedback and evaluation result from an individual adversarial critic."""
+
+    role: AgentRole = Field(..., description="Critic role that produced this feedback")
+    critic_name: str = Field(..., description="Name of the critic agent")
+    approved: bool = Field(default=True, description="Whether the critic approves the changes")
+    issues: List[str] = Field(
+        default_factory=list, description="Specific issues or vulnerabilities caught by this critic"
+    )
+    feedback: str = Field(default="", description="Detailed commentary and recommendations")
+    run_result: Optional[RunResult] = Field(
+        default=None, description="Raw execution result from the agent runner if executed"
+    )
+
+
+class AggregatedCriticReview(BaseModel):
+    """Aggregated feedback from parallel adversarial critics."""
+
+    approved: bool = Field(default=True, description="True only if all critics approve the changes")
+    critics_feedback: Dict[str, CriticFeedback] = Field(
+        default_factory=dict, description="Feedback indexed by critic role"
+    )
+    summary: str = Field(
+        default="", description="Combined markdown report summarizing feedback from all critics"
+    )
+
+    @property
+    def security_critic(self) -> Optional[CriticFeedback]:
+        return self.critics_feedback.get(AgentRole.SECURITY_REVIEWER.value)
+
+    @property
+    def performance_critic(self) -> Optional[CriticFeedback]:
+        return self.critics_feedback.get(AgentRole.PERFORMANCE_REVIEWER.value)
+
+    @property
+    def requirement_critic(self) -> Optional[CriticFeedback]:
+        return self.critics_feedback.get(AgentRole.REQUIREMENT_REVIEWER.value)
 
 
 class EvalReport(BaseModel):
@@ -99,16 +161,6 @@ class EvalReport(BaseModel):
     duration_seconds: float
     pass_rate: float
     results: List[RunResult] = Field(default_factory=list)
-
-
-class AgentRole(str, Enum):
-    """Specialized roles for worker agents in the orchestrator architecture."""
-
-    ORCHESTRATOR = "orchestrator"
-    CODER = "coder"
-    TESTER = "tester"
-    REVIEWER = "reviewer"
-    RESEARCHER = "researcher"
 
 
 class TaskStatus(str, Enum):
@@ -269,6 +321,12 @@ class OrchestrationPlan(BaseModel):
     stop_on_failure: bool = Field(
         default=True, description="Whether to abort remaining dependent tasks if a subtask fails"
     )
+    enable_adversarial_critics: bool = Field(
+        default=False,
+        description=(
+            "Whether to automatically dispatch parallel adversarial critics when Coder completes"
+        ),
+    )
 
 
 class OrchestrationResult(BaseModel):
@@ -283,4 +341,13 @@ class OrchestrationResult(BaseModel):
     duration_seconds: float
     task_results: Dict[str, RunResult] = Field(default_factory=dict)
     task_statuses: Dict[str, TaskStatus] = Field(default_factory=dict)
+    critic_reviews: Dict[str, AggregatedCriticReview] = Field(
+        default_factory=dict, description="Critic reviews indexed by subtask id"
+    )
     summary: str = ""
+
+
+RunResult.model_rebuild()
+CriticFeedback.model_rebuild()
+AggregatedCriticReview.model_rebuild()
+OrchestrationResult.model_rebuild()
