@@ -41,3 +41,4 @@ This skill defines the mandatory verification gates that must pass **AFTER** com
   - No leftover `print()` debug statements or temporary scratch files.
   - No secrets, tokens, or hardcoded passwords.
   - Formatting matches the surrounding codebase.
+  - **Patch-Only Compliance**: Verify the diff is minimal and atomic; ensure no existing files were rewritten in full or had unrelated lines modified.

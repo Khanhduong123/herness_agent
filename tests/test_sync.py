@@ -16,7 +16,6 @@ def test_sync_single_project(tmp_path):
     result = runner.invoke(main, ["sync", str(target)])
     assert result.exit_code == 0
     assert (target / "custom_app.py").exists()
-    assert (target / "Agent.md").exists()
     assert (target / "AGENTS.md").exists()
     assert (target / ".agents" / "skills" / "sdlc-clean-code-standards" / "SKILL.md").exists()
 
@@ -33,5 +32,5 @@ def test_sync_all_projects(tmp_path):
     # Now run sync --all
     result = runner.invoke(main, ["sync", "--all"])
     assert result.exit_code == 0
-    assert (proj1 / "Agent.md").exists()
-    assert (proj2 / "Agent.md").exists()
+    assert (proj1 / "AGENTS.md").exists()
+    assert (proj2 / "AGENTS.md").exists()

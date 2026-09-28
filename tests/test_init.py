@@ -11,10 +11,8 @@ def test_init_creates_files(tmp_path):
 
     result = runner.invoke(main, ["init", "--target-dir", str(target), "--force"])
     assert result.exit_code == 0
-    assert (target / "Agent.md").exists()
     assert (target / "AGENTS.md").exists()
     assert (target / ".pre-commit-config.yaml").exists()
-    assert (target / "examples" / "orchestrator_plan.yaml").exists()
     assert (target / ".agents" / "skills" / "sdlc-pretask-checklist" / "SKILL.md").exists()
     assert (target / ".agents" / "skills" / "sdlc-posttask-quality-gate" / "SKILL.md").exists()
 
@@ -43,5 +41,5 @@ def test_init_existing_directory_merge(tmp_path):
     result = runner.invoke(main, ["init", "--target-dir", str(target)], input="y\n")
     assert result.exit_code == 0
     assert (target / "app.py").exists()
-    assert (target / "Agent.md").exists()
+    assert (target / "AGENTS.md").exists()
     assert (target / ".agents" / "skills" / "sdlc-pretask-checklist" / "SKILL.md").exists()
