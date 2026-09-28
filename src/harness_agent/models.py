@@ -253,6 +253,22 @@ class SubTask(BaseModel):
         default=None, description="Detailed SDLC technical specification (sub-spec)"
     )
     tags: List[str] = Field(default_factory=list, description="Tags for categorization")
+    plan_file: Optional[str] = Field(
+        default=None,
+        description="Path to specific subtask plan markdown file (e.g. .ai/plan/subtask_[id].md)",
+    )
+    plan_content: Optional[str] = Field(
+        default=None,
+        description="Explicit plan markdown content for this subtask",
+    )
+    interface_files: List[str] = Field(
+        default_factory=list,
+        description="Specific interface or schema files relevant to this task (e.g. models.py)",
+    )
+    interface_contents: Dict[str, str] = Field(
+        default_factory=dict,
+        description="In-memory interface file contents mapping path to code content",
+    )
 
 
 class OrchestrationPlan(BaseModel):
@@ -268,6 +284,10 @@ class OrchestrationPlan(BaseModel):
     )
     stop_on_failure: bool = Field(
         default=True, description="Whether to abort remaining dependent tasks if a subtask fails"
+    )
+    lazy_context: bool = Field(
+        default=True,
+        description="Enable lazy context loading: pass only assigned subtask spec and interfaces",
     )
 
 
