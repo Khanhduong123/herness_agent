@@ -34,8 +34,25 @@ This skill guides the design phase before writing application code.
   - Declare dependency links (`depends_on`) to form a clean DAG without cycles.
   - Define evaluation checks (`TaskCheck`) to validate outputs programmatically.
 
+## 3. Cross-Subtask Interface Tension Matrix
+
+When orchestrating parallel worker agents, conflicting data representations (e.g., Subtask A assumes ISO timestamp string, Subtask B assumes epoch float) cause silent integration failures.
+
+1. **Contradiction Detection:**
+   - Map all shared Pydantic models, schemas, and API contracts across parallel subtasks.
+   - Cross-check data types, nullable constraints, and default values.
+
+2. **Contract Alignment Table:**
+   Maintain a table documenting shared interfaces to preempt conflicts:
+
+   ```text
+   | Interface / Model | Producer Subtask | Consumer Subtask(s) | Tension / Conflict Risk | Agreed Contract Schema |
+   | :--- | :--- | :--- | :--- | :--- |
+   | `UserModel` | Subtask 1 (Auth) | Subtask 2 (Billing) | ID type mismatch (int vs UUID) | `user_id: UUID` (Pydantic v2) |
+   ```
+
 ---
 
-## 3. Backward Compatibility & Non-Breaking Evolution
+## 4. Backward Compatibility & Non-Breaking Evolution
 - Never alter existing public function signatures without updating call sites and tests.
 - Deprecate gracefully when replacing old interfaces.

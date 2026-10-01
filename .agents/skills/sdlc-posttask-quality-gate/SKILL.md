@@ -35,7 +35,21 @@ This skill defines the mandatory verification gates that must pass **AFTER** com
 
 ---
 
-## 3. Git Diff Inspection
+## 3. Mechanical Symbol & Interface Binding Verification (Truthfulness Gate)
+1. **Import & Symbol Resolution:**
+   - Every `import` and `from ... import ...` statement in modified files must resolve to
+     an installed package or an existing workspace file.
+   - Every public symbol called from internal modules must exist in the target module's AST or
+     `__all__`.
+2. **Dangling Symbol Policy:**
+   - Any reference to an undefined or unexported function/class is classified as `CRITICAL`
+     (phantom symbol hallucination).
+   - Task execution is blocked until Coder either provides the missing definition or corrects
+     the call.
+
+---
+
+## 4. Git Diff Inspection
 - Run `git diff` to review all modified lines.
 - Verify:
   - No leftover `print()` debug statements or temporary scratch files.
