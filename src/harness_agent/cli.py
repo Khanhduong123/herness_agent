@@ -16,6 +16,18 @@ from harness_agent.models import AgyConfig, OrchestrationResult, Task, TaskStatu
 from harness_agent.orchestrator import AgentOrchestrator
 from harness_agent.runner import AgyRunner
 
+if sys.platform == "win32":
+    if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 
 @click.group()
 @click.version_option(version="0.1.0", prog_name="harness-agent")

@@ -496,7 +496,7 @@ class AgentOrchestrator:
                         )
                     )
                 else:
-                    status_str = f" [{ 'SUCCESS' if dep_res.success else 'FAILED' }]"
+                    status_str = f" [{'SUCCESS' if dep_res.success else 'FAILED'}]"
                     upstream_lines.append(f"### Output from Task '{dep_id}'{status_str}:")
                     upstream_lines.append(preview or "(no text output)")
 
