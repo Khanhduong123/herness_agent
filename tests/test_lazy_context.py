@@ -280,3 +280,45 @@ def test_real_repo_subtask_plan_resolution():
     assert content is not None
     assert "# Sub-Spec: Lazy Context Loading" in content
     assert "Prevent context rot" in content
+
+
+def test_real_repo_agents_rule_resolution():
+    """Verify that orchestrator resolves and reads AGENTS.md in the repository root."""
+    orchestrator = AgentOrchestrator()
+    resolved = orchestrator.resolve_agents_rule_file()
+    assert resolved is not None
+    assert resolved.endswith("AGENTS.md")
+
+    content = orchestrator.read_agents_rules()
+    assert content is not None
+    assert "Central Orchestrator Pattern" in content
+    assert "Conda Environment" in content
+
+
+def test_worker_prompt_enforces_agents_md_guidelines():
+    """Verify that worker prompts always inject AGENTS.md system standards."""
+    orchestrator = AgentOrchestrator()
+    subtask = SubTask(
+        id="task_audit",
+        name="Security Audit",
+        role=AgentRole.CODER,
+        instruction="Audit code diff",
+    )
+    plan = OrchestrationPlan(
+        plan_id="plan_audit",
+        goal="Audit codebase",
+        tasks=[subtask],
+    )
+    worker = orchestrator.DEFAULT_WORKERS[AgentRole.CODER]
+    prompt = orchestrator._build_worker_prompt(
+        plan=plan,
+        subtask=subtask,
+        worker=worker,
+    )
+
+    assert "## Mandatory System Guidelines & Rules (AGENTS.md):" in prompt
+    assert "**MANDATORY FIRST STEP:** Read `AGENTS.md`" in prompt
+    assert "conda run -n pytorch" in prompt
+    assert "Black (100 line length)" in prompt
+    assert "PATCH, NEVER REGENERATE" in prompt
+    assert "branch protection" in prompt

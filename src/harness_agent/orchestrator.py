@@ -269,6 +269,42 @@ class AgentOrchestrator:
                 return f.read()
         return None
 
+    def resolve_agents_rule_file(self, workspace_dir: Optional[str] = None) -> Optional[str]:
+        """Locate the AGENTS.md rule file on disk."""
+        search_roots = []
+        if workspace_dir:
+            search_roots.append(os.path.abspath(workspace_dir))
+        search_roots.append(os.path.abspath(os.getcwd()))
+
+        expanded_roots: List[str] = []
+        for root in search_roots:
+            curr = root
+            for _ in range(6):
+                if curr not in expanded_roots:
+                    expanded_roots.append(curr)
+                parent = os.path.dirname(curr)
+                if parent == curr:
+                    break
+                curr = parent
+
+        for root in expanded_roots:
+            for name in ("AGENTS.md", "Agent.md"):
+                cand = os.path.join(root, name)
+                if os.path.isfile(cand):
+                    return os.path.abspath(cand)
+        return None
+
+    def read_agents_rules(self, workspace_dir: Optional[str] = None) -> Optional[str]:
+        """Read the AGENTS.md rule file content if present."""
+        path = self.resolve_agents_rule_file(workspace_dir=workspace_dir)
+        if path and os.path.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return f.read()
+            except OSError:
+                pass
+        return None
+
     def read_interface_files(
         self, subtask: SubTask, workspace_dir: Optional[str] = None
     ) -> Dict[str, str]:
@@ -340,9 +376,34 @@ class AgentOrchestrator:
             f"# Role: {worker.name} ({worker.role.value.upper()})",
             f"Overall Objective: {plan.goal}",
             "",
+            "## Mandatory System Guidelines & Rules (AGENTS.md):",
+            (
+                "**MANDATORY FIRST STEP:** Read `AGENTS.md` in the repository root before "
+                "performing any action."
+            ),
+            "You MUST strictly comply with the following environment and architectural standards:",
+            (
+                "- **Conda Environment:** Mandatory to use the `pytorch` environment "
+                "(`conda run -n pytorch <command>`)."
+            ),
+            (
+                "- **Python Standards:** Python >= 3.10, 100% type hints on public interfaces "
+                "(Pydantic v2), Black (100 line length), isort, flake8."
+            ),
+            (
+                "- **Testing Gates:** Run tests via `conda run -n pytorch pytest`. "
+                "100% pass rate required before completion."
+            ),
+            (
+                "- **Tool-Locking & Patching:** Patch, never regenerate existing files. "
+                "Overwriting full files is blocked."
+            ),
+            (
+                "- **Git Operations:** Direct terminal execution via agy CLI, branch protection "
+                "(never commit directly to `main`), conventional commits (`feat:`, `fix:`, etc.)."
+            ),
+            "",
             f"## Assigned SubTask: {subtask.name} (ID: {subtask.id})",
-            "**MANDATORY FIRST STEP:** Read the `AGENTS.md` file in the repository "
-            "root to understand architectural rules, environment setup, and Git protocols.",
             f"Instruction:\n{subtask.instruction}",
         ]
 
