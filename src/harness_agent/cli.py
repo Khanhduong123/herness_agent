@@ -524,5 +524,65 @@ def sync_cmd(target_dir: Optional[str], sync_all: bool, link: bool) -> None:
     click.secho(f"\n[+] Hoan tat dong bo {total_synced} du an!", fg="cyan")
 
 
+@main.command(name="scholar-search")
+@click.argument("query")
+@click.option("--limit", default=5, type=int, help="Maximum number of papers to retrieve")
+@click.option(
+    "--provider",
+    default="all",
+    type=click.Choice(["all", "arxiv", "openalex"]),
+    help="Target scholarly provider",
+)
+@click.option("--json-output", "--json", "is_json", is_flag=True, help="Output as JSON array")
+def scholar_search_cmd(query: str, limit: int, provider: str, is_json: bool) -> None:
+    """Search AI & machine learning papers across arXiv and OpenAlex."""
+    from harness_agent.scholar import search_ai_papers
+
+    providers = None if provider == "all" else [provider]
+    result = search_ai_papers(query=query, limit=limit, providers=providers)
+
+    if is_json:
+        click.echo(result.model_dump_json(indent=2))
+        return
+
+    click.secho(f"\n=== Scholar Search Results for: '{query}' ===", fg="cyan", bold=True)
+    click.echo(f"Found {result.total_found} relevant papers (showing top {len(result.papers)}):\n")
+
+    if not result.papers:
+        click.secho("[-] No papers found matching query.", fg="yellow")
+        return
+
+    for idx, paper in enumerate(result.papers, 1):
+        year_str = f" ({paper.year})" if paper.year else ""
+        citations_str = (
+            f" | Citations: {paper.citation_count}" if paper.citation_count is not None else ""
+        )
+        click.secho(f"[{idx}] {paper.title}{year_str}", fg="green", bold=True)
+
+        if paper.authors:
+            authors_preview = ", ".join(paper.authors[:4])
+            if len(paper.authors) > 4:
+                authors_preview += " et al."
+            click.echo(f"    Authors: {authors_preview}")
+
+        identifiers = []
+        if paper.arxiv_id:
+            identifiers.append(f"arXiv:{paper.arxiv_id}")
+        if paper.doi:
+            identifiers.append(f"DOI:{paper.doi}")
+        if identifiers:
+            click.echo(f"    ID: {' | '.join(identifiers)}{citations_str}")
+
+        if paper.pdf_url:
+            click.secho(f"    PDF: {paper.pdf_url}", fg="blue")
+        elif paper.landing_url:
+            click.secho(f"    URL: {paper.landing_url}", fg="blue")
+
+        if paper.abstract:
+            preview = paper.abstract[:220].strip() + ("..." if len(paper.abstract) > 220 else "")
+            click.echo(f"    Abstract: {preview}")
+        click.echo("")
+
+
 if __name__ == "__main__":
     main()
