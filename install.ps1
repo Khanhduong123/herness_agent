@@ -19,30 +19,59 @@ param (
 )
 
 $ErrorActionPreference = "Stop"
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-
-# 1. Ask for project name if not provided
-if (-not $ProjectName -and -not $TargetDir) {
-    Write-Host "=== THIET LAP REPO MOI CHO HARNESS AGENT ===" -ForegroundColor Cyan
-    $ProjectName = Read-Host "Nhap ten du an cua ban (vi du: my-awesome-project)"
-    while ([string]::IsNullOrWhiteSpace($ProjectName)) {
-        $ProjectName = Read-Host "Ten du an khong duoc de trong. Vui long nhap lai"
-    }
+if ($PSScriptRoot) {
+    $ScriptDir = $PSScriptRoot
+} elseif ($MyInvocation.MyCommand.Path) {
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+} else {
+    $ScriptDir = (Get-Location).Path
 }
 
-# Determine target directory
-if (-not $TargetDir) {
+$CurrentDir = (Get-Location).Path
+
+# 1. Ask for project name or target directory if not provided
+if (-not $ProjectName -and -not $TargetDir) {
+    # If run from outside harness_agent repo, default to current working directory
+    if ($CurrentDir -ne $ScriptDir) {
+        $TargetDir = $CurrentDir
+        Write-Host "Phat hien dang chay tu thu muc du an: $TargetDir" -ForegroundColor Cyan
+    } else {
+        Write-Host "=== THIET LAP REPO MOI CHO HARNESS AGENT ===" -ForegroundColor Cyan
+        $ProjectName = Read-Host "Nhap ten du an cua ban (vi du: my-awesome-project)"
+        while ([string]::IsNullOrWhiteSpace($ProjectName)) {
+            $ProjectName = Read-Host "Ten du an khong duoc de trong. Vui long nhap lai"
+        }
+        $TargetDir = Join-Path ".." $ProjectName
+    }
+} elseif (-not $TargetDir -and $ProjectName) {
     $TargetDir = Join-Path ".." $ProjectName
 }
 
-# 2. Check if project directory already exists
-$Exists = Test-Path $TargetDir
-if ($Exists) {
+# 2. Resolve target directory path
+if (Test-Path $TargetDir) {
     $ResolvedTarget = (Resolve-Path $TargetDir).Path
-    Write-Host "`n[CANH BAO] Thu muc du an '$ResolvedTarget' DA TON TAI tren may!" -ForegroundColor Yellow
+    $TargetExisted = $true
+} else {
+    New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+    $ResolvedTarget = (Resolve-Path $TargetDir).Path
+    $TargetExisted = $false
+    Write-Host "--> Da tao thu muc moi: $ResolvedTarget" -ForegroundColor Green
+}
+
+# Check if target already has files
+$HasFiles = $false
+if (Test-Path $ResolvedTarget) {
+    $items = Get-ChildItem -Path $ResolvedTarget -Force -ErrorAction SilentlyContinue
+    if ($items -and $items.Count -gt 0) {
+        $HasFiles = $true
+    }
+}
+
+if ($HasFiles -and $TargetExisted) {
+    Write-Host "`n[THONG TIN] Thu muc '$ResolvedTarget' da chua code/du lieu hien co." -ForegroundColor Yellow
     if (-not $Force) {
         Write-Host "Chon hanh dong:"
-        Write-Host "  [1] Cap nhat / Bo sung quy chuan (Agent.md, skills) vao du an hien co (Khong xoa code cu)" -ForegroundColor Green
+        Write-Host "  [1] Cap nhat / Bo sung quy chuan (AGENTS.md, skills, .ai/plan) vao du an (Khong xoa code cu)" -ForegroundColor Green
         Write-Host "  [2] Huy thao tac (Abort)" -ForegroundColor Red
         $Choice = Read-Host "Lua chon cua ban [1/2] (Mac dinh: 1)"
         if ($Choice -eq "2") {
@@ -50,19 +79,22 @@ if ($Exists) {
             exit 0
         }
     }
-    Write-Host "--> Tien hanh bo sung / cap nhat quy chuan vao du an: $ResolvedTarget" -ForegroundColor Cyan
-} else {
-    New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
-    $ResolvedTarget = (Resolve-Path $TargetDir).Path
-    Write-Host "--> Da tao thu muc moi: $ResolvedTarget" -ForegroundColor Green
+    Write-Host "--> Tien hanh bo sung / cap nhat quy chuan vao: $ResolvedTarget" -ForegroundColor Cyan
 }
 
 Write-Host "==> Dang sao chep quy tac Harness Agent, SDLC Skills & cau hinh agy-cli vao: $ResolvedTarget" -ForegroundColor Cyan
 
 # 1. Copy compliance and rule files
-Copy-Item -Path (Join-Path $ScriptDir "Agent.md") -Destination (Join-Path $ResolvedTarget "Agent.md") -Force
-Copy-Item -Path (Join-Path $ScriptDir "AGENTS.md") -Destination (Join-Path $ResolvedTarget "AGENTS.md") -Force
-Write-Host "  [+] Created Agent.md and AGENTS.md" -ForegroundColor Green
+$AgentsMd = Join-Path $ScriptDir "AGENTS.md"
+if (Test-Path $AgentsMd) {
+    Copy-Item -Path $AgentsMd -Destination (Join-Path $ResolvedTarget "AGENTS.md") -Force
+    Write-Host "  [+] Created AGENTS.md" -ForegroundColor Green
+}
+$AgentMd = Join-Path $ScriptDir "Agent.md"
+if (Test-Path $AgentMd) {
+    Copy-Item -Path $AgentMd -Destination (Join-Path $ResolvedTarget "Agent.md") -Force
+    Write-Host "  [+] Created Agent.md" -ForegroundColor Green
+}
 
 # 2. Copy pre-commit config if not exists
 $TargetPreCommit = Join-Path $ResolvedTarget ".pre-commit-config.yaml"
@@ -92,13 +124,84 @@ if (Test-Path $SourceAgents) {
     Write-Host "  [+] Copied SDLC Skills to .agents\skills\" -ForegroundColor Green
 }
 
+# 5. Initialize 3-tier planning directories
+$PlanDirs = @(
+    ".runs",
+    ".ai\plan",
+    ".ai\plans",
+    ".ai\decisions",
+    ".ai\context"
+)
+foreach ($dir in $PlanDirs) {
+    $fullDir = Join-Path $ResolvedTarget $dir
+    if (-not (Test-Path $fullDir)) {
+        New-Item -ItemType Directory -Path $fullDir -Force | Out-Null
+    }
+}
+Write-Host "  [+] Initialized planning directories (.runs/, .ai/plan/, .ai/decisions/, .ai/context/)" -ForegroundColor Green
+
+# 6. Ensure .gitignore has critical AI orchestrator entries
+$TargetGitignore = Join-Path $ResolvedTarget ".gitignore"
+$GitignoreEntries = @(
+    "# AI Orchestrator & Plans",
+    ".agents/",
+    ".runs/",
+    ".ai/",
+    "AGENTS.md"
+)
+if (-not (Test-Path $TargetGitignore)) {
+    $SourceGitignore = Join-Path $ScriptDir ".gitignore"
+    if (Test-Path $SourceGitignore) {
+        Copy-Item -Path $SourceGitignore -Destination $TargetGitignore -Force
+        Write-Host "  [+] Created .gitignore from template" -ForegroundColor Green
+    } else {
+        Set-Content -Path $TargetGitignore -Value ($GitignoreEntries -join "`n") -Encoding utf8
+        Write-Host "  [+] Created .gitignore" -ForegroundColor Green
+    }
+} else {
+    $currentGitignore = Get-Content $TargetGitignore -Raw -ErrorAction SilentlyContinue
+    $toAppend = @()
+    foreach ($entry in $GitignoreEntries) {
+        if ($currentGitignore -notmatch [regex]::Escape($entry)) {
+            $toAppend += $entry
+        }
+    }
+    if ($toAppend.Count -gt 0) {
+        Add-Content -Path $TargetGitignore -Value ("`n" + ($toAppend -join "`n")) -Encoding utf8
+        Write-Host "  [+] Updated .gitignore with AI rules" -ForegroundColor Green
+    }
+}
+
+# 7. Register project in ~/.harness/projects.json
+try {
+    $HarnessDir = Join-Path $env:USERPROFILE ".harness"
+    if (-not (Test-Path $HarnessDir)) {
+        New-Item -ItemType Directory -Path $HarnessDir -Force | Out-Null
+    }
+    $RegistryFile = Join-Path $HarnessDir "projects.json"
+    $ProjectList = @()
+    if (Test-Path $RegistryFile) {
+        $raw = Get-Content $RegistryFile -Raw -ErrorAction SilentlyContinue
+        if ($raw) {
+            $ProjectList = @(ConvertFrom-Json $raw)
+        }
+    }
+    if ($ProjectList -notcontains $ResolvedTarget) {
+        $ProjectList += $ResolvedTarget
+        $ProjectList | ConvertTo-Json | Set-Content $RegistryFile -Encoding utf8
+        Write-Host "  [+] Registered in ~/.harness/projects.json for sync updates" -ForegroundColor Green
+    }
+} catch {
+    # Non-critical registration
+}
+
 Write-Host ""
 Write-Host "========================================================================" -ForegroundColor Yellow
 Write-Host " Thiet lap hoan tat! agy-cli da san sang trong: $ResolvedTarget" -ForegroundColor Green
 Write-Host "========================================================================" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "Cac buoc tiep theo trong du an moi cua ban:"
+Write-Host "Cac buoc tiep theo trong du an cua ban:"
 Write-Host "  1. cd '$ResolvedTarget'"
-Write-Host "  2. Chay agy: agy 'Doc file AGENTS.md va tom tat quy tac du an nay'"
+Write-Host "  2. Chay agy: agy 'Doc file AGENTS.md va bat dau nhiem vu'"
 Write-Host "  3. Thao tac Git qua agy: agy 'Tao branch feat/init va commit'"
 Write-Host ""

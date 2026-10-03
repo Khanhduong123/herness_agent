@@ -16,37 +16,44 @@ PROJECT_NAME="${1:-}"
 TARGET_DIR="${2:-}"
 FORCE="${FORCE:-false}"
 
-# 1. Ask for project name if not provided
-if [ -z "$PROJECT_NAME" ] && [ -z "$TARGET_DIR" ]; then
-    echo "=== THIẾT LẬP REPO MỚI CHO HARNESS AGENT ==="
-    read -rp "Nhập tên dự án của bạn (ví dụ: my-awesome-project): " PROJECT_NAME
-    while [ -z "$PROJECT_NAME" ]; do
-        read -rp "Tên dự án không được để trống. Vui lòng nhập lại: " PROJECT_NAME
-    done
-fi
+CURRENT_DIR="$(pwd)"
 
-# Determine target directory
-if [ -z "$TARGET_DIR" ]; then
+# 1. Ask for project name or target directory if not provided
+if [ -z "$PROJECT_NAME" ] && [ -z "$TARGET_DIR" ]; then
+    if [ "$CURRENT_DIR" != "$SCRIPT_DIR" ]; then
+        TARGET_DIR="$CURRENT_DIR"
+        echo "Phát hiện đang chạy từ thư mục dự án: $TARGET_DIR"
+    else
+        echo "=== THIẾT LẬP REPO MỚI CHO HARNESS AGENT ==="
+        read -rp "Nhập tên dự án của bạn (ví dụ: my-awesome-project): " PROJECT_NAME
+        while [ -z "$PROJECT_NAME" ]; do
+            read -rp "Tên dự án không được để trống. Vui lòng nhập lại: " PROJECT_NAME
+        done
+        TARGET_DIR="../$PROJECT_NAME"
+    fi
+elif [ -z "$TARGET_DIR" ] && [ -n "$PROJECT_NAME" ]; then
     TARGET_DIR="../$PROJECT_NAME"
 fi
 
 # 2. Check if project directory already exists
 if [ -d "$TARGET_DIR" ]; then
     TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
-    echo ""
-    echo "[CẢNH BÁO] Thư mục dự án '$TARGET_DIR' ĐÃ TỒN TẠI trên máy!"
-    if [ "$FORCE" != "true" ]; then
-        echo "Chọn hành động:"
-        echo "  [1] Cập nhật / Bổ sung quy chuẩn (Agent.md, skills) vào dự án hiện có (Không xóa code cũ)"
-        echo "  [2] Hủy thao tác (Abort)"
-        read -rp "Lựa chọn của bạn [1/2] (Mặc định: 1): " choice
-        choice="${choice:-1}"
-        if [ "$choice" = "2" ]; then
-            echo "Đã hủy quá trình thiết lập."
-            exit 0
+    if [ -n "$(ls -A "$TARGET_DIR" 2>/dev/null)" ]; then
+        echo ""
+        echo "[THÔNG TIN] Thư mục '$TARGET_DIR' đã chứa dữ liệu/code hiện có."
+        if [ "$FORCE" != "true" ]; then
+            echo "Chọn hành động:"
+            echo "  [1] Cập nhật / Bổ sung quy chuẩn (AGENTS.md, skills, .ai/plan) vào dự án hiện có (Không xóa code cũ)"
+            echo "  [2] Hủy thao tác (Abort)"
+            read -rp "Lựa chọn của bạn [1/2] (Mặc định: 1): " choice
+            choice="${choice:-1}"
+            if [ "$choice" = "2" ]; then
+                echo "Đã hủy quá trình thiết lập."
+                exit 0
+            fi
         fi
+        echo "--> Tiến hành bổ sung / cập nhật quy chuẩn vào: $TARGET_DIR"
     fi
-    echo "--> Tiến hành bổ sung / cập nhật quy chuẩn vào dự án: $TARGET_DIR"
 else
     mkdir -p "$TARGET_DIR"
     TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
@@ -56,9 +63,14 @@ fi
 echo "==> Đang sao chép quy tắc Harness Agent, SDLC Skills & cấu hình agy-cli vào: $TARGET_DIR"
 
 # 1. Copy compliance and rule files
-cp "$SCRIPT_DIR/Agent.md" "$TARGET_DIR/Agent.md"
-cp "$SCRIPT_DIR/AGENTS.md" "$TARGET_DIR/AGENTS.md"
-echo "  [✓] Created Agent.md and AGENTS.md"
+if [ -f "$SCRIPT_DIR/AGENTS.md" ]; then
+    cp "$SCRIPT_DIR/AGENTS.md" "$TARGET_DIR/AGENTS.md"
+    echo "  [✓] Created AGENTS.md"
+fi
+if [ -f "$SCRIPT_DIR/Agent.md" ]; then
+    cp "$SCRIPT_DIR/Agent.md" "$TARGET_DIR/Agent.md"
+    echo "  [✓] Created Agent.md"
+fi
 
 # 2. Copy pre-commit config if not exists
 if [ ! -f "$TARGET_DIR/.pre-commit-config.yaml" ] && [ -f "$SCRIPT_DIR/.pre-commit-config.yaml" ]; then
@@ -80,13 +92,64 @@ if [ -d "$SCRIPT_DIR/.agents" ]; then
     echo "  [✓] Copied SDLC Skills to .agents/skills/"
 fi
 
+# 5. Initialize 3-tier planning directories
+mkdir -p "$TARGET_DIR/.runs"
+mkdir -p "$TARGET_DIR/.ai/plan"
+mkdir -p "$TARGET_DIR/.ai/plans"
+mkdir -p "$TARGET_DIR/.ai/decisions"
+mkdir -p "$TARGET_DIR/.ai/context"
+echo "  [✓] Initialized planning directories (.runs/, .ai/plan/, .ai/decisions/, .ai/context/)"
+
+# 6. Ensure .gitignore
+GITIGNORE_FILE="$TARGET_DIR/.gitignore"
+if [ ! -f "$GITIGNORE_FILE" ]; then
+    if [ -f "$SCRIPT_DIR/.gitignore" ]; then
+        cp "$SCRIPT_DIR/.gitignore" "$GITIGNORE_FILE"
+        echo "  [✓] Created .gitignore from template"
+    else
+        cat << 'EOF' > "$GITIGNORE_FILE"
+# AI Orchestrator & Plans
+.agents/
+.runs/
+.ai/
+AGENTS.md
+EOF
+        echo "  [✓] Created .gitignore"
+    fi
+else
+    for entry in ".agents/" ".runs/" ".ai/" "AGENTS.md"; do
+        if ! grep -qxF "$entry" "$GITIGNORE_FILE"; then
+            echo "$entry" >> "$GITIGNORE_FILE"
+        fi
+    done
+    echo "  [✓] Updated .gitignore with AI rules"
+fi
+
+# 7. Register project in ~/.harness/projects.json if python is available
+python3 -c "
+import json, os, sys
+harness_dir = os.path.expanduser('~/.harness')
+os.makedirs(harness_dir, exist_ok=True)
+reg_file = os.path.join(harness_dir, 'projects.json')
+projects = set()
+if os.path.exists(reg_file):
+    try:
+        with open(reg_file, 'r') as f:
+            projects = set(json.load(f))
+    except Exception:
+        pass
+projects.add('$TARGET_DIR')
+with open(reg_file, 'w') as f:
+    json.dump(sorted(list(projects)), f, indent=2)
+" 2>/dev/null || true
+
 echo ""
 echo "========================================================================"
 echo " Thiết lập hoàn tất! agy-cli đã sẵn sàng trong: $TARGET_DIR"
 echo "========================================================================"
 echo ""
-echo "Các bước tiếp theo trong dự án mới của bạn:"
+echo "Các bước tiếp theo trong dự án của bạn:"
 echo "  1. cd \"$TARGET_DIR\""
-echo "  2. Chạy agy: agy \"Đọc file AGENTS.md và tóm tắt quy tắc dự án này\""
+echo "  2. Chạy agy: agy \"Đọc file AGENTS.md và bắt đầu nhiệm vụ\""
 echo "  3. Thao tác Git qua agy: agy \"Tạo branch feat/init và commit\""
 echo ""

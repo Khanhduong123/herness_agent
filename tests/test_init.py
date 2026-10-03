@@ -13,6 +13,7 @@ def test_init_creates_files(tmp_path):
     assert result.exit_code == 0
     assert (target / "AGENTS.md").exists()
     assert (target / ".pre-commit-config.yaml").exists()
+    assert (target / ".ai" / "plan").is_dir()
     assert (target / ".agents" / "skills" / "sdlc-pretask-checklist" / "SKILL.md").exists()
     assert (target / ".agents" / "skills" / "sdlc-posttask-quality-gate" / "SKILL.md").exists()
 
