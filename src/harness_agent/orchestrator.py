@@ -241,6 +241,7 @@ class AgentOrchestrator:
                     return os.path.abspath(candidate)
 
             try:
+                candidates: List[str] = []
                 for entry in sorted(os.listdir(plan_dir)):
                     if not entry.endswith(".md"):
                         continue
@@ -250,7 +251,17 @@ class AgentOrchestrator:
                         or entry.startswith(f"{sub_id}_")
                         or (id_num.isdigit() and entry.startswith(f"subtask_{int(id_num):02d}_"))
                     ):
-                        return os.path.abspath(os.path.join(plan_dir, entry))
+                        candidates.append(entry)
+
+                if candidates:
+                    if subtask.name:
+                        name_slug = re.sub(r"[^a-z0-9]+", "_", subtask.name.lower()).strip("_")
+                        slug_words = [w for w in name_slug.split("_") if len(w) > 3]
+                        if slug_words:
+                            for cand_entry in candidates:
+                                if any(w in cand_entry.lower() for w in slug_words):
+                                    return os.path.abspath(os.path.join(plan_dir, cand_entry))
+                    return os.path.abspath(os.path.join(plan_dir, candidates[0]))
             except OSError:
                 pass
 
