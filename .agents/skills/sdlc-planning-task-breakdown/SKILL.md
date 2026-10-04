@@ -77,13 +77,13 @@ Each vertical slice delivers working, testable functionality.
 
 ### Step 4: Write Task Breakdown (Before Generating Sub-Specs)
 
-Each task defined in the plan should follow this structure. Later, each task will be formally expanded using the `sdlc-subtask-specifier` skill into its own `.ai/plans/subtasks/YYYY-MM-DD/subtask_[id].md` file.
+Each task defined in the plan should follow this structure. Later, each task will be formally expanded using the `sdlc-subtask-specifier` skill into its own `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[id].md` file.
 
 ```markdown
 ## Task [N]: [Short descriptive title]
 
 **Plan ID:** `plan_[feature_name]`
-**Task ID:** `subtask_[N]_[slug]`
+**Task ID:** `subtask_01_[slug]` (use 2-digit zero-padded numbers: 01, 02, etc.)
 **Assigned Role:** `coder` (Dedicated Domain Expert)
 **Description:** One paragraph explaining what this task accomplishes.
 
@@ -136,7 +136,7 @@ If a task is L or larger, it should be broken into smaller tasks.
 ## Output Files
 
 - **Plan document:** Save the implementation plan to the project folder at `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` (do not save it to a separate artifact folder).
-- **Next Step:** Once the plan is approved by the user, the Orchestrator will use `sdlc-subtask-specifier` to generate individual `.ai/plans/subtasks/YYYY-MM-DD/subtask_[task_id].md` files for each task in the plan.
+- **Next Step:** Once the plan is approved by the user, the Orchestrator will use `sdlc-subtask-specifier` to generate individual `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[task_id].md` files for each task in the plan.
 
 ## Verification
 

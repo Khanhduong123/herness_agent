@@ -1,5 +1,7 @@
 """Harness Agent: A benchmark and execution harness for agents running via the agy CLI."""
 
+from harness_agent.citecheck import check_report_citations, check_report_file
+from harness_agent.claims import CitationPair, Claim, triage_citation
 from harness_agent.critics import (
     aggregate_critic_feedback,
     build_critic_prompt,
@@ -68,6 +70,17 @@ from harness_agent.security import (
     wrap_untrusted_content,
 )
 from harness_agent.state import DAGStateStore
+from harness_agent.web import (
+    BuiltinProvider,
+    Crawl4AIProvider,
+    SafeHTTPError,
+    SafeResponse,
+    WebResult,
+    WebSearchResult,
+    check_url,
+    safe_get,
+    search_duckduckgo,
+)
 
 __version__ = "0.1.0"
 
@@ -79,7 +92,11 @@ __all__ = [
     "AgyConfig",
     "AgyRunner",
     "BaseEvaluator",
+    "BuiltinProvider",
+    "CitationPair",
+    "Claim",
     "CommandEvaluator",
+    "Crawl4AIProvider",
     "CriticFeedback",
     "CriticalityLevel",
     "DAGStateStore",
@@ -94,6 +111,8 @@ __all__ = [
     "PatchResult",
     "RiskLevel",
     "RunResult",
+    "SafeHTTPError",
+    "SafeResponse",
     "SpecStatus",
     "SubSpec",
     "SubTask",
@@ -106,11 +125,16 @@ __all__ = [
     "ToolLockViolationError",
     "UNTRUSTED_SOURCE_INSTRUCTION",
     "UntrustedSource",
+    "WebResult",
+    "WebSearchResult",
     "WorkerAgentConfig",
     "aggregate_critic_feedback",
     "apply_patch",
     "apply_unified_diff",
     "build_critic_prompt",
+    "check_report_citations",
+    "check_report_file",
+    "check_url",
     "detect_injection_risk",
     "detect_performance_issues",
     "detect_requirement_issues",
@@ -125,7 +149,10 @@ __all__ = [
     "read_external_source",
     "read_issue_tracker",
     "read_pdf_document",
+    "safe_get",
     "sanitize_delimiters",
+    "search_duckduckgo",
+    "triage_citation",
     "validate_tool_call",
     "wrap_untrusted_content",
 ]

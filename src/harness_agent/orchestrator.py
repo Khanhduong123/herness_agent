@@ -271,6 +271,17 @@ class AgentOrchestrator:
             f"{sub_id}.md",
         ]
 
+        m = re.match(r"^(\d+)(.*)", id_num)
+        if m:
+            num_val = int(m.group(1))
+            rest = m.group(2)
+            exact_names.extend(
+                [
+                    f"subtask_{num_val:02d}{rest}.md",
+                    f"subtask_{num_val:02d}.md",
+                ]
+            )
+
         for root in expanded_roots:
             candidate_base_dirs = [
                 os.path.join(root, ".ai", "plans"),
@@ -298,6 +309,14 @@ class AgentOrchestrator:
                                 entry.startswith(f"subtask_{id_num}_")
                                 or entry.startswith(f"subtask_{sub_id}_")
                                 or entry.startswith(f"{sub_id}_")
+                                or (
+                                    m
+                                    and (
+                                        entry.startswith(f"subtask_{num_val:02d}_")
+                                        if not rest or not rest.startswith("_")
+                                        else entry.startswith(f"subtask_{num_val:02d}{rest}")
+                                    )
+                                )
                                 or (
                                     id_num.isdigit()
                                     and entry.startswith(f"subtask_{int(id_num):02d}_")

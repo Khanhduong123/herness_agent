@@ -585,5 +585,138 @@ def scholar_search_cmd(query: str, limit: int, provider: str, is_json: bool) -> 
         click.echo("")
 
 
+@main.command(name="web-crawl")
+@click.argument("url")
+@click.option(
+    "--browser/--no-browser",
+    default=True,
+    help="Use headless browser (crawl4ai) or fast safe_http (builtin)",
+)
+@click.option("--json-output", "--json", "is_json", is_flag=True, help="Output as JSON")
+def web_crawl_cmd(url: str, browser: bool, is_json: bool) -> None:
+    """Crawl a web page and extract clean markdown enclosed in untrusted-source tags."""
+    from harness_agent.web.builtin import BuiltinProvider
+    from harness_agent.web.crawl4ai_provider import Crawl4AIProvider
+    from harness_agent.web.safe_http import SafeHTTPError
+
+    try:
+        if browser:
+            provider = Crawl4AIProvider()
+        else:
+            provider = BuiltinProvider()
+        result = provider.fetch(url)
+    except SafeHTTPError as exc:
+        click.secho(f"✗ SSRF / Security refusal: {exc}", fg="red")
+        sys.exit(1)
+    except Exception as exc:
+        click.secho(f"✗ Fetch failed: {exc}", fg="red")
+        sys.exit(1)
+
+    if is_json:
+        click.echo(result.model_dump_json(indent=2))
+        return
+
+    click.secho(f"\n=== Web Crawl Result: {result.title or result.url} ===", fg="cyan", bold=True)
+    click.echo(f"URL: {result.url}")
+    click.echo(f"Fetched at: {result.fetched_at}")
+    click.secho("\n--- Content (<untrusted-source>) ---", fg="yellow")
+    click.echo(result.wrapped_content or result.content)
+
+
+@main.command(name="web-search")
+@click.argument("query")
+@click.option("--limit", default=5, type=int, help="Maximum number of results to retrieve")
+@click.option("--json-output", "--json", "is_json", is_flag=True, help="Output as JSON")
+def web_search_cmd(query: str, limit: int, is_json: bool) -> None:
+    """Execute free web search via DuckDuckGo without API keys."""
+    from harness_agent.web.free_search import search_duckduckgo
+
+    try:
+        results = search_duckduckgo(query=query, max_results=limit)
+    except Exception as exc:
+        click.secho(f"✗ Search failed: {exc}", fg="red")
+        sys.exit(1)
+
+    if is_json:
+        click.echo(json.dumps([r.model_dump() for r in results], indent=2))
+        return
+
+    click.secho(f"\n=== Web Search Results for: '{query}' ===", fg="cyan", bold=True)
+    if not results:
+        click.secho("[-] No results found.", fg="yellow")
+        return
+
+    for item in results:
+        click.secho(f"[{item.rank}] {item.title}", fg="green", bold=True)
+        click.secho(f"    URL: {item.url}", fg="blue")
+        if item.snippet:
+            click.echo(f"    Snippet: {item.snippet}")
+        click.echo("")
+
+
+@main.command(name="cite-check")
+@click.argument("report_file", type=click.Path(exists=True))
+@click.option(
+    "--sources-dir",
+    default=None,
+    type=click.Path(exists=True, file_okay=False, dir_okay=True),
+    help="Directory containing source markdown/text files",
+)
+@click.option("--json-output", "--json", "is_json", is_flag=True, help="Output as JSON")
+def cite_check_cmd(report_file: str, sources_dir: Optional[str], is_json: bool) -> None:
+    """Audit report citations and verify claims against source documents."""
+    from harness_agent.citecheck import check_report_file
+
+    try:
+        report = check_report_file(report_path=report_file, sources_dir=sources_dir)
+    except Exception as exc:
+        click.secho(f"✗ Cite check failed: {exc}", fg="red")
+        sys.exit(1)
+
+    if is_json:
+        click.echo(report.model_dump_json(indent=2))
+        return
+
+    click.secho(
+        "\n================ Citation Verification Audit ================",
+        fg="cyan",
+        bold=True,
+    )
+    click.echo(f"Report File:         {report.report_file}")
+    click.echo(f"Total Sentences:     {report.total_sentences}")
+    click.echo(f"Total Citations:     {report.total_citations}")
+    click.secho(f"Supported Claims:    {report.supported}", fg="green")
+    if report.partially_supported:
+        click.secho(f"Partially Supported: {report.partially_supported}", fg="yellow")
+    if report.wrong_source:
+        click.secho(f"Wrong Source:        {report.wrong_source}", fg="magenta")
+    if report.unsupported:
+        click.secho(f"Unsupported Claims:  {report.unsupported}", fg="red")
+    if report.dangling:
+        click.secho(f"Dangling Citations:  {report.dangling}", fg="red")
+    click.echo(f"Pass Rate:           {report.pass_rate}%")
+
+    if report.pairs:
+        click.secho("\n--- Detailed Citation Verdicts ---", fg="cyan")
+        for idx, pair in enumerate(report.pairs, 1):
+            if pair.verdict == "supported":
+                color = "green"
+            elif pair.verdict == "partially-supported":
+                color = "yellow"
+            elif pair.verdict == "wrong-source":
+                color = "magenta"
+            else:
+                color = "red"
+            click.secho(
+                f"[{idx}] [{pair.verdict.upper()}] (Source: {pair.source_id})",
+                fg=color,
+                bold=True,
+            )
+            click.echo(f"    Sentence: {pair.sentence}")
+            if pair.details:
+                click.echo(f"    Details:  {pair.details}")
+            click.echo("")
+
+
 if __name__ == "__main__":
     main()
