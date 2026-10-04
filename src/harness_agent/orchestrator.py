@@ -150,12 +150,21 @@ class AgentOrchestrator:
             match = re.search(r"^---\s*\n(.*?)\n---", content, flags=re.DOTALL)
             if match:
                 frontmatter_data = yaml.safe_load(match.group(1))
-                if isinstance(frontmatter_data, dict) and "plan_id" in frontmatter_data:
+                if isinstance(frontmatter_data, dict):
+                    if "plan_id" not in frontmatter_data or not frontmatter_data.get("plan_id"):
+                        raise ValueError(
+                            f"Plan file '{file_path}' is missing mandatory 'plan_id' in frontmatter"
+                        )
                     return OrchestrationPlan(**frontmatter_data)
 
         data = yaml.safe_load(content)
         if not isinstance(data, dict):
-            raise ValueError(f"Invalid plan format in {file_path}")
+            raise ValueError(
+                f"Invalid plan format in {file_path}. Plans must be valid YAML or Markdown with "
+                "YAML frontmatter containing mandatory 'plan_id' and 'goal'."
+            )
+        if "plan_id" not in data or not data.get("plan_id"):
+            raise ValueError(f"Plan file '{file_path}' is missing mandatory 'plan_id'")
         return OrchestrationPlan(**data)
 
     @classmethod
@@ -384,7 +393,8 @@ class AgentOrchestrator:
         """
         task_results = task_results or {}
         lines = [
-            f"# Role: {worker.name} ({worker.role.value.upper()})",
+            f"# Role: {worker.name} ({worker.role.value.upper()}) - Dedicated Domain Expert",
+            f"Plan ID: {plan.plan_id}",
             f"Overall Objective: {plan.goal}",
             "",
             "## Mandatory System Guidelines & Rules (AGENTS.md):",
@@ -393,6 +403,11 @@ class AgentOrchestrator:
                 "performing any action."
             ),
             "You MUST strictly comply with the following environment and architectural standards:",
+            (
+                "- **Domain Focus:** You are a specialized domain expert "
+                "assigned strictly to this 1 task. "
+                "Focus exclusively on this task and do not deviate or modify unrelated code."
+            ),
             (
                 "- **Conda Environment:** Mandatory to use the `pytorch` environment "
                 "(`conda run -n pytorch <command>`)."
@@ -414,7 +429,8 @@ class AgentOrchestrator:
                 "(never commit directly to `main`), conventional commits (`feat:`, `fix:`, etc.)."
             ),
             "",
-            f"## Assigned SubTask: {subtask.name} (ID: {subtask.id})",
+            f"## Assigned SubTask: {subtask.name} (Plan ID: {plan.plan_id}, Task ID: {subtask.id})",
+            "Expert Role: Dedicated Domain Expert",
             f"Instruction:\n{subtask.instruction}",
         ]
 

@@ -30,7 +30,7 @@ Before writing any code or Sub-Spec, operate in read-only mode:
 - Map dependencies between components
 - Note risks and unknowns
 
-**Do NOT write code during planning.** The output is a plan document saved to the project folder at `.ai/plan/plan.md` (or `.ai/plan/[plan_name].md`), which outlines the sequence of Sub-Specs to generate.
+**Do NOT write code during planning.** The output is a master plan document saved to the project folder at `.ai/plan/main_[plan_id].md` (with YAML frontmatter containing mandatory `plan_id` and `goal`), which outlines the sequence of Sub-Specs to generate.
 
 ### Step 2: Identify Dependencies & Parallel Execution (DAG)
 
@@ -82,6 +82,9 @@ Each task defined in the plan should follow this structure. Later, each task wil
 ```markdown
 ## Task [N]: [Short descriptive title]
 
+**Plan ID:** `plan_[feature_name]`
+**Task ID:** `subtask_[N]_[slug]`
+**Assigned Role:** `coder` (Dedicated Domain Expert)
 **Description:** One paragraph explaining what this task accomplishes.
 
 **Acceptance criteria:**

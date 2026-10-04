@@ -305,6 +305,9 @@ class SubTask(BaseModel):
     """A decomposed subtask to be executed by a designated worker agent."""
 
     id: str = Field(..., description="Unique subtask identifier")
+    plan_id: Optional[str] = Field(
+        default=None, description="Identifier of the parent orchestration plan"
+    )
     name: str = Field(..., description="Human-readable subtask name")
     role: AgentRole = Field(
         default=AgentRole.CODER, description="Worker role responsible for this subtask"
@@ -383,6 +386,12 @@ class OrchestrationPlan(BaseModel):
         default=True,
         description="Enable lazy context loading: pass only assigned subtask spec and interfaces",
     )
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        for task in self.tasks:
+            if not task.plan_id and self.plan_id:
+                task.plan_id = self.plan_id
 
 
 class OrchestrationResult(BaseModel):
