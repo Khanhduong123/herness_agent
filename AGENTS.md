@@ -98,7 +98,12 @@ All agents must strictly adhere to the following environment rules:
 
 - **Separation of Concerns**: Python source code (`src/`) must NEVER call Git programmatically (e.g., no `subprocess` or `GitPython`).
 - **Direct Execution**: All Git actions must be performed directly via the `agy` CLI in the terminal.
-- **Branch Protection**: Never commit directly to `main`. Always work on a dedicated branch (`feat/...`, `fix/...`).
+- **Strict Branch Protection & Automated Merge Lock**:
+  - **Protected Branches:** `main`, `master`, `dev`, `develop`.
+  - **NO AUTOMATED MERGING:** All AI agents (Orchestrator, Coder, Tester) and scripts are **STRICTLY FORBIDDEN** from automatically merging feature or bugfix branches into `main` or `dev`.
+  - **NO DIRECT COMMITTING:** Committing directly to `main`, `master`, `dev`, or `develop` is strictly blocked (enforced via `.pre-commit-config.yaml` `no-commit-to-branch` hook).
+  - **HUMAN-ONLY MERGE AUTHORITY:** Merging code into `main` or `dev` is exclusively reserved for the human user.
+  - **Dedicated Branches Only:** Always work exclusively on dedicated branches (`feat/...`, `fix/...`, `agent/...`).
 - **Conventional Commits**: Use `feat:`, `fix:`, `test:`, `docs:`, `refactor:`. Always inspect `git status` and `git diff` before committing.
 - **Rule Sync on Main Only**: Updates to standard rules and SDLC skills must only be pulled/synced into the `main` branch, not in-flight feature branches.
 

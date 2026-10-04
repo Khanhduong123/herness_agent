@@ -28,13 +28,15 @@ This skill defines the mandatory protocol every AI agent must execute **BEFORE**
 
 ## 1. Git & Environment Verification
 - [ ] **Working Tree Check**: Run `git status` to verify there are no uncommitted or conflicting changes.
-- [ ] **Branch Protection**: Verify current branch is NOT `main`.
-  - If on `main`, immediately create and checkout a dedicated feature branch:
+- [ ] **Protected Branch & Automated Merge Guard**:
+  - Verify current branch is NOT `main`, `master`, `dev`, or `develop`.
+  - If on a protected branch, immediately create and checkout a dedicated feature branch:
     ```bash
     git checkout -b feat/<task-name>
     # or for bugfixes:
     git checkout -b fix/<bug-name>
     ```
+  - **NEVER attempt to merge into `main` or `dev`.** Merging into protected branches is exclusively reserved for the human user.
 - [ ] **Conda Environment**: Confirm active environment is `pytorch`:
   ```powershell
   conda run -n pytorch python --version
