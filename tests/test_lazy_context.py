@@ -145,6 +145,94 @@ def test_lazy_context_loads_subtask_plan_file(tmp_path):
     assert "Detailed requirements for Feature A only." not in prompt_2
 
 
+def test_lazy_context_loads_subtask_plan_date_based(tmp_path):
+    """Orchestrator explicitly resolves and reads subtask specs
+    from .ai/plans/subtasks/YYYY-MM-DD/.
+    """
+    plan_dir = tmp_path / ".ai" / "plans" / "subtasks" / "2026-10-04"
+    plan_dir.mkdir(parents=True)
+
+    plan_subtask_1 = plan_dir / "subtask_1_feature_a.md"
+    plan_subtask_1.write_text(
+        "# Subtask 1: Feature A Specification\n\nDetailed requirements for Feature A only.",
+        encoding="utf-8",
+    )
+
+    plan_subtask_2 = plan_dir / "subtask_2_feature_b.md"
+    plan_subtask_2.write_text(
+        "# Subtask 2: Feature B Specification\n\nDetailed requirements for Feature B only.",
+        encoding="utf-8",
+    )
+
+    plan = OrchestrationPlan(
+        plan_id="plan_date_based_test",
+        goal="Build two features",
+        tasks=[
+            SubTask(
+                id="1",
+                name="Feature A",
+                role=AgentRole.CODER,
+                instruction="Implement Feature A",
+            ),
+            SubTask(
+                id="2",
+                name="Feature B",
+                role=AgentRole.CODER,
+                instruction="Implement Feature B",
+            ),
+        ],
+    )
+
+    orchestrator = AgentOrchestrator()
+    worker = orchestrator.DEFAULT_WORKERS[AgentRole.CODER]
+
+    prompt_1 = orchestrator._build_worker_prompt(
+        plan=plan,
+        subtask=plan.tasks[0],
+        worker=worker,
+        workspace_dir=str(tmp_path),
+    )
+    assert "Detailed requirements for Feature A only." in prompt_1
+    assert "Detailed requirements for Feature B only." not in prompt_1
+
+    prompt_2 = orchestrator._build_worker_prompt(
+        plan=plan,
+        subtask=plan.tasks[1],
+        worker=worker,
+        workspace_dir=str(tmp_path),
+    )
+    assert "Detailed requirements for Feature B only." in prompt_2
+    assert "Detailed requirements for Feature A only." not in prompt_2
+
+
+def test_lazy_context_subtask_plan_fallback_to_legacy(tmp_path):
+    """Orchestrator falls back to legacy .ai/plan/ when not found in date-based subtasks."""
+    legacy_dir = tmp_path / ".ai" / "plan"
+    legacy_dir.mkdir(parents=True)
+
+    legacy_subtask = legacy_dir / "subtask_legacy_feature.md"
+    legacy_subtask.write_text(
+        "# Legacy Feature Specification\n\nFallback content from legacy .ai/plan/",
+        encoding="utf-8",
+    )
+
+    subtask = SubTask(
+        id="legacy_feature",
+        name="Legacy Feature",
+        role=AgentRole.CODER,
+        instruction="Work on legacy feature",
+    )
+
+    orchestrator = AgentOrchestrator()
+    resolved = orchestrator.resolve_subtask_plan_file(subtask, workspace_dir=str(tmp_path))
+    assert resolved is not None
+    assert "subtask_legacy_feature.md" in resolved
+
+    content = orchestrator.read_subtask_plan(subtask, workspace_dir=str(tmp_path))
+    assert content is not None
+    assert "Fallback content from legacy .ai/plan/" in content
+
+
 def test_lazy_context_passes_specific_interface_files(tmp_path):
     """Pass specific interface files (e.g. schema Pydantic files),
     ignoring the rest of the codebase.
@@ -197,6 +285,31 @@ def test_lazy_context_passes_specific_interface_files(tmp_path):
     # Unrelated codebase files are completely ignored
     assert "PrivateDBPool" not in prompt
     assert "execute_raw_sql" not in prompt
+
+
+def test_lazy_context_rejects_interface_file_traversal(tmp_path):
+    """Verify that interface files attempting directory traversal outside
+    workspace are rejected.
+    """
+    outside_file = tmp_path.parent / "sensitive.env"
+    outside_file.write_text("SUPER_SECRET_KEY=12345", encoding="utf-8")
+
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+
+    subtask = SubTask(
+        id="test_traversal",
+        name="Traversal Test",
+        role=AgentRole.CODER,
+        instruction="Read interface",
+        interface_files=["../sensitive.env", str(outside_file)],
+    )
+
+    orchestrator = AgentOrchestrator()
+    interfaces = orchestrator.read_interface_files(subtask, workspace_dir=str(ws))
+    assert "SUPER_SECRET_KEY" not in str(interfaces)
+    assert "Security rejection" in interfaces["../sensitive.env"]
+    assert "Security rejection" in interfaces[str(outside_file)]
 
 
 @pytest.mark.asyncio
@@ -263,10 +376,29 @@ async def test_dispatch_subtask_executes_with_lazy_context(tmp_path, monkeypatch
 
 
 def test_real_repo_subtask_plan_resolution():
-    """Verify that orchestrator resolves actual repository .ai/plan/subtask_3_lazy_context.md."""
+    """Verify that orchestrator resolves actual repository date-based subtask plan."""
     orchestrator = AgentOrchestrator()
     subtask = SubTask(
         id="3",
+        name="AGENTS.md and Skills",
+        role=AgentRole.CODER,
+        instruction="Update AGENTS.md and SDLC Skills to Date-Based Standard",
+    )
+
+    resolved = orchestrator.resolve_subtask_plan_file(subtask)
+    assert resolved is not None
+    assert "subtask_3_agents_md_skills.md" in resolved
+
+    content = orchestrator.read_subtask_plan(subtask)
+    assert content is not None
+    assert "subtask_3_agents_md_skills" in content
+
+
+def test_real_repo_legacy_subtask_plan_fallback():
+    """Verify that orchestrator falls back to actual repository legacy .ai/plan/ for old tasks."""
+    orchestrator = AgentOrchestrator()
+    subtask = SubTask(
+        id="subtask_3_lazy_context",
         name="Lazy Context Loading",
         role=AgentRole.CODER,
         instruction="Implement lazy context loading",

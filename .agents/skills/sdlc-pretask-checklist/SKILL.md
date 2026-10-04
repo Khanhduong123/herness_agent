@@ -17,7 +17,7 @@ This skill defines the mandatory protocol every AI agent must execute **BEFORE**
 - [ ] **Orchestrator Role Lock (CRITICAL)**:
   - **Are you the Central Orchestrator?**
     - If **YES**: **STOP IMMEDIATELY BEFORE MODIFYING ANY APPLICATION CODE.** The Orchestrator is strictly forbidden from writing or editing source code (`src/`, `tests/`). Your deliverable is exclusively:
-      1. Create Master Plan in `.ai/plan/main_[plan_id].md` and Sub-Specs in `.ai/plan/subtask_[task_id].md`.
+      1. Create Master Plan in `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` and Sub-Specs in `.ai/plans/subtasks/YYYY-MM-DD/subtask_[task_id].md`.
       2. Request User Approval.
       3. Create isolated workspace (`agent/[task_id]`).
       4. Dispatch to a dedicated Coder Worker Agent (`herdr agent start worker_[task_id] --kind agy`).

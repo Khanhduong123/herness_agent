@@ -30,7 +30,7 @@ Before writing any code or Sub-Spec, operate in read-only mode:
 - Map dependencies between components
 - Note risks and unknowns
 
-**Do NOT write code during planning.** The output is a master plan document saved to the project folder at `.ai/plan/main_[plan_id].md` (with YAML frontmatter containing mandatory `plan_id` and `goal`), which outlines the sequence of Sub-Specs to generate.
+**Do NOT write code during planning.** The output is a master plan document saved to the project folder at `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` (with YAML frontmatter containing mandatory `plan_id` and `goal`), which outlines the sequence of Sub-Specs to generate.
 
 ### Step 2: Identify Dependencies & Parallel Execution (DAG)
 
@@ -77,7 +77,7 @@ Each vertical slice delivers working, testable functionality.
 
 ### Step 4: Write Task Breakdown (Before Generating Sub-Specs)
 
-Each task defined in the plan should follow this structure. Later, each task will be formally expanded using the `sdlc-subtask-specifier` skill into its own `.ai/plan/subtask_[id].md` file.
+Each task defined in the plan should follow this structure. Later, each task will be formally expanded using the `sdlc-subtask-specifier` skill into its own `.ai/plans/subtasks/YYYY-MM-DD/subtask_[id].md` file.
 
 ```markdown
 ## Task [N]: [Short descriptive title]
@@ -135,8 +135,8 @@ If a task is L or larger, it should be broken into smaller tasks.
 
 ## Output Files
 
-- **Plan document:** Save the implementation plan to the project folder at `.ai/plan/plan.md` (do not save it to a separate artifact folder).
-- **Next Step:** Once the plan is approved by the user, the Orchestrator will use `sdlc-subtask-specifier` to generate individual `.ai/plan/subtask_[task_id].md` files for each task in the plan.
+- **Plan document:** Save the implementation plan to the project folder at `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` (do not save it to a separate artifact folder).
+- **Next Step:** Once the plan is approved by the user, the Orchestrator will use `sdlc-subtask-specifier` to generate individual `.ai/plans/subtasks/YYYY-MM-DD/subtask_[task_id].md` files for each task in the plan.
 
 ## Verification
 
@@ -144,4 +144,4 @@ Before finishing the planning phase, confirm:
 - [ ] Task dependencies are identified and ordered correctly (DAG).
 - [ ] No task touches more than ~5 files (M size max).
 - [ ] Tasks are sliced vertically (delivering complete features).
-- [ ] The human has reviewed and approved the plan in `.ai/plan/plan.md`.
+- [ ] The human has reviewed and approved the plan in `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md`.

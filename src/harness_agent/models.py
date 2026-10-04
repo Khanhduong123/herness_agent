@@ -342,7 +342,9 @@ class SubTask(BaseModel):
     tags: List[str] = Field(default_factory=list, description="Tags for categorization")
     plan_file: Optional[str] = Field(
         default=None,
-        description="Path to specific subtask plan markdown file (e.g. .ai/plan/subtask_[id].md)",
+        description=(
+            "Path to detailed subtask plan file (e.g. .ai/plans/subtasks/YYYY-MM-DD/subtask_1.md)"
+        ),
     )
     plan_content: Optional[str] = Field(
         default=None,

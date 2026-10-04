@@ -92,8 +92,8 @@ Concrete test scenarios must be defined before code implementation:
 
 
 ### 2.7. Storage & Approval Workflow
-- **Storage**: The Orchestrator MUST save every generated `sub-spec` locally as a Markdown file in the project's `.ai/plan/` directory (e.g., `.ai/plan/subtask_01_feature.md`).
-- **User Approval**: After saving the file, the Orchestrator MUST ask the User for approval (e.g., *"Please review the sub-spec at `.ai/plan/subtask_01_feature.md`"*).
+- **Storage**: The Orchestrator MUST save every generated `sub-spec` locally as a Markdown file in the project's `.ai/plans/subtasks/YYYY-MM-DD/` directory (e.g., `.ai/plans/subtasks/YYYY-MM-DD/subtask_01_feature.md`).
+- **User Approval**: After saving the file, the Orchestrator MUST ask the User for approval (e.g., *"Please review the sub-spec at `.ai/plans/subtasks/YYYY-MM-DD/subtask_01_feature.md`"*).
 - **Execution**: The Orchestrator MUST NOT spawn the Sub-Agent until the User explicitly approves the Sub-Spec.
 
 ---
