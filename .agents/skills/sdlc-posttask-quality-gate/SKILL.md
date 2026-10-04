@@ -56,3 +56,20 @@ This skill defines the mandatory verification gates that must pass **AFTER** com
   - No secrets, tokens, or hardcoded passwords.
   - Formatting matches the surrounding codebase.
   - **Patch-Only Compliance**: Verify the diff is minimal and atomic; ensure no existing files were rewritten in full or had unrelated lines modified.
+
+---
+
+## 5. Remote Push & Pull Request Creation Gate
+After committing to the dedicated feature or fix branch and completing the quality checks:
+1. **Push Branch to Remote**:
+   The agent **MUST automatically push** the local branch to the remote repository:
+   ```powershell
+   git push -u origin <branch-name>
+   ```
+2. **Create Pull Request**:
+   The agent **MUST create a Pull Request** targeting `main` (or `dev`) via GitHub CLI (`gh`) or GitHub REST API:
+   ```powershell
+   gh pr create --base main --head <branch-name> --title "feat/fix: <description>" --body "<detailed PR description>"
+   ```
+3. **Report PR Link to User**:
+   The agent **MUST provide the resulting Pull Request URL directly to the user** in the response. Under no circumstances should the agent merge the PR into protected branches (merging remains exclusively the human user's authority).

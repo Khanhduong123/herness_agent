@@ -54,3 +54,19 @@ This skill guides the final staging and commit phase of the SDLC workflow.
    git commit -m "feat(scope): concise explanation of change"
    ```
 4. Confirm pre-commit hooks pass cleanly.
+5. Push branch to remote:
+   ```powershell
+   git push -u origin <branch-name>
+   ```
+6. Create Pull Request targeting `main` (or `dev`) via GitHub CLI (`gh`) or GitHub REST API:
+   ```powershell
+   gh pr create --base main --head <branch-name> --title "feat(scope): concise explanation" --body "Summary of changes"
+   ```
+7. Provide the resulting PR link directly to the user.
+
+---
+
+## 4. Remote Push & Pull Request Protocol
+- **Automatic Push**: After committing changes to a feature or fix branch, the agent **MUST automatically push** the branch to the remote repository.
+- **Pull Request Creation**: The agent **MUST create a Pull Request** targeting `main` (or `dev`) using GitHub CLI (`gh`) or the GitHub REST API.
+- **User Notification**: The agent **MUST output the PR URL** to the user so the human reviewer can inspect and merge. Automated merging to protected branches remains strictly prohibited.

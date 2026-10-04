@@ -105,6 +105,10 @@ All agents must strictly adhere to the following environment rules:
   - **HUMAN-ONLY MERGE AUTHORITY:** Merging code into `main` or `dev` is exclusively reserved for the human user.
   - **Dedicated Branches Only:** Always work exclusively on dedicated branches (`feat/...`, `fix/...`, `agent/...`).
 - **Conventional Commits**: Use `feat:`, `fix:`, `test:`, `docs:`, `refactor:`. Always inspect `git status` and `git diff` before committing.
+- **Automated Remote Push & Pull Request Creation**:
+  - After each feature or fix branch is committed, the agent **MUST automatically push** the branch to the remote repository (`git push -u origin <branch-name>`).
+  - The agent **MUST create a Pull Request** targeting `main` (or `dev`) via the GitHub CLI (`gh pr create --base main --head <branch-name> --title "..." --body "..."`) or GitHub REST API.
+  - The agent **MUST provide the resulting PR link directly to the user** for human review and merge authorization.
 - **Rule Sync on Main Only**: Updates to standard rules and SDLC skills must only be pulled/synced into the `main` branch, not in-flight feature branches.
 
 ---
