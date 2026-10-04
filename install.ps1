@@ -96,12 +96,20 @@ if (Test-Path $AgentMd) {
     Write-Host "  [+] Created Agent.md" -ForegroundColor Green
 }
 
-# 2. Copy pre-commit config if not exists
+# 2. Copy or update pre-commit config (ensuring branch protection hooks)
 $TargetPreCommit = Join-Path $ResolvedTarget ".pre-commit-config.yaml"
 $SourcePreCommit = Join-Path $ScriptDir ".pre-commit-config.yaml"
-if ((-not (Test-Path $TargetPreCommit)) -and (Test-Path $SourcePreCommit)) {
-    Copy-Item -Path $SourcePreCommit -Destination $TargetPreCommit -Force
-    Write-Host "  [+] Created .pre-commit-config.yaml" -ForegroundColor Green
+if (Test-Path $SourcePreCommit) {
+    if (-not (Test-Path $TargetPreCommit)) {
+        Copy-Item -Path $SourcePreCommit -Destination $TargetPreCommit -Force
+        Write-Host "  [+] Created .pre-commit-config.yaml (Branch protection active)" -ForegroundColor Green
+    } else {
+        $content = Get-Content $TargetPreCommit -Raw -ErrorAction SilentlyContinue
+        if ($content -notmatch "no-commit-to-branch") {
+            Copy-Item -Path $SourcePreCommit -Destination $TargetPreCommit -Force
+            Write-Host "  [+] Updated .pre-commit-config.yaml with no-commit-to-branch protection" -ForegroundColor Green
+        }
+    }
 }
 
 # 3. Copy sample orchestrator plan
@@ -193,6 +201,21 @@ try {
     }
 } catch {
     # Non-critical registration
+}
+
+# 8. Install Git Pre-commit Hooks in target if it is a Git repo
+$TargetGit = Join-Path $ResolvedTarget ".git"
+if (Test-Path $TargetGit) {
+    if (Get-Command pre-commit -ErrorAction SilentlyContinue) {
+        Push-Location $ResolvedTarget
+        try {
+            pre-commit install | Out-Null
+            Write-Host "  [+] Activated Git pre-commit hooks (Protected branches: main, dev)" -ForegroundColor Green
+        } catch {}
+        finally {
+            Pop-Location
+        }
+    }
 }
 
 Write-Host ""

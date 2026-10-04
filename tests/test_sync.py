@@ -18,6 +18,16 @@ def test_sync_single_project(tmp_path):
     assert (target / "custom_app.py").exists()
     assert (target / "AGENTS.md").exists()
     assert (target / ".agents" / "skills" / "sdlc-clean-code-standards" / "SKILL.md").exists()
+    assert (target / ".pre-commit-config.yaml").exists()
+
+    pre_commit_content = (target / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    assert "no-commit-to-branch" in pre_commit_content
+    assert "dev" in pre_commit_content
+    assert "main" in pre_commit_content
+
+    agents_content = (target / "AGENTS.md").read_text(encoding="utf-8")
+    assert "RULE 0: ZERO-TOLERANCE CODE-WRITING LOCK" in agents_content
+    assert "NO AUTOMATED MERGING" in agents_content
 
 
 def test_sync_all_projects(tmp_path):

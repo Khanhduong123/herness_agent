@@ -17,6 +17,15 @@ def test_init_creates_files(tmp_path):
     assert (target / ".agents" / "skills" / "sdlc-pretask-checklist" / "SKILL.md").exists()
     assert (target / ".agents" / "skills" / "sdlc-posttask-quality-gate" / "SKILL.md").exists()
 
+    pre_commit_content = (target / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    assert "no-commit-to-branch" in pre_commit_content
+    assert "dev" in pre_commit_content
+    assert "main" in pre_commit_content
+
+    agents_content = (target / "AGENTS.md").read_text(encoding="utf-8")
+    assert "RULE 0: ZERO-TOLERANCE CODE-WRITING LOCK" in agents_content
+    assert "NO AUTOMATED MERGING" in agents_content
+
 
 def test_init_existing_directory_prompt_cancel(tmp_path):
     runner = CliRunner()

@@ -72,10 +72,15 @@ if [ -f "$SCRIPT_DIR/Agent.md" ]; then
     echo "  [✓] Created Agent.md"
 fi
 
-# 2. Copy pre-commit config if not exists
-if [ ! -f "$TARGET_DIR/.pre-commit-config.yaml" ] && [ -f "$SCRIPT_DIR/.pre-commit-config.yaml" ]; then
-    cp "$SCRIPT_DIR/.pre-commit-config.yaml" "$TARGET_DIR/.pre-commit-config.yaml"
-    echo "  [✓] Created .pre-commit-config.yaml"
+# 2. Copy or update pre-commit config (ensuring branch protection hooks)
+if [ -f "$SCRIPT_DIR/.pre-commit-config.yaml" ]; then
+    if [ ! -f "$TARGET_DIR/.pre-commit-config.yaml" ]; then
+        cp "$SCRIPT_DIR/.pre-commit-config.yaml" "$TARGET_DIR/.pre-commit-config.yaml"
+        echo "  [✓] Created .pre-commit-config.yaml (Branch protection active)"
+    elif ! grep -q "no-commit-to-branch" "$TARGET_DIR/.pre-commit-config.yaml" 2>/dev/null; then
+        cp "$SCRIPT_DIR/.pre-commit-config.yaml" "$TARGET_DIR/.pre-commit-config.yaml"
+        echo "  [✓] Updated .pre-commit-config.yaml with branch protection hook"
+    fi
 fi
 
 # 3. Copy sample orchestrator plan
@@ -142,6 +147,12 @@ projects.add('$TARGET_DIR')
 with open(reg_file, 'w') as f:
     json.dump(sorted(list(projects)), f, indent=2)
 " 2>/dev/null || true
+
+# 8. Install Git Pre-commit Hooks in target if it is a Git repo
+if [ -d "$TARGET_DIR/.git" ] && command -v pre-commit >/dev/null 2>&1; then
+    (cd "$TARGET_DIR" && pre-commit install >/dev/null 2>&1 || true)
+    echo "  [✓] Activated Git pre-commit hooks (Protected branches: main, dev)"
+fi
 
 echo ""
 echo "========================================================================"
