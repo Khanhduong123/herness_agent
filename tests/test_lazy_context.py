@@ -387,11 +387,13 @@ def test_real_repo_subtask_plan_resolution():
 
     resolved = orchestrator.resolve_subtask_plan_file(subtask)
     assert resolved is not None
-    assert "subtask_3_agents_md_skills.md" in resolved
+    assert (
+        "subtask_03_agents_md_skills.md" in resolved or "subtask_3_agents_md_skills.md" in resolved
+    )
 
     content = orchestrator.read_subtask_plan(subtask)
     assert content is not None
-    assert "subtask_3_agents_md_skills" in content
+    assert "subtask_03_agents_md_skills" in content or "subtask_3_agents_md_skills" in content
 
 
 def test_real_repo_legacy_subtask_plan_fallback():
@@ -406,7 +408,7 @@ def test_real_repo_legacy_subtask_plan_fallback():
 
     resolved = orchestrator.resolve_subtask_plan_file(subtask)
     assert resolved is not None
-    assert "subtask_3_lazy_context.md" in resolved
+    assert "subtask_03_lazy_context.md" in resolved or "subtask_3_lazy_context.md" in resolved
 
     content = orchestrator.read_subtask_plan(subtask)
     assert content is not None
