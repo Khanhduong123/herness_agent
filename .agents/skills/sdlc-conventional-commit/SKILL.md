@@ -68,5 +68,6 @@ This skill guides the final staging and commit phase of the SDLC workflow.
 
 ## 4. Remote Push & Pull Request Protocol
 - **Automatic Push**: After committing changes to a feature or fix branch, the agent **MUST automatically push** the branch to the remote repository.
-- **Pull Request Creation**: The agent **MUST create a Pull Request** targeting `main` (or `dev`) using GitHub CLI (`gh`) or the GitHub REST API.
+- **Pull Request Creation & Template Compliance**: The agent **MUST create a Pull Request** targeting `main` (or `dev`) using GitHub CLI (`gh`) or the GitHub REST API.
+  - The PR body **MUST strictly populate `.github/pull_request_template.md`** (Description, Type of change, Test Configuration, Test Evidence / console output, and Checklist).
 - **User Notification**: The agent **MUST output the PR URL** to the user so the human reviewer can inspect and merge. Automated merging to protected branches remains strictly prohibited.

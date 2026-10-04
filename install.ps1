@@ -132,6 +132,14 @@ if (Test-Path $SourceAgents) {
     Write-Host "  [+] Copied SDLC Skills to .agents\skills\" -ForegroundColor Green
 }
 
+# 4b. Copy GitHub Templates
+$SourceGithub = Join-Path $ScriptDir ".github"
+$TargetGithub = Join-Path $ResolvedTarget ".github"
+if (Test-Path $SourceGithub) {
+    Copy-Item -Path $SourceGithub -Destination $TargetGithub -Recurse -Force
+    Write-Host "  [+] Copied GitHub templates to .github\" -ForegroundColor Green
+}
+
 # 5. Initialize 3-tier planning directories
 $PlanDirs = @(
     ".runs",
