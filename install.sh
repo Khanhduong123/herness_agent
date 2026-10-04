@@ -97,6 +97,13 @@ if [ -d "$SCRIPT_DIR/.agents" ]; then
     echo "  [✓] Copied SDLC Skills to .agents/skills/"
 fi
 
+# 4b. Copy GitHub Templates
+if [ -d "$SCRIPT_DIR/.github" ]; then
+    mkdir -p "$TARGET_DIR/.github"
+    cp -r "$SCRIPT_DIR/.github"/* "$TARGET_DIR/.github/"
+    echo "  [✓] Copied GitHub templates to .github/"
+fi
+
 # 5. Initialize 3-tier planning directories
 mkdir -p "$TARGET_DIR/.runs"
 mkdir -p "$TARGET_DIR/.ai/plans/main"

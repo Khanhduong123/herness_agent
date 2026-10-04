@@ -13,7 +13,7 @@
 > 3. **YOUR ORCHESTRATOR WORKFLOW IS STRICTLY**:
 >    - **Decompose & Plan**: Formulate a Task DAG with mandatory `plan_id` in `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` and Sub-Specs in `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[task_id].md`.
 >    - **Wait for User Approval**: Present the plan to the user before any workspace setup or worker launch.
->    - **Setup Workspace**: Create an isolated git worktree via Herdr (`herdr workspace create agent/[task_id]`).
+>    - **Setup Workspace**: Create an isolated git worktree via Herdr (`herdr worktree create --branch agent/<task_id>`).
 >    - **Dispatch to Worker**: Launch a specialized Coder Agent (`herdr agent start worker_[task_id] --kind agy --pane <pane>` or `harness-agent orchestrate`).
 >    - **Quality Gate & Critics**: Dispatch diffs in parallel to the 3 Adversarial Critics and verify 100% pytest pass rate.
 
@@ -50,9 +50,9 @@ graph TD
 
 | Role | Identifier | Key Responsibilities |
 | :--- | :--- | :--- |
-| **Orchestrator** | `orchestrator` | • Receives the goal from the User.<br/>• Decomposes the goal into a Task DAG.<br/>• **CRITICAL RULE:** NEVER write or edit code files directly. Wait for approval, create a git worktree, and setup a Herdr workspace.<br/>• **CRITICAL RULE (Mandatory Plan ID & Local Storage):** DO NOT create UI Artifacts. MUST explicitly write all plans directly to `.ai/plans/main/YYYY-MM-DD/` and `.ai/plans/subtasks/YYYY-MM-DD/` using standard file paths. Every plan MUST declare a unique `plan_id` (e.g., `plan_[feature_name]`). Master Task DAGs MUST be stored as `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` with YAML frontmatter containing `plan_id`. Individual Sub-Specs MUST be stored in dedicated plan folders with 2-digit zero-padded numbers: `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[task_id].md` referencing both `Plan ID: [plan_id]` and `Task ID: [task_id]`. This prevents file overwriting across multiple plans and guarantees clean numerical ordering.<br/>• **CRITICAL RULE (Sub-Agent Domain Expertise):** Every sub-agent MUST be a dedicated domain expert focused exclusively on that 1 assigned task and MUST strictly adhere to system rules.<br/>• **DO NOT run `agy` in the background**. Launch interactively (`herdr agent start worker_[task_id] --kind agy --pane <pane_id>`) and send prompts via `herdr agent prompt`.<br/>• **MANDATORY:** Must check if the CLI ran and wait for the completion signal before proceeding. |
+| **Orchestrator** | `orchestrator` | • Receives the goal from the User.<br/>• Decomposes the goal into a Task DAG.<br/>• **CRITICAL RULE:** NEVER write or edit code files directly. Wait for approval, and create an isolated git worktree via Herdr (`herdr worktree create --branch agent/<task_id>`).<br/>• **CRITICAL RULE (Mandatory Plan ID & Local Storage):** DO NOT create UI Artifacts. MUST explicitly write all plans directly to `.ai/plans/main/YYYY-MM-DD/` and `.ai/plans/subtasks/YYYY-MM-DD/` using standard file paths. Every plan MUST declare a unique `plan_id` (e.g., `plan_[feature_name]`). Master Task DAGs MUST be stored as `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` with YAML frontmatter containing `plan_id`. Individual Sub-Specs MUST be stored in dedicated plan folders with 2-digit zero-padded numbers: `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[task_id].md` referencing both `Plan ID: [plan_id]` and `Task ID: [task_id]`. This prevents file overwriting across multiple plans and guarantees clean numerical ordering.<br/>• **CRITICAL RULE (Sub-Agent Domain Expertise):** Every sub-agent MUST be a dedicated domain expert focused exclusively on that 1 assigned task and MUST strictly adhere to system rules.<br/>• **DO NOT run `agy` in the background**. Launch interactively (`herdr agent start worker_[task_id] --kind agy --pane <pane_id>`) and send prompts via `herdr agent prompt worker_[task_id] "..."`.<br/>• **MANDATORY Completion Contract & Timeout:** Must monitor worker execution. Worker signals completion by outputting `[WORKER_COMPLETED]` or writing `.ai/status/<task_id>.complete`. Orchestrator enforces a strict timeout ceiling (10–15 minutes max) to prevent deadlocks if the worker hangs or prompts for input. |
 | **Researcher** | `researcher` | • Explores the codebase, dependencies, and available libraries.<br/>• Designs architectural blueprints before implementation begins. |
-| **Coder** | `coder`, `agent-backend`, etc. | • Implements feature code, strictly adhering to PEP 8, typing, and the provided spec.<br/>• **CRITICAL RULE ("Patch, Never Regenerate"):** MUST NEVER rewrite or overwrite entire existing files. MUST ONLY apply minimal diff hunks using patch-based tools (`apply_patch`, `replace_file_content`, `multi_replace_file_content`). Full-file overwrites are tool-locked and strictly forbidden.<br/>• **Domain Expert Rule:** The Orchestrator configures this sub-agent as a specialized domain expert (e.g., `agent-backend` for APIs) strictly dedicated to its 1 assigned subtask and compliant with all quality gates. |
+| **Coder** | `coder`, `agent-backend`, etc. | • Implements feature code, strictly adhering to PEP 8, typing, and the provided spec.<br/>• **CRITICAL RULE ("Patch, Never Regenerate"):** For existing files, MUST NEVER rewrite or overwrite the entire file; MUST ONLY apply minimal diff hunks using patch tools (`apply_patch`, `replace_file_content`, `multi_replace_file_content`). Full-file overwrites on existing files are strictly tool-locked. For newly created files (new modules or tests), `write_to_file` is explicitly permitted.<br/>• **Domain Expert Rule:** The Orchestrator configures this sub-agent as a specialized domain expert (e.g., `agent-backend` for APIs) strictly dedicated to its 1 assigned subtask and compliant with all quality gates. |
 | **Tester** | `tester` | • Writes unit and integration tests using `pytest` and `pytest-asyncio`.<br/>• Validates a 100% pass rate before hand-off. |
 | **Security Reviewer** | `security_reviewer`, `security-reviewer` | • Evaluates code diffs and files for vulnerabilities, injection flaws (SQLi, shell injection, XSS), hardcoded secrets, and unsafe deserialization. |
 | **Performance Reviewer** | `performance_reviewer`, `performance-reviewer` | • Evaluates code diffs for algorithmic efficiency, nested loops (O(N^2) complexity), memory leaks, and performance bottlenecks. |
@@ -88,26 +88,36 @@ All agents must strictly adhere to the following environment rules:
 - **Gatekeeper Rule:** A task cannot be marked as complete if any tests fail.
 
 ### 2.4. Tool-Locking & Patching Policy ("Patch, Never Regenerate")
-- **Patch-Only Rule:** All code modifications to existing files must be executed exclusively via diff hunks. Regenerating or rewriting whole files causes context rot, hallucination, and loss of unrelated comments/functions.
-- **Tool-Locking:** Worker agents (especially Coder and Reviewer) are tool-locked against full-file overwrites (e.g., `write_to_file` on existing files). Any attempt to overwrite an entire file in one go will be rejected by the orchestrator and fail the quality gate.
-- **Permitted Edit Tools:** `apply_patch`, `replace_file_content`, `multi_replace_file_content`.
+- **Patch-Only Rule for Existing Files:** All code modifications to existing files must be executed exclusively via diff hunks using patch-based tools (`apply_patch`, `replace_file_content`, `multi_replace_file_content`). Regenerating or rewriting whole files causes context rot, hallucination, and loss of unrelated comments/functions.
+- **File Creation Exception:** `write_to_file` is strictly permitted ONLY for creating brand-new files (e.g., newly scaffolded modules, schemas, or test suites) that do not yet exist on disk.
+- **Tool-Locking Enforcement:** Worker agents (especially Coder and Reviewer) are tool-locked against full-file overwrites on existing files (e.g., calling `write_to_file` with `Overwrite=true` on files that already exist). Any attempt to overwrite an entire existing file in one go will be rejected by the orchestrator and fail the quality gate.
+- **Permitted Edit Tools:** For existing files: `apply_patch`, `replace_file_content`, `multi_replace_file_content`. For new files: `write_to_file`.
 
 ---
 
-## 3. Git Operations: Direct agy-cli Control
+## 3. Git Operations: Terminal Execution & Tool Boundaries
 
-- **Separation of Concerns**: Python source code (`src/`) must NEVER call Git programmatically (e.g., no `subprocess` or `GitPython`).
-- **Direct Execution**: All Git actions must be performed directly via the `agy` CLI in the terminal.
+- **Separation of Concerns & Tool Boundaries**:
+  - **Python Source Code**: Source code (`src/`) must NEVER invoke Git programmatically (e.g., no `subprocess` or `GitPython`).
+  - **Herdr Multiplexer**: Manages workspace lifecycle, panes, and Git worktrees (`herdr worktree create --branch agent/<task_id>`).
+  - **Standard Git & GitHub CLI**: All repository Git operations (status, diff, staging, commits, remote pushes, and PR creation via `git` and `gh`) must be executed directly in the terminal shell of the active pane.
 - **Strict Branch Protection & Automated Merge Lock**:
   - **Protected Branches:** `main`, `master`, `dev`, `develop`.
   - **NO AUTOMATED MERGING:** All AI agents (Orchestrator, Coder, Tester) and scripts are **STRICTLY FORBIDDEN** from automatically merging feature or bugfix branches into `main` or `dev`.
   - **NO DIRECT COMMITTING:** Committing directly to `main`, `master`, `dev`, or `develop` is strictly blocked (enforced via `.pre-commit-config.yaml` `no-commit-to-branch` hook).
   - **HUMAN-ONLY MERGE AUTHORITY:** Merging code into `main` or `dev` is exclusively reserved for the human user.
   - **Dedicated Branches Only:** Always work exclusively on dedicated branches (`feat/...`, `fix/...`, `agent/...`).
-- **Conventional Commits**: Use `feat:`, `fix:`, `test:`, `docs:`, `refactor:`. Always inspect `git status` and `git diff` before committing.
+- **Conventional Commits & Pre-Commit Hook Recovery**:
+  - Use conventional prefixes: `feat:`, `fix:`, `test:`, `docs:`, `refactor:`. Always inspect `git status` and `git diff` before committing.
+  - **Pre-Commit Hook Abort Handling**: Pre-commit hooks (`black`, `isort`, `flake8`) automatically run upon `git commit`. If hooks modify/reformat files or abort the commit:
+    1. Inspect the hook output.
+    2. Re-stage the modified files: `git add .`
+    3. Re-run the commit command: `git commit -m "..."`
+    4. Only proceed to push after the commit successfully finishes with exit code 0.
 - **Automated Remote Push & Pull Request Creation**:
   - After each feature or fix branch is committed, the agent **MUST automatically push** the branch to the remote repository (`git push -u origin <branch-name>`).
-  - The agent **MUST create a Pull Request** targeting `main` (or `dev`) via the GitHub CLI (`gh pr create --base main --head <branch-name> --title "..." --body "..."`) or GitHub REST API.
+  - The agent **MUST create a Pull Request** targeting `main` (or `dev`) via the GitHub CLI (`gh pr create --base main --head <branch-name> --title "..." --body "..."`) or output the remote GitHub PR creation link.
+  - **Mandatory PR Template Protocol**: The agent **MUST fill out the PR description strictly adhering to `.github/pull_request_template.md`** (populating Description, Type of change, Test Configuration, Test Evidence logs/pass rate, and Checklist).
   - The agent **MUST provide the resulting PR link directly to the user** for human review and merge authorization.
 - **Rule Sync on Main Only**: Updates to standard rules and SDLC skills must only be pulled/synced into the `main` branch, not in-flight feature branches.
 
@@ -150,17 +160,20 @@ Agents MUST ONLY read and apply specific skills that are relevant to their task.
 
 ---
 
-## 7. Orchestrator CLI Commands
+## 7. Orchestrator Operational Commands
 
 ```powershell
-# Check agy CLI connectivity
+# Check agy & environment connectivity
 conda run -n pytorch harness-agent check
 
-# Initialize rules & skills for a new repository
-conda run -n pytorch harness-agent init "..\new-project"
+# Create an isolated Git worktree for the subtask via Herdr
+herdr worktree create --branch agent/<task_id>
 
-# Sync rule updates (MUST BE ON MAIN BRANCH)
-conda run -n pytorch harness-agent sync "..\new-project"
+# Launch an interactive worker agent in a dedicated Herdr pane
+herdr agent start worker_<task_id> --kind agy --pane <pane_id>
+
+# Prompt worker agent with specific sub-spec contract
+herdr agent prompt worker_<task_id> "Read .ai/plans/subtasks/YYYY-MM-DD/<plan_id>/subtask_01_<task_id>.md and implement"
 ```
 
 ---
