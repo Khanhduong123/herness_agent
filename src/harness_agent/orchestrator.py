@@ -32,6 +32,32 @@ class AgentOrchestrator:
     """Central orchestrator that decomposes goals and dispatches tasks to worker agents."""
 
     DEFAULT_WORKERS = {
+        AgentRole.ORCHESTRATOR: WorkerAgentConfig(
+            role=AgentRole.ORCHESTRATOR,
+            name="orchestrator",
+            effort="high",
+            system_prompt=(
+                "You are the Central Orchestrator. "
+                "CRITICAL MANDATE: You are strictly PROHIBITED from directly writing, modifying, "
+                "or refactoring application source code or tests (in src/, tests/, etc.). "
+                "Your role is exclusively to analyze requirements, decompose tasks into a DAG, "
+                "write plan files (.ai/plan/main_[plan_id].md and .ai/plan/subtask_[task_id].md), "
+                "set up workspaces, and dispatch tasks to specialized worker agents "
+                "(coder, tester)."
+            ),
+            allowed_tools=[
+                "view_file",
+                "run_command",
+                "ask_question",
+            ],
+            disallowed_tools=[
+                "apply_patch",
+                "replace_file_content",
+                "multi_replace_file_content",
+                "write_to_file_overwrite",
+                "full_file_rewrite",
+            ],
+        ),
         AgentRole.RESEARCHER: WorkerAgentConfig(
             role=AgentRole.RESEARCHER,
             name="researcher-agent",
@@ -231,7 +257,7 @@ class AgentOrchestrator:
                 curr = parent
 
         sub_id = str(subtask.id).strip()
-        id_num = sub_id[len("subtask_") :] if sub_id.startswith("subtask_") else sub_id
+        id_num = sub_id.removeprefix("subtask_")
 
         exact_names = [
             f"subtask_{sub_id}.md",

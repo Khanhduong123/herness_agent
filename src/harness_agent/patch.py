@@ -300,11 +300,46 @@ def validate_tool_call(
     tool_name: str,
     args: Dict[str, Any],
     workspace_dir: str,
+    role: Optional[str] = None,
     allowed_tools: Optional[List[str]] = None,
     disallowed_tools: Optional[List[str]] = None,
     enforce_patch_only: bool = False,
 ) -> Tuple[bool, str]:
     """Validate a tool call against tool-locking policies and patch-only constraints."""
+    # Enforce role-based lock: Orchestrator MUST NEVER modify application source code
+    if role and str(role).lower() in ("orchestrator", "agentrole.orchestrator"):
+        target_file = (
+            args.get("target_file")
+            or args.get("TargetFile")
+            or args.get("path")
+            or args.get("file")
+            or ""
+        )
+        norm_target = str(target_file).replace("\\", "/").lower()
+        if tool_name in (
+            "replace_file_content",
+            "apply_patch",
+            "multi_replace_file_content",
+            "write_to_file",
+            "write_file",
+        ):
+            is_plan_or_doc = (
+                norm_target.startswith(".ai/")
+                or "/.ai/" in norm_target
+                or norm_target.startswith(".runs/")
+                or "/.runs/" in norm_target
+                or (norm_target.endswith(".md") and not norm_target.startswith("src/"))
+                or (norm_target.endswith(".yaml") and not norm_target.startswith("src/"))
+                or (norm_target.endswith(".yml") and not norm_target.startswith("src/"))
+            )
+            is_code_dir = norm_target.startswith("src/") or norm_target.startswith("tests/")
+            if not is_plan_or_doc or is_code_dir:
+                return False, (
+                    "Tool-locking violation: Central Orchestrator is strictly prohibited from "
+                    f"directly writing or modifying application source code ('{target_file}'). "
+                    "Coding tasks must be delegated to a specialized Coder Worker Agent."
+                )
+
     disallowed = disallowed_tools or []
     if tool_name in disallowed:
         return (

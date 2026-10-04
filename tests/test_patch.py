@@ -302,3 +302,26 @@ async def test_orchestrator_subtask_tool_locking_rejection(tmp_path, monkeypatch
     assert result.success is False
     assert result.failed_tasks == 1
     assert "Tool-locking violation" in result.task_results["sub_lock"].error_message
+
+
+def test_orchestrator_role_lock_blocks_code_modification(tmp_path):
+    # Orchestrator attempting to modify source code in src/
+    valid, msg = validate_tool_call(
+        tool_name="replace_file_content",
+        args={"target_file": "src/harness_agent/runner.py"},
+        workspace_dir=str(tmp_path),
+        role="orchestrator",
+    )
+    assert valid is False
+    assert "Central Orchestrator is strictly prohibited" in msg
+
+
+def test_orchestrator_role_lock_allows_planning_docs(tmp_path):
+    # Orchestrator is allowed to write plan files in .ai/plan/
+    valid, msg = validate_tool_call(
+        tool_name="write_to_file",
+        args={"target_file": ".ai/plan/main_test.md"},
+        workspace_dir=str(tmp_path),
+        role="orchestrator",
+    )
+    assert valid is True

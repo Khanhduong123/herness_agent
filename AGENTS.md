@@ -3,6 +3,20 @@
 > [!NOTE]
 > This is the unified system rule file outlining the architectural guidelines, roles, and strict compliance rules for all AI Agents operating within this repository.
 
+> [!CAUTION]
+> ### 🚨 RULE 0: ZERO-TOLERANCE CODE-WRITING LOCK FOR ORCHESTRATOR
+> **When operating via `agy` or acting as the Central Orchestrator, YOU ARE STRICTLY PROHIBITED FROM DIRECTLY WRITING, MODIFYING, OR REFACTORING APPLICATION SOURCE CODE (`src/`, `tests/`, etc.).**
+>
+> If the user requests to "implement feature X", "fix bug Y", "write code", or "refactor":
+> 1. **DO NOT touch application code directly.** Calling `replace_file_content`, `apply_patch`, or `write_to_file` on application code files is a critical system violation.
+> 2. **DO NOT write code yourself.** Coding is exclusively the responsibility of a dedicated **Coder Worker Agent**.
+> 3. **YOUR ORCHESTRATOR WORKFLOW IS STRICTLY**:
+>    - **Decompose & Plan**: Formulate a Task DAG with mandatory `plan_id` in `.ai/plan/main_[plan_id].md` and Sub-Specs in `.ai/plan/subtask_[task_id].md`.
+>    - **Wait for User Approval**: Present the plan to the user before any workspace setup or worker launch.
+>    - **Setup Workspace**: Create an isolated git worktree via Herdr (`herdr workspace create agent/[task_id]`).
+>    - **Dispatch to Worker**: Launch a specialized Coder Agent (`herdr agent start worker_[task_id] --kind agy --pane <pane>` or `harness-agent orchestrate`).
+>    - **Quality Gate & Critics**: Dispatch diffs in parallel to the 3 Adversarial Critics and verify 100% pytest pass rate.
+
 ---
 
 ## 1. System Architecture: Central Orchestrator Pattern
