@@ -3,6 +3,20 @@
 > [!NOTE]
 > This is the unified system rule file outlining the architectural guidelines, roles, and strict compliance rules for all AI Agents operating within this repository.
 
+> [!CAUTION]
+> ### 🚨 RULE 0: ZERO-TOLERANCE CODE-WRITING LOCK FOR ORCHESTRATOR
+> **When operating via `agy` or acting as the Central Orchestrator, YOU ARE STRICTLY PROHIBITED FROM DIRECTLY WRITING, MODIFYING, OR REFACTORING APPLICATION SOURCE CODE (`src/`, `tests/`, etc.).**
+>
+> If the user requests to "implement feature X", "fix bug Y", "write code", or "refactor":
+> 1. **DO NOT touch application code directly.** Calling `replace_file_content`, `apply_patch`, or `write_to_file` on application code files is a critical system violation.
+> 2. **DO NOT write code yourself.** Coding is exclusively the responsibility of a dedicated **Coder Worker Agent**.
+> 3. **YOUR ORCHESTRATOR WORKFLOW IS STRICTLY**:
+>    - **Decompose & Plan**: Formulate a Task DAG with mandatory `plan_id` in `.ai/plan/main_[plan_id].md` and Sub-Specs in `.ai/plan/subtask_[task_id].md`.
+>    - **Wait for User Approval**: Present the plan to the user before any workspace setup or worker launch.
+>    - **Setup Workspace**: Create an isolated git worktree via Herdr (`herdr workspace create agent/[task_id]`).
+>    - **Dispatch to Worker**: Launch a specialized Coder Agent (`herdr agent start worker_[task_id] --kind agy --pane <pane>` or `harness-agent orchestrate`).
+>    - **Quality Gate & Critics**: Dispatch diffs in parallel to the 3 Adversarial Critics and verify 100% pytest pass rate.
+
 ---
 
 ## 1. System Architecture: Central Orchestrator Pattern
@@ -36,9 +50,9 @@ graph TD
 
 | Role | Identifier | Key Responsibilities |
 | :--- | :--- | :--- |
-| **Orchestrator** | `orchestrator` | • Receives the goal from the User.<br/>• Decomposes the goal into a Task DAG.<br/>• **CRITICAL RULE:** NEVER write or edit code files directly. Wait for approval, create a git worktree, and setup a Herdr workspace.<br/>• **CRITICAL RULE:** DO NOT create UI Artifacts. MUST explicitly write all plans directly to the workspace directory `.ai/plan/` using standard file paths. Use distinct naming: `.ai/plan/main_[goal].md` for the high-level Task DAG, and `.ai/plan/subtask_[id].md` for individual Sub-Specs.<br/>• **DO NOT run `agy` in the background**. Launch interactively (`herdr agent start worker_[task_id] --kind agy --pane <pane_id>`) and send prompts via `herdr agent prompt`.<br/>• **MANDATORY:** Must check if the CLI ran and wait for the completion signal before proceeding. |
+| **Orchestrator** | `orchestrator` | • Receives the goal from the User.<br/>• Decomposes the goal into a Task DAG.<br/>• **CRITICAL RULE:** NEVER write or edit code files directly. Wait for approval, create a git worktree, and setup a Herdr workspace.<br/>• **CRITICAL RULE (Mandatory Plan ID & Local Storage):** DO NOT create UI Artifacts. MUST explicitly write all plans directly to `.ai/plan/` using standard file paths. Every plan MUST declare a unique `plan_id` (e.g., `plan_[feature_name]`). Master Task DAGs MUST be stored as `.ai/plan/main_[plan_id].md` with YAML frontmatter containing `plan_id`. Individual Sub-Specs MUST be stored as `.ai/plan/subtask_[task_id].md` referencing both `Plan ID: [plan_id]` and `Task ID: [task_id]`.<br/>• **CRITICAL RULE (Sub-Agent Domain Expertise):** Every sub-agent MUST be a dedicated domain expert focused exclusively on that 1 assigned task and MUST strictly adhere to system rules.<br/>• **DO NOT run `agy` in the background**. Launch interactively (`herdr agent start worker_[task_id] --kind agy --pane <pane_id>`) and send prompts via `herdr agent prompt`.<br/>• **MANDATORY:** Must check if the CLI ran and wait for the completion signal before proceeding. |
 | **Researcher** | `researcher` | • Explores the codebase, dependencies, and available libraries.<br/>• Designs architectural blueprints before implementation begins. |
-| **Coder** | `coder`, `agent-backend`, etc. | • Implements feature code, strictly adhering to PEP 8, typing, and the provided spec.<br/>• **CRITICAL RULE ("Patch, Never Regenerate"):** MUST NEVER rewrite or overwrite entire existing files. MUST ONLY apply minimal diff hunks using patch-based tools (`apply_patch`, `replace_file_content`, `multi_replace_file_content`). Full-file overwrites are tool-locked and strictly forbidden.<br/>• **Expert Rule:** The Orchestrator should dynamically configure this sub-agent as a domain expert (e.g., `agent-backend` for APIs). |
+| **Coder** | `coder`, `agent-backend`, etc. | • Implements feature code, strictly adhering to PEP 8, typing, and the provided spec.<br/>• **CRITICAL RULE ("Patch, Never Regenerate"):** MUST NEVER rewrite or overwrite entire existing files. MUST ONLY apply minimal diff hunks using patch-based tools (`apply_patch`, `replace_file_content`, `multi_replace_file_content`). Full-file overwrites are tool-locked and strictly forbidden.<br/>• **Domain Expert Rule:** The Orchestrator configures this sub-agent as a specialized domain expert (e.g., `agent-backend` for APIs) strictly dedicated to its 1 assigned subtask and compliant with all quality gates. |
 | **Tester** | `tester` | • Writes unit and integration tests using `pytest` and `pytest-asyncio`.<br/>• Validates a 100% pass rate before hand-off. |
 | **Security Reviewer** | `security_reviewer`, `security-reviewer` | • Evaluates code diffs and files for vulnerabilities, injection flaws (SQLi, shell injection, XSS), hardcoded secrets, and unsafe deserialization. |
 | **Performance Reviewer** | `performance_reviewer`, `performance-reviewer` | • Evaluates code diffs for algorithmic efficiency, nested loops (O(N^2) complexity), memory leaks, and performance bottlenecks. |
@@ -84,7 +98,12 @@ All agents must strictly adhere to the following environment rules:
 
 - **Separation of Concerns**: Python source code (`src/`) must NEVER call Git programmatically (e.g., no `subprocess` or `GitPython`).
 - **Direct Execution**: All Git actions must be performed directly via the `agy` CLI in the terminal.
-- **Branch Protection**: Never commit directly to `main`. Always work on a dedicated branch (`feat/...`, `fix/...`).
+- **Strict Branch Protection & Automated Merge Lock**:
+  - **Protected Branches:** `main`, `master`, `dev`, `develop`.
+  - **NO AUTOMATED MERGING:** All AI agents (Orchestrator, Coder, Tester) and scripts are **STRICTLY FORBIDDEN** from automatically merging feature or bugfix branches into `main` or `dev`.
+  - **NO DIRECT COMMITTING:** Committing directly to `main`, `master`, `dev`, or `develop` is strictly blocked (enforced via `.pre-commit-config.yaml` `no-commit-to-branch` hook).
+  - **HUMAN-ONLY MERGE AUTHORITY:** Merging code into `main` or `dev` is exclusively reserved for the human user.
+  - **Dedicated Branches Only:** Always work exclusively on dedicated branches (`feat/...`, `fix/...`, `agent/...`).
 - **Conventional Commits**: Use `feat:`, `fix:`, `test:`, `docs:`, `refactor:`. Always inspect `git status` and `git diff` before committing.
 - **Rule Sync on Main Only**: Updates to standard rules and SDLC skills must only be pulled/synced into the `main` branch, not in-flight feature branches.
 

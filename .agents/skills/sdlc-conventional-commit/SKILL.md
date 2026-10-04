@@ -14,6 +14,11 @@ This skill guides the final staging and commit phase of the SDLC workflow.
 ## 1. Commit Directives (Via agy-cli Terminal Only)
 - All Git operations must be executed directly in the terminal via `agy-cli`.
 - Never bypass pre-commit hooks (`--no-verify` is strictly forbidden).
+- **CRITICAL - NO AUTOMATED MERGING OR COMMITTING TO PROTECTED BRANCHES**:
+  - Protected branches: `main`, `master`, `dev`, `develop`.
+  - All AI agents and automated scripts are **STRICTLY PROHIBITED** from merging or committing into `main` or `dev`.
+  - Merging into `main` or `dev` is exclusively reserved for the human user.
+  - Pre-commit hook `no-commit-to-branch` will abort any attempt to commit directly on protected branches.
 
 ---
 

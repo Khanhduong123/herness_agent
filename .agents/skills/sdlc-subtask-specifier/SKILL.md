@@ -21,7 +21,7 @@ Every Sub-Spec must be populated with all 6 core SDLC dimensions:
 +------------------------------------------------------------------------+
 |                             SUB-SPEC SCHEMA                            |
 +------------------------------------------------------------------------+
-| 1. METADATA & STATUS (Task ID, Name, Role, Spec Status)                |
+| 1. METADATA & STATUS (Plan ID, Task ID, Name, Role, Spec Status)       |
 | 2. CRITICALITY LEVEL (CRITICAL | HIGH | MEDIUM | LOW)                  |
 | 3. RISK ASSESSMENT (Risk Level, Failure Points, Blast Radius, Plan)    |
 | 4. FUNCTION & INTERFACE SPECS (Signatures, Parameters, Return Types)   |
@@ -108,8 +108,9 @@ Concrete test scenarios must be defined before code implementation:
 - **Command:** The Sub-Agent MUST start by running `herdr workspace create agent/[Task-ID]` via terminal, and then `cd` into it to do the work.
 
 ## 2. Overview & Metadata
+- **Plan ID:** plan_feature_name
 - **Task ID:** subtask_01_feature_name
-- **Assigned Role:** coder
+- **Assigned Role:** coder (Domain Expert)
 - **Criticality:** HIGH
 - **Status:** APPROVED
 - **Depends On:** []

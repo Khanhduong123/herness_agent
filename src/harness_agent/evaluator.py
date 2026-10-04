@@ -131,11 +131,13 @@ class ToolLockEvaluator(BaseEvaluator):
         disallowed = (
             [t.strip() for t in check.target.split(",") if t.strip()] if check.target else []
         )
+        role = check.expected if isinstance(check.expected, str) else None
         for tc in result.tool_calls:
             valid, reason = validate_tool_call(
                 tool_name=tc.name,
                 args=tc.args,
                 workspace_dir=workspace_dir,
+                role=role,
                 disallowed_tools=disallowed,
                 enforce_patch_only=True,
             )

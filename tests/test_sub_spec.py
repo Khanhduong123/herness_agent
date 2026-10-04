@@ -106,6 +106,12 @@ def test_sub_spec_prompt_rendering():
         plan=plan, subtask=subtask, worker=worker, task_results={}
     )
 
+    # Assert plan_id propagation and domain expert in worker prompt
+    assert plan.tasks[0].plan_id == "plan_spec_test"
+    assert "Plan ID: plan_spec_test" in prompt
+    assert "Dedicated Domain Expert" in prompt
+    assert "specialized domain expert" in prompt
+
     # Assert all sub-spec requirements appear in worker prompt
     assert "## Technical Sub-Specification (SDLC Contract):" in prompt
     assert "Criticality: HIGH" in prompt

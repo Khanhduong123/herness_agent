@@ -150,3 +150,45 @@ tasks:
     assert plan.plan_id == "plan_test_io"
     assert len(plan.tasks) == 1
     assert plan.tasks[0].role == AgentRole.CODER
+    assert plan.tasks[0].plan_id == "plan_test_io"
+
+
+def test_load_plan_from_markdown_frontmatter(tmp_path):
+    md_content = """---
+plan_id: "plan_markdown_test"
+goal: "Test markdown plan with frontmatter"
+tasks:
+  - id: "subtask_01"
+    name: "Subtask 01"
+    role: "coder"
+    instruction: "Implement feature"
+---
+
+# Plan: Markdown Test
+Details about this plan.
+"""
+    plan_file = tmp_path / "main_plan_markdown_test.md"
+    plan_file.write_text(md_content, encoding="utf-8")
+
+    orchestrator = AgentOrchestrator()
+    plan = orchestrator.load_plan(str(plan_file))
+    assert plan.plan_id == "plan_markdown_test"
+    assert plan.goal == "Test markdown plan with frontmatter"
+    assert plan.tasks[0].plan_id == "plan_markdown_test"
+
+
+def test_load_plan_missing_plan_id_raises(tmp_path):
+    invalid_yaml = """
+goal: "Missing plan id"
+tasks:
+  - id: "t1"
+    name: "Task 1"
+    role: "coder"
+    instruction: "Do task 1"
+"""
+    plan_file = tmp_path / "invalid_plan.yaml"
+    plan_file.write_text(invalid_yaml, encoding="utf-8")
+
+    orchestrator = AgentOrchestrator()
+    with pytest.raises(ValueError, match="missing mandatory 'plan_id'"):
+        orchestrator.load_plan(str(plan_file))
