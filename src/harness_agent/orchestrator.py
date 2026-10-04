@@ -41,9 +41,9 @@ class AgentOrchestrator:
                 "CRITICAL MANDATE: You are strictly PROHIBITED from directly writing, modifying, "
                 "or refactoring application source code or tests (in src/, tests/, etc.). "
                 "Your role is exclusively to analyze requirements, decompose tasks into a DAG, "
-                "write plan files (.ai/plan/main_[plan_id].md and .ai/plan/subtask_[task_id].md), "
-                "set up workspaces, and dispatch tasks to specialized worker agents "
-                "(coder, tester)."
+                "write plan files (.ai/plans/main_[plan_id].md and "
+                ".ai/plans/subtask_[task_id].md), set up workspaces, and dispatch tasks to "
+                "specialized worker agents (coder, tester)."
             ),
             allowed_tools=[
                 "view_file",
@@ -171,7 +171,7 @@ class AgentOrchestrator:
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # Check for YAML frontmatter in Markdown (e.g. .ai/plan/main_[goal].md)
+        # Check for YAML frontmatter in Markdown (e.g. .ai/plans/main_[goal].md)
         if file_path.endswith(".md") or content.startswith("---"):
             match = re.search(r"^---\s*\n(.*?)\n---", content, flags=re.DOTALL)
             if match:
@@ -228,7 +228,7 @@ class AgentOrchestrator:
     def resolve_subtask_plan_file(
         self, subtask: SubTask, workspace_dir: Optional[str] = None
     ) -> Optional[str]:
-        """Locate the specific .ai/plan/subtask_[id].md file on disk."""
+        """Locate the specific .ai/plans/subtask_[id].md file on disk."""
         if subtask.plan_file:
             if os.path.isabs(subtask.plan_file) and os.path.isfile(subtask.plan_file):
                 return subtask.plan_file
@@ -256,6 +256,12 @@ class AgentOrchestrator:
                     break
                 curr = parent
 
+        if subtask.plan_file:
+            for root in expanded_roots:
+                cand = os.path.join(root, subtask.plan_file)
+                if os.path.isfile(cand):
+                    return os.path.abspath(cand)
+
         sub_id = str(subtask.id).strip()
         id_num = sub_id.removeprefix("subtask_")
 
@@ -266,39 +272,54 @@ class AgentOrchestrator:
         ]
 
         for root in expanded_roots:
-            plan_dir = os.path.join(root, ".ai", "plan")
-            if not os.path.isdir(plan_dir):
-                continue
+            candidate_base_dirs = [
+                os.path.join(root, ".ai", "plans"),
+                os.path.join(root, ".ai", "plan"),
+            ]
+            for base_dir in candidate_base_dirs:
+                if not os.path.isdir(base_dir):
+                    continue
 
-            for name in exact_names:
-                candidate = os.path.join(plan_dir, name)
-                if os.path.isfile(candidate):
-                    return os.path.abspath(candidate)
+                try:
+                    for dirpath, dirnames, filenames in os.walk(base_dir, topdown=True):
+                        dirnames.sort(reverse=True)
+                        filenames_set = set(filenames)
+                        for name in exact_names:
+                            if name in filenames_set:
+                                candidate = os.path.join(dirpath, name)
+                                if os.path.isfile(candidate):
+                                    return os.path.abspath(candidate)
 
-            try:
-                candidates: List[str] = []
-                for entry in sorted(os.listdir(plan_dir)):
-                    if not entry.endswith(".md"):
-                        continue
-                    if (
-                        entry.startswith(f"subtask_{id_num}_")
-                        or entry.startswith(f"subtask_{sub_id}_")
-                        or entry.startswith(f"{sub_id}_")
-                        or (id_num.isdigit() and entry.startswith(f"subtask_{int(id_num):02d}_"))
-                    ):
-                        candidates.append(entry)
+                        candidates: List[str] = []
+                        for entry in sorted(filenames):
+                            if not entry.endswith(".md"):
+                                continue
+                            if (
+                                entry.startswith(f"subtask_{id_num}_")
+                                or entry.startswith(f"subtask_{sub_id}_")
+                                or entry.startswith(f"{sub_id}_")
+                                or (
+                                    id_num.isdigit()
+                                    and entry.startswith(f"subtask_{int(id_num):02d}_")
+                                )
+                            ):
+                                candidates.append(entry)
 
-                if candidates:
-                    if subtask.name:
-                        name_slug = re.sub(r"[^a-z0-9]+", "_", subtask.name.lower()).strip("_")
-                        slug_words = [w for w in name_slug.split("_") if len(w) > 3]
-                        if slug_words:
-                            for cand_entry in candidates:
-                                if any(w in cand_entry.lower() for w in slug_words):
-                                    return os.path.abspath(os.path.join(plan_dir, cand_entry))
-                    return os.path.abspath(os.path.join(plan_dir, candidates[0]))
-            except OSError:
-                pass
+                        if candidates:
+                            if subtask.name:
+                                name_slug = re.sub(r"[^a-z0-9]+", "_", subtask.name.lower()).strip(
+                                    "_"
+                                )
+                                slug_words = [w for w in name_slug.split("_") if len(w) > 3]
+                                if slug_words:
+                                    for cand_entry in candidates:
+                                        if any(w in cand_entry.lower() for w in slug_words):
+                                            return os.path.abspath(
+                                                os.path.join(dirpath, cand_entry)
+                                            )
+                            return os.path.abspath(os.path.join(dirpath, candidates[0]))
+                except OSError:
+                    pass
 
         return None
 
@@ -362,37 +383,31 @@ class AgentOrchestrator:
         if not subtask.interface_files:
             return results
 
-        search_roots = []
-        if workspace_dir:
-            search_roots.append(os.path.abspath(workspace_dir))
-        search_roots.append(os.path.abspath(os.getcwd()))
-
-        expanded_roots: List[str] = []
-        for root in search_roots:
-            curr = root
-            for _ in range(6):
-                if curr not in expanded_roots:
-                    expanded_roots.append(curr)
-                parent = os.path.dirname(curr)
-                if parent == curr:
-                    break
-                curr = parent
+        ws_root = os.path.abspath(workspace_dir) if workspace_dir else os.path.abspath(os.getcwd())
 
         for iface_path in subtask.interface_files:
             if iface_path in results:
                 continue
 
+            target_file = (
+                os.path.abspath(iface_path)
+                if os.path.isabs(iface_path)
+                else os.path.abspath(os.path.join(ws_root, iface_path))
+            )
+
+            # Security verification: verify that abspath of file starts with
+            # abspath of workspace_dir
+            if not target_file.startswith(ws_root):
+                results[iface_path] = (
+                    f"# Security rejection: interface file '{iface_path}' "
+                    f"is outside workspace directory"
+                )
+                continue
+
             content = None
-            if os.path.isabs(iface_path) and os.path.isfile(iface_path):
-                with open(iface_path, "r", encoding="utf-8") as f:
+            if os.path.isfile(target_file):
+                with open(target_file, "r", encoding="utf-8") as f:
                     content = f.read()
-            else:
-                for root in expanded_roots:
-                    cand = os.path.join(root, iface_path)
-                    if os.path.isfile(cand):
-                        with open(cand, "r", encoding="utf-8") as f:
-                            content = f.read()
-                        break
 
             if content is not None:
                 results[iface_path] = content
@@ -413,7 +428,7 @@ class AgentOrchestrator:
 
         Implements Lazy Context Loading:
         - Ensures worker only receives context for its assigned subtask and no other subtasks.
-        - Injects ONLY the specific .ai/plan/subtask_[id].md file.
+        - Injects ONLY the specific .ai/plans/subtask_[id].md file.
         - Injects specific interface files (e.g. schema Pydantic files),
           ignoring the rest of the codebase.
         """

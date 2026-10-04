@@ -71,7 +71,7 @@ if ($HasFiles -and $TargetExisted) {
     Write-Host "`n[THONG TIN] Thu muc '$ResolvedTarget' da chua code/du lieu hien co." -ForegroundColor Yellow
     if (-not $Force) {
         Write-Host "Chon hanh dong:"
-        Write-Host "  [1] Cap nhat / Bo sung quy chuan (AGENTS.md, skills, .ai/plan) vao du an (Khong xoa code cu)" -ForegroundColor Green
+        Write-Host "  [1] Cap nhat / Bo sung quy chuan (AGENTS.md, skills, .ai/plans) vao du an (Khong xoa code cu)" -ForegroundColor Green
         Write-Host "  [2] Huy thao tac (Abort)" -ForegroundColor Red
         $Choice = Read-Host "Lua chon cua ban [1/2] (Mac dinh: 1)"
         if ($Choice -eq "2") {
@@ -135,8 +135,8 @@ if (Test-Path $SourceAgents) {
 # 5. Initialize 3-tier planning directories
 $PlanDirs = @(
     ".runs",
-    ".ai\plan",
-    ".ai\plans",
+    ".ai\plans\main",
+    ".ai\plans\subtasks",
     ".ai\decisions",
     ".ai\context"
 )
@@ -146,7 +146,7 @@ foreach ($dir in $PlanDirs) {
         New-Item -ItemType Directory -Path $fullDir -Force | Out-Null
     }
 }
-Write-Host "  [+] Initialized planning directories (.runs/, .ai/plan/, .ai/decisions/, .ai/context/)" -ForegroundColor Green
+Write-Host "  [+] Initialized planning directories (.runs/, .ai/plans/main/, .ai/plans/subtasks/, .ai/decisions/, .ai/context/)" -ForegroundColor Green
 
 # 6. Ensure .gitignore has critical AI orchestrator entries
 $TargetGitignore = Join-Path $ResolvedTarget ".gitignore"

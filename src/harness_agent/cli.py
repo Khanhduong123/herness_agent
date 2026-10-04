@@ -280,8 +280,8 @@ def init_cmd(
 
     # Setup 3-tier architecture directories
     (target_path / ".runs").mkdir(parents=True, exist_ok=True)
-    (target_path / ".ai" / "plan").mkdir(parents=True, exist_ok=True)
-    (target_path / ".ai" / "plans").mkdir(parents=True, exist_ok=True)
+    (target_path / ".ai" / "plans" / "main").mkdir(parents=True, exist_ok=True)
+    (target_path / ".ai" / "plans" / "subtasks").mkdir(parents=True, exist_ok=True)
     (target_path / ".ai" / "decisions").mkdir(parents=True, exist_ok=True)
     (target_path / ".ai" / "context").mkdir(parents=True, exist_ok=True)
 

@@ -8,7 +8,7 @@ description: >-
 # SDLC Research to Sub-Agent Planning Protocol
 
 > [!NOTE]
-> This skill defines how the **Central Orchestrator** transforms an academic research blueprint (`.ai/plan/research_[topic].md`) into an executable Task DAG and targeted Sub-Specs for specialized Worker Agents.
+> This skill defines how the **Central Orchestrator** transforms an academic research blueprint (`.ai/plans/main/YYYY-MM-DD/research_[topic].md`) into an executable Task DAG and targeted Sub-Specs for specialized Worker Agents.
 
 ---
 
@@ -16,9 +16,9 @@ description: >-
 
 ```mermaid
 graph TD
-    Blueprint[".ai/plan/research_[topic].md<br/>(AI Paper Blueprint)"] --> Bridge["sdlc-research-to-subagent-plan"]
-    Bridge --> DAG[".ai/plan/main_[goal].md<br/>(Task DAG & Dependency Graph)"]
-    Bridge --> Specs[".ai/plan/subtask_[id].md<br/>(Individual Sub-Specs)"]
+    Blueprint[".ai/plans/main/YYYY-MM-DD/research_[topic].md<br/>(AI Paper Blueprint)"] --> Bridge["sdlc-research-to-subagent-plan"]
+    Bridge --> DAG[".ai/plans/main/YYYY-MM-DD/main_[goal].md<br/>(Task DAG & Dependency Graph)"]
+    Bridge --> Specs[".ai/plans/subtasks/YYYY-MM-DD/subtask_[id].md<br/>(Individual Sub-Specs)"]
 
     Specs --> AgentModel["agent-model (PyTorch layers)"]
     Specs --> AgentData["agent-data (Dataset & Tokenizer)"]
@@ -70,7 +70,7 @@ Ensure parallel worker agents do not produce conflicting interfaces (e.g., misma
 ```
 
 ### Step 3: Lazy Context Injection
-For each subtask, generate `.ai/plan/subtask_[id].md`.
+For each subtask, generate `.ai/plans/subtasks/YYYY-MM-DD/subtask_[id].md`.
 **Enforce Lazy Context:**
 - Do NOT dump the entire 20-page paper into every sub-agent's prompt.
 - For `agent-model`: Inject ONLY Section 3 (Architecture) and the forward pass pseudo-code.
@@ -82,7 +82,7 @@ Launch each worker in an isolated Herdr workspace:
 ```powershell
 herdr workspace create --label agent_[task_id] --cwd <repo_path>
 herdr agent start worker_[task_id] --kind agy --pane <pane_id> -- --dangerously-skip-permissions
-herdr agent prompt worker_[task_id] "Implement subtask according to .ai/plan/subtask_[id].md..." --wait
+herdr agent prompt worker_[task_id] "Implement subtask according to .ai/plans/subtasks/YYYY-MM-DD/subtask_[id].md..." --wait
 ```
 
 ### Step 5: Testing & Quality Gate

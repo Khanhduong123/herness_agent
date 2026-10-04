@@ -43,7 +43,7 @@ if [ -d "$TARGET_DIR" ]; then
         echo "[THÔNG TIN] Thư mục '$TARGET_DIR' đã chứa dữ liệu/code hiện có."
         if [ "$FORCE" != "true" ]; then
             echo "Chọn hành động:"
-            echo "  [1] Cập nhật / Bổ sung quy chuẩn (AGENTS.md, skills, .ai/plan) vào dự án hiện có (Không xóa code cũ)"
+            echo "  [1] Cập nhật / Bổ sung quy chuẩn (AGENTS.md, skills, .ai/plans) vào dự án hiện có (Không xóa code cũ)"
             echo "  [2] Hủy thao tác (Abort)"
             read -rp "Lựa chọn của bạn [1/2] (Mặc định: 1): " choice
             choice="${choice:-1}"
@@ -99,11 +99,11 @@ fi
 
 # 5. Initialize 3-tier planning directories
 mkdir -p "$TARGET_DIR/.runs"
-mkdir -p "$TARGET_DIR/.ai/plan"
-mkdir -p "$TARGET_DIR/.ai/plans"
+mkdir -p "$TARGET_DIR/.ai/plans/main"
+mkdir -p "$TARGET_DIR/.ai/plans/subtasks"
 mkdir -p "$TARGET_DIR/.ai/decisions"
 mkdir -p "$TARGET_DIR/.ai/context"
-echo "  [✓] Initialized planning directories (.runs/, .ai/plan/, .ai/decisions/, .ai/context/)"
+echo "  [✓] Initialized planning directories (.runs/, .ai/plans/main/, .ai/plans/subtasks/, .ai/decisions/, .ai/context/)"
 
 # 6. Ensure .gitignore
 GITIGNORE_FILE="$TARGET_DIR/.gitignore"
@@ -133,20 +133,21 @@ fi
 # 7. Register project in ~/.harness/projects.json if python is available
 python3 -c "
 import json, os, sys
-harness_dir = os.path.expanduser('~/.harness')
-os.makedirs(harness_dir, exist_ok=True)
-reg_file = os.path.join(harness_dir, 'projects.json')
-projects = set()
-if os.path.exists(reg_file):
-    try:
-        with open(reg_file, 'r') as f:
-            projects = set(json.load(f))
-    except Exception:
-        pass
-projects.add('$TARGET_DIR')
-with open(reg_file, 'w') as f:
-    json.dump(sorted(list(projects)), f, indent=2)
-" 2>/dev/null || true
+if len(sys.argv) > 1 and sys.argv[1]:
+    harness_dir = os.path.expanduser('~/.harness')
+    os.makedirs(harness_dir, exist_ok=True)
+    reg_file = os.path.join(harness_dir, 'projects.json')
+    projects = set()
+    if os.path.exists(reg_file):
+        try:
+            with open(reg_file, 'r') as f:
+                projects = set(json.load(f))
+        except Exception:
+            pass
+    projects.add(sys.argv[1])
+    with open(reg_file, 'w') as f:
+        json.dump(sorted(list(projects)), f, indent=2)
+" "$TARGET_DIR" 2>/dev/null || true
 
 # 8. Install Git Pre-commit Hooks in target if it is a Git repo
 if [ -d "$TARGET_DIR/.git" ] && command -v pre-commit >/dev/null 2>&1; then
