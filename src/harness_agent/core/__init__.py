@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from harness_agent.core.dispatch import HerdrDispatcher
 from harness_agent.core.harness import AgentHarness
 from harness_agent.core.models import (
     AgentRole,
@@ -49,6 +50,7 @@ __all__ = [
     "DAGStateStore",
     "EvalReport",
     "FunctionSpec",
+    "HerdrDispatcher",
     "OrchestrationPlan",
     "OrchestrationResult",
     "RiskLevel",
