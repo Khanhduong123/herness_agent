@@ -379,7 +379,7 @@ def test_real_repo_subtask_plan_resolution():
     """Verify that orchestrator resolves actual repository date-based subtask plan."""
     orchestrator = AgentOrchestrator()
     subtask = SubTask(
-        id="3",
+        id="subtask_03_agents_md_skills",
         name="AGENTS.md and Skills",
         role=AgentRole.CODER,
         instruction="Update AGENTS.md and SDLC Skills to Date-Based Standard",

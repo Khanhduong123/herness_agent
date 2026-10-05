@@ -3,12 +3,47 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from harness_agent.cli import main
+from harness_agent.core.models import AgentRole, AggregatedCriticReview, CriticFeedback
 from harness_agent.core.pr import DEFAULT_PR_TEMPLATE, PRContext, PRGenerator, PRResult
+
+
+@pytest.fixture(autouse=True)
+def mock_critics_in_pr_tests(monkeypatch):
+    mock_rev = AggregatedCriticReview(
+        approved=True,
+        critics_feedback={
+            AgentRole.SECURITY_REVIEWER.value: CriticFeedback(
+                role=AgentRole.SECURITY_REVIEWER,
+                critic_name="security-reviewer",
+                approved=True,
+            ),
+            AgentRole.PERFORMANCE_REVIEWER.value: CriticFeedback(
+                role=AgentRole.PERFORMANCE_REVIEWER,
+                critic_name="performance-reviewer",
+                approved=True,
+            ),
+            AgentRole.REQUIREMENT_REVIEWER.value: CriticFeedback(
+                role=AgentRole.REQUIREMENT_REVIEWER,
+                critic_name="requirement-reviewer",
+                approved=True,
+            ),
+        },
+        summary="## Adversarial Critic Review Report\nAll checks passed.",
+    )
+
+    async def fake_dispatch(*args, **kwargs):
+        return mock_rev
+
+    monkeypatch.setattr(
+        "harness_agent.evaluation.critics.dispatch_parallel_critics",
+        fake_dispatch,
+    )
 
 
 def test_find_template(tmp_path: Path) -> None:
@@ -413,6 +448,8 @@ def test_cli_pr_create_end_to_end() -> None:
             push=True,
             draft=True,
             custom_description=None,
+            critic_review=ANY,
+            no_review=False,
         )
 
 
@@ -603,4 +640,6 @@ def test_cli_pr_create_with_description() -> None:
             push=True,
             draft=False,
             custom_description="Feature overview narrative",
+            critic_review=ANY,
+            no_review=False,
         )
