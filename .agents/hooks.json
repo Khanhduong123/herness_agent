@@ -1,0 +1,10 @@
+{
+  "enforce-orchestrator-role": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python src/harness_agent/hooks/enforce_orchestrator.py"
+      }
+    ]
+  }
+}
