@@ -262,6 +262,42 @@ try {
     # Non-critical registration
 }
 
+# 7b. Auto-trust target project and .worktrees in agy-cli settings.json
+try {
+    $AgySettingsDir = Join-Path $env:USERPROFILE ".gemini\antigravity-cli"
+    if (-not (Test-Path $AgySettingsDir)) {
+        New-Item -ItemType Directory -Path $AgySettingsDir -Force | Out-Null
+    }
+    $AgySettingsFile = Join-Path $AgySettingsDir "settings.json"
+    $SettingsData = @{}
+    if (Test-Path $AgySettingsFile) {
+        $rawSettings = Get-Content $AgySettingsFile -Raw -ErrorAction SilentlyContinue
+        if ($rawSettings) {
+            $parsed = ConvertFrom-Json $rawSettings -AsHashtable -ErrorAction SilentlyContinue
+            if ($parsed) {
+                $SettingsData = $parsed
+            }
+        }
+    }
+    if (-not $SettingsData.ContainsKey("trustedWorkspaces") -or -not ($SettingsData["trustedWorkspaces"] -is [System.Collections.IEnumerable])) {
+        $SettingsData["trustedWorkspaces"] = @()
+    }
+    $TrustedList = [System.Collections.ArrayList]@($SettingsData["trustedWorkspaces"])
+    $WorktreesDir = Join-Path $ResolvedTarget ".worktrees"
+    $WorktreesAgentDir = Join-Path $ResolvedTarget ".worktrees\agent"
+
+    foreach ($pathCandidate in @($ResolvedTarget, $WorktreesDir, $WorktreesAgentDir)) {
+        if (-not ($TrustedList -contains $pathCandidate)) {
+            $TrustedList.Add($pathCandidate) | Out-Null
+        }
+    }
+    $SettingsData["trustedWorkspaces"] = $TrustedList
+    $SettingsData | ConvertTo-Json -Depth 10 | Set-Content $AgySettingsFile -Encoding utf8
+    Write-Host "  [+] Auto-trusted project and .worktrees in agy-cli settings.json" -ForegroundColor Green
+} catch {
+    # Non-critical trust registration
+}
+
 # 8. Install Git Pre-commit Hooks in target if it is a Git repo
 $TargetGit = Join-Path $ResolvedTarget ".git"
 if (Test-Path $TargetGit) {

@@ -38,6 +38,75 @@ class HerdrDispatcher:
         return shutil.which(executable) is not None
 
     @classmethod
+    def trust_workspace(
+        cls,
+        workspace_path: Path,
+        settings_file: Optional[Path] = None,
+    ) -> bool:
+        """Register workspace path and its worktree parent in agy-cli trustedWorkspaces.
+
+        Args:
+            workspace_path: Path to workspace or worktree directory.
+            settings_file: Optional custom path to settings.json (for testing or overrides).
+
+        Returns:
+            bool: True if settings were successfully checked or updated, False otherwise.
+        """
+        try:
+            target_settings = (
+                settings_file
+                if settings_file is not None
+                else Path.home() / ".gemini" / "antigravity-cli" / "settings.json"
+            )
+            target_settings.parent.mkdir(parents=True, exist_ok=True)
+
+            data = {}
+            if target_settings.is_file():
+                try:
+                    with open(target_settings, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    data = {}
+
+            if not isinstance(data, dict):
+                data = {}
+
+            trusted = data.get("trustedWorkspaces")
+            if not isinstance(trusted, list):
+                trusted = []
+
+            resolved_ws = Path(workspace_path).resolve()
+            paths_to_add = [str(resolved_ws)]
+
+            # Check if this path is inside a .worktrees directory
+            for parent in resolved_ws.parents:
+                if parent.name == ".worktrees":
+                    paths_to_add.append(str(parent))
+                    break
+
+            modified = False
+            for p in paths_to_add:
+                # Normalize comparison
+                norm_p = str(Path(p).resolve())
+                already_present = any(
+                    str(Path(existing).resolve()) == norm_p
+                    for existing in trusted
+                    if isinstance(existing, str)
+                )
+                if not already_present:
+                    trusted.append(str(p))
+                    modified = True
+
+            if modified or "trustedWorkspaces" not in data:
+                data["trustedWorkspaces"] = trusted
+                with open(target_settings, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+
+            return True
+        except Exception:
+            return False
+
+    @classmethod
     def create_agent_worktree(
         cls,
         task_id: str,
@@ -130,8 +199,11 @@ class HerdrDispatcher:
 
             for cp in candidate_paths:
                 if cp.exists() and cp.is_dir():
+                    cls.trust_workspace(cp)
                     cls.setup_worktree_env(cp, repo_root=repo_root)
                     break
+            else:
+                cls.trust_workspace(Path(path))
 
         return True, path, pane_id
 
@@ -564,6 +636,7 @@ class HerdrDispatcher:
         """
         root = repo_root or Path.cwd()
         worktree_path = Path(worktree_path)
+        cls.trust_workspace(worktree_path)
         worktree_path.mkdir(parents=True, exist_ok=True)
         env_files = [".env", ".env.test", ".env.local", ".env.example", ".flake8"]
         copied: List[str] = []

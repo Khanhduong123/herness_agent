@@ -806,3 +806,97 @@ class TestLifecycleCliCommands:
             result = runner.invoke(main, ["abort", "t1", "--reason", "Timeout"])
             assert result.exit_code == 0
             assert "Task t1 aborted" in result.output
+
+    def test_trust_workspace_creates_file_and_adds_paths(self, tmp_path: Path) -> None:
+        """Test trust_workspace when settings.json does not exist yet."""
+        settings_file = tmp_path / "settings.json"
+        wt_path = tmp_path / "my_project" / ".worktrees" / "agent" / "subtask_01"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        res = HerdrDispatcher.trust_workspace(wt_path, settings_file=settings_file)
+        assert res is True
+        assert settings_file.is_file()
+
+        with open(settings_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        assert "trustedWorkspaces" in data
+        trusted = data["trustedWorkspaces"]
+        assert str(wt_path.resolve()) in trusted
+        # Parent .worktrees should also be added
+        parent_wt = str((tmp_path / "my_project" / ".worktrees").resolve())
+        assert parent_wt in trusted
+
+    def test_trust_workspace_idempotent(self, tmp_path: Path) -> None:
+        """Test trust_workspace does not duplicate existing paths."""
+        settings_file = tmp_path / "settings.json"
+        wt_path = tmp_path / "repo" / "custom"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        # Prepopulate settings
+        settings_file.write_text(
+            json.dumps({"trustedWorkspaces": [str(wt_path.resolve())]}),
+            encoding="utf-8",
+        )
+
+        res = HerdrDispatcher.trust_workspace(wt_path, settings_file=settings_file)
+        assert res is True
+
+        with open(settings_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        assert len(data["trustedWorkspaces"]) == 1
+        assert data["trustedWorkspaces"][0] == str(wt_path.resolve())
+
+    def test_trust_workspace_corrupt_or_non_dict_json(self, tmp_path: Path) -> None:
+        """Test trust_workspace when settings.json contains corrupt JSON or non-dict data."""
+        settings_file = tmp_path / "corrupt_settings.json"
+        settings_file.write_text("NOT_VALID_JSON{", encoding="utf-8")
+        wt_path = tmp_path / "my_project" / "workspace"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        res = HerdrDispatcher.trust_workspace(wt_path, settings_file=settings_file)
+        assert res is True
+
+        with open(settings_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert isinstance(data, dict)
+        assert str(wt_path.resolve()) in data.get("trustedWorkspaces", [])
+
+        # Non-dict JSON (e.g. array)
+        settings_file.write_text('["unexpected", "array"]', encoding="utf-8")
+        res2 = HerdrDispatcher.trust_workspace(wt_path, settings_file=settings_file)
+        assert res2 is True
+        with open(settings_file, "r", encoding="utf-8") as f:
+            data2 = json.load(f)
+        assert isinstance(data2, dict)
+        assert str(wt_path.resolve()) in data2.get("trustedWorkspaces", [])
+
+    def test_trust_workspace_non_list_trusted_workspaces(self, tmp_path: Path) -> None:
+        """Test trust_workspace when trustedWorkspaces is not a list in settings.json."""
+        settings_file = tmp_path / "invalid_type_settings.json"
+        settings_file.write_text(
+            json.dumps({"trustedWorkspaces": "not-a-list"}),
+            encoding="utf-8",
+        )
+        wt_path = tmp_path / "my_project" / "workspace"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        res = HerdrDispatcher.trust_workspace(wt_path, settings_file=settings_file)
+        assert res is True
+
+        with open(settings_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert isinstance(data.get("trustedWorkspaces"), list)
+        assert str(wt_path.resolve()) in data["trustedWorkspaces"]
+
+    def test_trust_workspace_exception_handling(self, tmp_path: Path) -> None:
+        """Test trust_workspace handles unexpected file errors gracefully returning False."""
+        # Target a path where writing will fail (e.g. directory named as settings file)
+        bad_settings = tmp_path / "is_a_directory"
+        bad_settings.mkdir()
+        wt_path = tmp_path / "my_project" / "workspace"
+
+        with patch("pathlib.Path.mkdir", side_effect=PermissionError("Mocked write failure")):
+            res = HerdrDispatcher.trust_workspace(wt_path, settings_file=bad_settings)
+            assert res is False
