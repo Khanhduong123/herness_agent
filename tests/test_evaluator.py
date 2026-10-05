@@ -1,5 +1,7 @@
 """Unit tests for evaluators."""
 
+import sys
+
 from harness_agent.core.models import RunResult, Task, TaskCheck
 from harness_agent.evaluation.evaluator import (
     CommandEvaluator,
@@ -74,7 +76,7 @@ def test_evaluate_task_aggregation(tmp_path):
 
 def test_command_evaluator(tmp_path):
     evaluator = CommandEvaluator()
-    check = TaskCheck(type="command_exit_zero", target="python -c \"print('test')\"")
+    check = TaskCheck(type="command_exit_zero", target=f'"{sys.executable}" -c "print(123)"')
     res = RunResult(task_id="t1", success=True, exit_code=0, duration_seconds=0.1)
 
     passed, msg = evaluator.evaluate(check, res, str(tmp_path))

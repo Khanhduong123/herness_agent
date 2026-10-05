@@ -293,7 +293,7 @@ conda run -n pytorch harness-agent run-prompt "Refactor utils.py to use async/aw
 Execute automated test and benchmark suites defined in YAML/JSON to evaluate agent capabilities and measure pass rates:
 
 ```powershell
-conda run -n pytorch harness-agent run-suite examples/sample_suite.yaml --output runs/eval_report.json
+conda run -n pytorch harness-agent run-suite examples/sample_suite.yaml --output .runs/eval_report.json
 ```
 
 Sample Suite Definition ([`examples/sample_suite.yaml`](examples/sample_suite.yaml)):
@@ -321,7 +321,7 @@ Execute multi-agent Task DAGs coordinating specialized workers (Researcher, Code
 
 ```powershell
 # Run a full orchestrator plan
-conda run -n pytorch harness-agent orchestrate examples/orchestrator_plan.yaml --output runs/orchestration_report.json
+conda run -n pytorch harness-agent orchestrate examples/orchestrator_plan.yaml --output .runs/orchestration_report.json
 
 # Resume interrupted run
 conda run -n pytorch harness-agent resume

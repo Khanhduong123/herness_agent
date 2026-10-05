@@ -101,7 +101,7 @@ def run_prompt_cmd(
 
 @main.command(name="run-suite")
 @click.argument("suite_file", type=click.Path(exists=True))
-@click.option("--output", "-o", default="runs/eval_report.json", help="Path to save JSON report")
+@click.option("--output", "-o", default=".runs/eval_report.json", help="Path to save JSON report")
 @click.option("--model", default=None, help="Override model for the suite")
 @click.option("--effort", default=None, help="Override reasoning effort")
 def run_suite_cmd(
@@ -166,7 +166,7 @@ def _print_orchestration_summary(result: OrchestrationResult, output: str) -> No
 @main.command(name="orchestrate")
 @click.argument("plan_file", type=click.Path(exists=True))
 @click.option(
-    "--output", "-o", default="runs/orchestration_report.json", help="Path to save JSON report"
+    "--output", "-o", default=".runs/orchestration_report.json", help="Path to save JSON report"
 )
 @click.option("--model", default=None, help="Override default model for workers")
 @click.option("--effort", default=None, help="Override reasoning effort")
@@ -203,7 +203,7 @@ def orchestrate_cmd(
 @click.argument("plan_or_id", required=False, default=None)
 @click.option("--db", default=None, help="Path to SQLite state database")
 @click.option(
-    "--output", "-o", default="runs/orchestration_report.json", help="Path to save JSON report"
+    "--output", "-o", default=".runs/orchestration_report.json", help="Path to save JSON report"
 )
 @click.option("--model", default=None, help="Override default model for workers")
 @click.option("--effort", default=None, help="Override reasoning effort")

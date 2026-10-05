@@ -67,9 +67,9 @@ After committing to the dedicated feature or fix branch and completing the quali
    git push -u origin <branch-name>
    ```
 2. **Create Pull Request**:
-   The agent **MUST create a Pull Request** targeting `main` (or `dev`) via GitHub CLI (`gh`) or GitHub REST API:
+   The agent **MUST create a Pull Request** targeting `main` (or `dev`) using the automated CLI tool:
    ```powershell
-   gh pr create --base main --head <branch-name> --title "feat/fix: <description>" --body "<detailed PR description>"
+   conda run -n pytorch harness-agent pr create --base main
    ```
 3. **Report PR Link to User**:
    The agent **MUST provide the resulting Pull Request URL directly to the user** in the response. Under no circumstances should the agent merge the PR into protected branches (merging remains exclusively the human user's authority).
