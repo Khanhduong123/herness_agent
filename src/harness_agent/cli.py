@@ -794,6 +794,13 @@ def cite_check_cmd(report_file: str, sources_dir: Optional[str], is_json: bool) 
 )
 @click.option("--prompt", "prompt_override", default=None, help="Custom prompt override")
 @click.option("--wait", is_flag=True, default=False, help="Wait for worker agent to finish")
+@click.option(
+    "--feature",
+    "--base",
+    "base_ref",
+    default=None,
+    help="Base branch/reference for the worktree branch",
+)
 def dispatch_cmd(
     task_id: str,
     spec_file: Optional[str],
@@ -801,6 +808,7 @@ def dispatch_cmd(
     dangerously_skip_permissions: bool,
     prompt_override: Optional[str],
     wait: bool,
+    base_ref: Optional[str] = None,
 ) -> None:
     """Interactively dispatch a task to a worker agent running in a Herdr workspace."""
     if not spec_file and not prompt_override:
@@ -823,7 +831,7 @@ def dispatch_cmd(
         sys.exit(1)
 
     click.echo(f"Creating git worktree for task '{task_id}'...")
-    ok, msg_or_path, pane_id = HerdrDispatcher.create_agent_worktree(task_id)
+    ok, msg_or_path, pane_id = HerdrDispatcher.create_agent_worktree(task_id, base_ref=base_ref)
     if not ok:
         click.secho(f"✗ Failed to create worktree: {msg_or_path}", fg="red")
         sys.exit(1)
@@ -968,6 +976,124 @@ def pr_create_cmd(
         click.secho(fallback_msg, fg="yellow")
     else:
         click.secho(f"✓ Pull Request created successfully: {result.pr_url}", fg="green")
+
+
+@main.group(name="feature")
+def feature_group() -> None:
+    """Feature branch management commands."""
+    pass
+
+
+@feature_group.command(name="create")
+@click.argument("feature_name")
+@click.option(
+    "--base",
+    default="main",
+    help="Base branch to create feature branch from (default: main)",
+)
+def feature_create_cmd(feature_name: str, base: str) -> None:
+    """Create and checkout a new feature branch."""
+    ok, msg = HerdrDispatcher.create_feature_branch(feature_name=feature_name, base_branch=base)
+    if ok:
+        click.secho(f"✓ {msg}", fg="green")
+    else:
+        click.secho(f"✗ Failed to create feature branch: {msg}", fg="red")
+        sys.exit(1)
+
+
+@main.group(name="worktree")
+def worktree_group() -> None:
+    """Git worktree and worker workspace lifecycle commands."""
+    pass
+
+
+@worktree_group.command(name="merge")
+@click.argument("task_id")
+@click.option(
+    "--into",
+    "target_branch",
+    required=True,
+    help="Target feature branch to merge into",
+)
+@click.option(
+    "--no-ff/--ff",
+    default=True,
+    help="Use --no-ff merge strategy (default: True)",
+)
+def worktree_merge_cmd(task_id: str, target_branch: str, no_ff: bool) -> None:
+    """Merge a completed subtask worktree branch into a feature branch and cleanup."""
+    click.echo(f"Merging worktree branch for task '{task_id}' into '{target_branch}'...")
+    ok, msg = HerdrDispatcher.merge_worktree_to_feature(
+        task_id=task_id, target_branch=target_branch, no_ff=no_ff
+    )
+    if ok:
+        click.secho(f"✓ {msg}", fg="green")
+    else:
+        click.secho(f"✗ Failed to merge worktree: {msg}", fg="red")
+        sys.exit(1)
+
+
+@worktree_group.command(name="cleanup")
+@click.argument("task_id")
+@click.option(
+    "--force/--no-force",
+    default=True,
+    help="Force remove worktree (default: True)",
+)
+def worktree_cleanup_cmd(task_id: str, force: bool) -> None:
+    """Stop worker agent and safely remove its isolated worktree."""
+    click.echo(f"Cleaning up worktree for task '{task_id}'...")
+    ok, msg = HerdrDispatcher.cleanup_worktree(task_id=task_id, force=force)
+    if ok:
+        click.secho(f"✓ {msg}", fg="green")
+    else:
+        click.secho(f"✗ Failed to clean up worktree: {msg}", fg="red")
+        sys.exit(1)
+
+
+@main.command(name="wait")
+@click.argument("task_id")
+@click.option(
+    "--timeout",
+    default=600,
+    type=int,
+    help="Timeout in seconds to wait (default: 600)",
+)
+@click.option(
+    "--poll-interval",
+    default=2.0,
+    type=float,
+    help="Seconds between poll checks (default: 2.0)",
+)
+def wait_cmd(task_id: str, timeout: int, poll_interval: float) -> None:
+    """Wait for a subtask worker agent to complete (blocking, zero tokens)."""
+    click.echo(f"Waiting for task '{task_id}' to complete (timeout={timeout}s)...")
+    ok, msg = HerdrDispatcher.wait_for_task(
+        task_id=task_id, timeout_seconds=timeout, poll_interval=poll_interval
+    )
+    if ok:
+        click.secho(f"✓ Task '{task_id}' completed: {msg}", fg="green")
+    else:
+        click.secho(f"✗ {msg}", fg="red")
+        sys.exit(1)
+
+
+@main.command(name="abort")
+@click.argument("task_id")
+@click.option(
+    "--reason",
+    default="Aborted via CLI",
+    help="Reason for aborting task",
+)
+def abort_cmd(task_id: str, reason: str) -> None:
+    """Abort subtask, archive failure diagnostic diff, stop agent, and remove worktree."""
+    click.echo(f"Aborting task '{task_id}'...")
+    ok, msg = HerdrDispatcher.abort_task(task_id=task_id, reason=reason)
+    if ok:
+        click.secho(f"✓ {msg}", fg="green")
+    else:
+        click.secho(f"✗ Failed to abort task: {msg}", fg="red")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
