@@ -27,6 +27,13 @@ Fixes # (issue)
 * Python version:
 * OS:
 
+## Adversarial Critic Review Gate
+
+<!-- Programmatic evaluation results from the 3 Adversarial Critics -->
+- [ ] Security Reviewer (`PASS` / No vulnerabilities detected)
+- [ ] Performance Reviewer (`PASS` / Algorithmic efficiency & memory clean)
+- [ ] Requirement Reviewer (`PASS` / Specifications & acceptance criteria met)
+
 ## Test Evidence
 
 <!-- Please provide evidence that tests pass and the feature works as expected. This can be screenshots, console logs, or recorded terminal sessions. -->

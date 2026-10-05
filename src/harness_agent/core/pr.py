@@ -8,7 +8,10 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from harness_agent.core.models import AggregatedCriticReview
 
 DEFAULT_PR_TEMPLATE = """## Description
 
@@ -41,6 +44,13 @@ Provide instructions so we can reproduce. -->
 **Test Configuration**:
 * Python version:
 * OS:
+
+## Adversarial Critic Review Gate
+
+<!-- Programmatic evaluation results from the 3 Adversarial Critics -->
+- [ ] Security Reviewer (`PASS` / No vulnerabilities detected)
+- [ ] Performance Reviewer (`PASS` / Algorithmic efficiency & memory clean)
+- [ ] Requirement Reviewer (`PASS` / Specifications & acceptance criteria met)
 
 ## Test Evidence
 
@@ -433,6 +443,8 @@ class PRGenerator:
         custom_title: Optional[str] = None,
         custom_description: Optional[str] = None,
         test_output: Optional[str] = None,
+        critic_review: Optional[AggregatedCriticReview] = None,
+        no_review: bool = False,
     ) -> Tuple[str, str]:
         """Generate PR title and markdown body populated with git context."""
         context = cls.collect_git_context(repo_root=repo_root, base_branch=base_branch)
@@ -513,6 +525,75 @@ class PRGenerator:
             count=1,
         )
 
+        # 4.5. Adversarial Critic Review Gate
+        if "## Adversarial Critic Review Gate" not in content:
+            gate_block = (
+                "## Adversarial Critic Review Gate\n\n"
+                "<!-- Programmatic evaluation results from the 3 Adversarial Critics -->\n"
+                "- [ ] Security Reviewer (`PASS` / No vulnerabilities detected)\n"
+                "- [ ] Performance Reviewer (`PASS` / Algorithmic efficiency & memory clean)\n"
+                "- [ ] Requirement Reviewer (`PASS` / Specifications & acceptance criteria met)\n\n"
+            )
+            if "## Test Evidence" in content:
+                content = content.replace("## Test Evidence", f"{gate_block}## Test Evidence", 1)
+            elif "## Checklist:" in content:
+                content = content.replace("## Checklist:", f"{gate_block}## Checklist:", 1)
+            else:
+                content += f"\n\n{gate_block}"
+
+        # Determine checkbox state
+        sec_ok = (
+            True
+            if no_review
+            else (
+                critic_review.security_critic.approved
+                if (critic_review and critic_review.security_critic)
+                else (critic_review.approved if critic_review else True)
+            )
+        )
+        perf_ok = (
+            True
+            if no_review
+            else (
+                critic_review.performance_critic.approved
+                if (critic_review and critic_review.performance_critic)
+                else (critic_review.approved if critic_review else True)
+            )
+        )
+        req_ok = (
+            True
+            if no_review
+            else (
+                critic_review.requirement_critic.approved
+                if (critic_review and critic_review.requirement_critic)
+                else (critic_review.approved if critic_review else True)
+            )
+        )
+
+        if sec_ok:
+            content = re.sub(r"- \[ \] (Security Reviewer.*)", r"- [x] \1", content, count=1)
+        if perf_ok:
+            content = re.sub(r"- \[ \] (Performance Reviewer.*)", r"- [x] \1", content, count=1)
+        if req_ok:
+            content = re.sub(r"- \[ \] (Requirement Reviewer.*)", r"- [x] \1", content, count=1)
+
+        if critic_review and critic_review.summary:
+            summary_snippet = (
+                f"\n\n<details>\n<summary>Adversarial Critic Evaluation Summary</summary>\n\n"
+                f"{critic_review.summary.strip()}\n\n</details>"
+            )
+            gate_match = re.search(
+                r"(## Adversarial Critic Review Gate.*?- \[.\] Requirement Reviewer[^\n]*)",
+                content,
+                flags=re.DOTALL,
+            )
+            if gate_match:
+                content = content.replace(
+                    gate_match.group(1),
+                    gate_match.group(1) + summary_snippet,
+                    1,
+                )
+
         # 5. Test Evidence
         content = re.sub(
             r"- \[ \] (Console logs / Test Output included.*)",
@@ -555,6 +636,8 @@ class PRGenerator:
         push: bool = True,
         draft: bool = False,
         custom_description: Optional[str] = None,
+        critic_review: Optional[AggregatedCriticReview] = None,
+        no_review: bool = False,
     ) -> PRResult:
         """Create a PR using gh CLI or provide web URL fallback."""
         root = repo_root or cls._resolve_repo_root()
@@ -583,6 +666,8 @@ class PRGenerator:
                 issue_id=issue_id,
                 custom_title=title,
                 custom_description=custom_description,
+                critic_review=critic_review,
+                no_review=no_review,
             )
             title = title or gen_title
             body = body or gen_body
