@@ -41,6 +41,10 @@ def test_get_rule_0_reminder() -> None:
     assert "STRICTLY PROHIBITED FROM DIRECTLY WRITING" in reminder
     assert "replace_file_content" in reminder
     assert "Coder Worker Agent" in reminder
+    assert "invoke_subagent" in reminder
+    assert "define_subagent" in reminder
+    assert "agents ngầm" in reminder
+    assert "--dangerously-skip-permissions" in reminder
 
 
 def test_build_preinvocation_payload_default() -> None:
