@@ -30,7 +30,7 @@
 | **Modify Application Source Code** | ✅ *(In Worktree only)* | ❌ | 🚫 *(FORBIDDEN - Rule 0)* | ❌ |
 | **Run `pytest` & Self-Tests** | ✅ | ✅ | 🔍 *(Read test reports only)* | ❌ |
 | **Quality Evaluation (Adversarial Review)** | ❌ | ✅ *(Read-only diffs)* | 🔍 *(Aggregate feedback)* | ❌ |
-| **Open Pull Request (`gh pr create`)** | ❌ | ❌ | ✅ | ❌ |
+| **Open Pull Request (`harness-agent pr create`)** | ❌ | ❌ | ✅ | ❌ |
 | **Merge into Protected Branch (`main`/`dev`)** | ❌ | ❌ | 🚫 **(STRICTLY FORBIDDEN)** | 👑 **(Review & Merge)** |
 
 ---
@@ -68,7 +68,7 @@
 - **Human-Only Merge Authority:** Merging code into `main` or `dev` is exclusively reserved for the human user.
 - **Automated PR Gate Protocol:** Upon final approval (100% pytest pass + 3 Critics PASS):
   1. Push feature branch to remote: `git push -u origin agent/<task_id>`
-  2. Create Pull Request using CLI tool: `conda run -n pytorch harness-agent pr create --base main` (or `gh pr create --title "[<task_id>] <title>" --body "<summary>"`)
+  2. Create Pull Request using CLI tool: `conda run -n pytorch harness-agent pr create --base main`
   3. Clean up the isolated worktree: `git worktree remove .worktrees/agent/<task_id>`
   4. Provide the PR link directly to the User in chat for manual review and merge authorization.
 
@@ -139,7 +139,7 @@ graph TD
     EvalGate -->|FAILED: Loops < 3| Aggregate["Aggregate feedback & Re-prompt Coder"]
     Aggregate --> Coder
     EvalGate -->|FAILED: Loops >= 3| Escalate["Escalate to User (Break infinite loops)"]
-    EvalGate -->|PASSED| PR["Push branch & Create PR (gh pr create)<br/>Remove worktree & Human reviews/merges"]
+    EvalGate -->|PASSED| PR["Push branch & Create PR (harness-agent pr create)<br/>Remove worktree & Human reviews/merges"]
 ```
 
 ---

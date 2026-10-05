@@ -58,13 +58,9 @@ This skill guides the final staging and commit phase of the SDLC workflow.
    ```powershell
    git push -u origin <branch-name>
    ```
-6. Create Pull Request targeting `main` (or `dev`) using the automated PR tool or GitHub CLI:
+6. Create Pull Request targeting `main` (or `dev`) using the automated PR tool:
    ```powershell
-   # Recommended: Automatically populate template from commits/tests and create PR
-   harness-agent pr create --base main
-
-   # Or manual GitHub CLI creation:
-   gh pr create --base main --head <branch-name> --title "feat(scope): concise explanation" --body "Summary of changes"
+   conda run -n pytorch harness-agent pr create --base main
    ```
 7. Provide the resulting PR link directly to the user.
 
@@ -72,6 +68,6 @@ This skill guides the final staging and commit phase of the SDLC workflow.
 
 ## 4. Remote Push & Pull Request Protocol
 - **Automatic Push**: After committing changes to a feature or fix branch, the agent **MUST automatically push** the branch to the remote repository.
-- **Pull Request Creation & Template Compliance**: The agent **MUST create a Pull Request** targeting `main` (or `dev`) using `harness-agent pr create --base main` (or GitHub CLI `gh`).
+- **Pull Request Creation & Template Compliance**: The agent **MUST create a Pull Request** targeting `main` (or `dev`) using `conda run -n pytorch harness-agent pr create --base main`.
   - The PR body **MUST strictly populate `.github/pull_request_template.md`** (Description, Type of change, Test Configuration, Test Evidence / console output, and Checklist). `harness-agent pr create` does this automatically.
 - **User Notification**: The agent **MUST output the PR URL** to the user so the human reviewer can inspect and merge. Automated merging to protected branches remains strictly prohibited.
