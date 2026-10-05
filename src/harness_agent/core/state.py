@@ -238,13 +238,13 @@ class DAGStateStore:
             "| :--- | :--- | :--- |",
         ]
         status_icons = {
-            TaskStatus.PENDING: "⏳ PENDING",
-            TaskStatus.RUNNING: "🔄 RUNNING",
-            TaskStatus.VALIDATING: "🔍 VALIDATING",
-            TaskStatus.COMPLETED: "✅ COMPLETED",
-            TaskStatus.FAILED: "❌ FAILED",
-            TaskStatus.BLOCKED: "🚫 BLOCKED",
-            TaskStatus.SKIPPED: "⏭️ SKIPPED",
+            TaskStatus.PENDING: "[PENDING]",
+            TaskStatus.RUNNING: "[RUNNING]",
+            TaskStatus.VALIDATING: "[VALIDATING]",
+            TaskStatus.COMPLETED: "[COMPLETED]",
+            TaskStatus.FAILED: "[FAILED]",
+            TaskStatus.BLOCKED: "[BLOCKED]",
+            TaskStatus.SKIPPED: "[SKIPPED]",
         }
         for tid, st in task_statuses.items():
             icon = status_icons.get(st, st.value.upper())
