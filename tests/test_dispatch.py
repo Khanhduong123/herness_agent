@@ -194,6 +194,61 @@ class TestHerdrDispatcher:
             assert ok is False
             assert "agent_blocked" in msg
 
+    def test_dispatch_interactive_critics_herdr_unavailable(self) -> None:
+        """dispatch_interactive_critics returns False when Herdr is unavailable."""
+        with patch.object(HerdrDispatcher, "is_herdr_available", return_value=False):
+            ok, msg = HerdrDispatcher.dispatch_interactive_critics(base_ref="main")
+            assert ok is False
+            assert "Herdr CLI 'herdr' is not installed" in msg
+
+    def test_dispatch_interactive_critics_success(self) -> None:
+        """dispatch_interactive_critics splits pane, starts agent, and sends prompted diff."""
+        diff_out = "diff --git a/file.py b/file.py\n+x = 1\n"
+        diff_proc = MagicMock(returncode=0, stdout=diff_out, stderr="")
+        split_proc = MagicMock(
+            returncode=0,
+            stdout=json.dumps({"result": {"pane_id": "critics:p2"}}),
+            stderr="",
+        )
+        start_proc = MagicMock(returncode=0, stdout="agent started", stderr="")
+        prompt_proc = MagicMock(returncode=0, stdout="prompt sent", stderr="")
+
+        with (
+            patch.object(HerdrDispatcher, "is_herdr_available", return_value=True),
+            patch(
+                "subprocess.run",
+                side_effect=[diff_proc, split_proc, start_proc, prompt_proc],
+            ) as mock_run,
+        ):
+            ok, msg = HerdrDispatcher.dispatch_interactive_critics(
+                base_ref="main",
+                task_id="subtask_02",
+            )
+            assert ok is True
+            assert "Dispatched interactive critic inspection agent" in msg
+            assert "critics:p2" in msg
+
+            # Verify prompt content includes role anchor
+            prompt_call = mock_run.call_args_list[3]
+            prompt_cmd = prompt_call[0][0]
+            assert "agent" in prompt_cmd and "prompt" in prompt_cmd
+            prompt_text = prompt_cmd[-1]
+            assert "[SYSTEM CONTEXT: You are an Adversarial Critic Agent" in prompt_text
+            assert "STATUS: APPROVED" in prompt_text
+
+    def test_dispatch_interactive_critics_split_failure(self) -> None:
+        """dispatch_interactive_critics handles split pane failure gracefully."""
+        diff_proc = MagicMock(returncode=0, stdout="diff --git a/a b/b\n", stderr="")
+        split_proc = MagicMock(returncode=1, stdout="", stderr="failed to split pane")
+
+        with (
+            patch.object(HerdrDispatcher, "is_herdr_available", return_value=True),
+            patch("subprocess.run", side_effect=[diff_proc, split_proc, split_proc]),
+        ):
+            ok, msg = HerdrDispatcher.dispatch_interactive_critics(base_ref="main")
+            assert ok is False
+            assert "Failed to create Herdr split pane" in msg
+
 
 class TestDispatchCliCommand:
     """Test suite for 'harness-agent dispatch' CLI command."""

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from harness_agent.core.models import (
@@ -523,3 +525,80 @@ async def dispatch_parallel_critics(
     feedbacks_dict = dict(results)
 
     return aggregate_critic_feedback(feedbacks_dict)
+
+
+def save_critic_report(
+    review: AggregatedCriticReview,
+    output_path: Optional[Path] = None,
+) -> Tuple[Path, Path]:
+    """Save structured critic evaluation report to JSON and Markdown files.
+
+    - Saves JSON report to .runs/critic_review_<timestamp>.json
+    - Saves Markdown summary to .runs/critic_review_<timestamp>.md
+    - Uses token-efficient ASCII indicators ([OK], [FAIL], [PASSED], [FAILED])
+
+    Args:
+        review: AggregatedCriticReview instance.
+        output_path: Optional custom path or directory. If specified with a .json or .md
+            extension, saves both sibling reports. If specified as a directory, saves
+            critic_review_<timestamp>.{json,md} inside it. If None, saves to .runs/.
+
+    Returns:
+        Tuple[Path, Path]: (json_report_path, markdown_report_path)
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if output_path is None:
+        runs_dir = Path(".runs")
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        json_path = runs_dir / f"critic_review_{timestamp}.json"
+        md_path = runs_dir / f"critic_review_{timestamp}.md"
+    else:
+        out_path = Path(output_path)
+        if out_path.is_dir() or not out_path.suffix:
+            out_path.mkdir(parents=True, exist_ok=True)
+            json_path = out_path / f"critic_review_{timestamp}.json"
+            md_path = out_path / f"critic_review_{timestamp}.md"
+        elif out_path.suffix.lower() == ".json":
+            json_path = out_path
+            md_path = out_path.with_suffix(".md")
+            json_path.parent.mkdir(parents=True, exist_ok=True)
+        elif out_path.suffix.lower() == ".md":
+            md_path = out_path
+            json_path = out_path.with_suffix(".json")
+            md_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            json_path = out_path.with_suffix(".json")
+            md_path = out_path.with_suffix(".md")
+            json_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 1. Write JSON representation
+    json_path.write_text(review.model_dump_json(indent=2), encoding="utf-8")
+
+    # 2. Write Markdown representation
+    if review.summary and review.summary.strip():
+        md_content = review.summary.strip()
+    else:
+        status_label = (
+            "APPROVED [OK]" if review.approved else "REJECTED [FAIL] (Remediation Required)"
+        )
+        lines = [
+            "## Adversarial Critic Review Report",
+            f"**Overall Status:** {status_label}",
+            "",
+        ]
+        for role_name, cf in review.critics_feedback.items():
+            status_icon = "[PASSED]" if cf.approved else "[FAILED]"
+            lines.append(f"### Critic: {cf.critic_name} ({cf.role.value.upper()}) {status_icon}")
+            if cf.issues:
+                lines.append("**Issues Detected:**")
+                for issue in cf.issues:
+                    lines.append(f"- {issue}")
+            else:
+                lines.append("No critical defects found.")
+            lines.append("")
+        md_content = "\n".join(lines).strip()
+
+    md_path.write_text(md_content + "\n", encoding="utf-8")
+
+    return json_path, md_path
