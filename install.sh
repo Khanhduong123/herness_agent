@@ -97,7 +97,21 @@ if [ -d "$SCRIPT_DIR/.agents" ]; then
     echo "  [✓] Copied SDLC Skills to .agents/skills/"
 fi
 
-# 4b. Copy GitHub Templates
+# 4a. Copy Lifecycle Hooks Configuration
+if [ -f "$SCRIPT_DIR/.agents/hooks.json" ]; then
+    mkdir -p "$TARGET_DIR/.agents"
+    cp "$SCRIPT_DIR/.agents/hooks.json" "$TARGET_DIR/.agents/hooks.json"
+    echo "  [✓] Created .agents/hooks.json (Lifecycle Hooks config)"
+fi
+
+# 4b. Copy Orchestrator Hooks Script
+if [ -d "$SCRIPT_DIR/src/harness_agent/hooks" ]; then
+    mkdir -p "$TARGET_DIR/src/harness_agent/hooks"
+    cp -r "$SCRIPT_DIR/src/harness_agent/hooks"/* "$TARGET_DIR/src/harness_agent/hooks/"
+    echo "  [✓] Copied Orchestrator hook script to src/harness_agent/hooks/"
+fi
+
+# 4c. Copy GitHub Templates
 if [ -d "$SCRIPT_DIR/.github" ]; then
     mkdir -p "$TARGET_DIR/.github"
     cp -r "$SCRIPT_DIR/.github"/* "$TARGET_DIR/.github/"

@@ -1,5 +1,10 @@
 """Unit test for the init command."""
 
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
 from click.testing import CliRunner
 
 from harness_agent.cli import main
@@ -18,6 +23,8 @@ def test_init_creates_files(tmp_path):
     assert not (target / ".ai" / "plan").exists()
     assert (target / ".agents" / "skills" / "sdlc-pretask-checklist" / "SKILL.md").exists()
     assert (target / ".agents" / "skills" / "sdlc-posttask-quality-gate" / "SKILL.md").exists()
+    assert (target / ".agents" / "hooks.json").exists()
+    assert (target / "src" / "harness_agent" / "hooks" / "enforce_orchestrator.py").exists()
 
     pre_commit_content = (target / ".pre-commit-config.yaml").read_text(encoding="utf-8")
     assert "no-commit-to-branch" in pre_commit_content
@@ -55,3 +62,41 @@ def test_init_existing_directory_merge(tmp_path):
     assert (target / "app.py").exists()
     assert (target / "AGENTS.md").exists()
     assert (target / ".agents" / "skills" / "sdlc-pretask-checklist" / "SKILL.md").exists()
+
+
+def test_install_ps1_scaffolding(tmp_path: Path) -> None:
+    """Test that install.ps1 creates .agents/hooks.json without nested .agents/.agents."""
+    ps_executable = shutil.which("powershell") or shutil.which("pwsh")
+    if not ps_executable:
+        pytest.skip("PowerShell executable not found")
+
+    repo_root = Path(__file__).resolve().parent.parent
+    install_script = repo_root / "install.ps1"
+    assert install_script.exists()
+
+    target = tmp_path / "ps_scaffold_target"
+    target.mkdir(parents=True, exist_ok=True)
+    # Pre-create .agents directory to ensure idempotency and test against nested .agents/.agents
+    (target / ".agents").mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(
+        [
+            ps_executable,
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(install_script),
+            "-TargetDir",
+            str(target),
+            "-Force",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+    )
+    assert (
+        result.returncode == 0
+    ), f"install.ps1 failed: stdout={result.stdout}, stderr={result.stderr}"
+    assert (target / ".agents" / "hooks.json").exists()
+    assert not (target / ".agents" / ".agents").exists()
+    assert (target / "src" / "harness_agent" / "hooks" / "enforce_orchestrator.py").exists()

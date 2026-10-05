@@ -314,6 +314,15 @@ def init_cmd(
         target_agents = target_path / ".agents"
         shutil.copytree(agents_src, target_agents, dirs_exist_ok=True)
         click.secho("  [✓] Created .agents/skills/ (SDLC Skills)", fg="green")
+        if (target_agents / "hooks.json").exists():
+            click.secho("  [✓] Created .agents/hooks.json (Lifecycle Hooks config)", fg="green")
+        copied += 1
+
+    hooks_src = repo_root / "src" / "harness_agent" / "hooks"
+    if hooks_src.exists():
+        target_hooks = target_path / "src" / "harness_agent" / "hooks"
+        shutil.copytree(hooks_src, target_hooks, dirs_exist_ok=True)
+        click.secho("  [✓] Created src/harness_agent/hooks/ (Lifecycle Hooks)", fg="green")
         copied += 1
 
     _register_project(repo_root, target_path)
