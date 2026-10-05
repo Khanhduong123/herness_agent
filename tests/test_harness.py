@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from harness_agent.harness import AgentHarness
-from harness_agent.models import AgyConfig, RunResult, Task
+from harness_agent.core.harness import AgentHarness
+from harness_agent.core.models import AgyConfig, RunResult, Task
 
 
 @pytest.mark.asyncio

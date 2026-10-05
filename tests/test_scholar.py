@@ -8,7 +8,7 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from harness_agent.cli import main
-from harness_agent.scholar import (
+from harness_agent.research.scholar import (
     PaperMetadata,
     extract_paper_blueprint,
     invert_openalex_abstract,
@@ -138,8 +138,10 @@ def test_search_ai_papers_deduplication():
         ),
     ]
 
-    with patch("harness_agent.scholar.search_arxiv", return_value=mock_arxiv_papers):
-        with patch("harness_agent.scholar.search_openalex", return_value=mock_openalex_papers):
+    with patch("harness_agent.research.scholar.search_arxiv", return_value=mock_arxiv_papers):
+        with patch(
+            "harness_agent.research.scholar.search_openalex", return_value=mock_openalex_papers
+        ):
             res = search_ai_papers("scaling laws", limit=5)
             assert res.total_found == 2
             titles = [p.title for p in res.papers]
@@ -163,8 +165,8 @@ def test_cli_scholar_search():
     ]
 
     runner = CliRunner()
-    with patch("harness_agent.scholar.search_arxiv", return_value=mock_papers):
-        with patch("harness_agent.scholar.search_openalex", return_value=[]):
+    with patch("harness_agent.research.scholar.search_arxiv", return_value=mock_papers):
+        with patch("harness_agent.research.scholar.search_openalex", return_value=[]):
             # Test text format
             result = runner.invoke(main, ["scholar-search", "test query", "--limit", "2"])
             assert result.exit_code == 0

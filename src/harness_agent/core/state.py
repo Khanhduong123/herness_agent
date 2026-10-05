@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from harness_agent.models import OrchestrationPlan, RunResult, TaskStatus
+from harness_agent.core.models import OrchestrationPlan, RunResult, TaskStatus
 
 
 class DAGStateStore:

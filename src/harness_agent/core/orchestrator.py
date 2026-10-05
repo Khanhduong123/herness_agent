@@ -9,9 +9,7 @@ from typing import Dict, List, Optional, Set
 
 import yaml
 
-from harness_agent.critics import dispatch_parallel_critics
-from harness_agent.evaluator import evaluate_task
-from harness_agent.models import (
+from harness_agent.core.models import (
     AgentRole,
     AggregatedCriticReview,
     AgyConfig,
@@ -23,9 +21,9 @@ from harness_agent.models import (
     TaskStatus,
     WorkerAgentConfig,
 )
-from harness_agent.runner import AgyRunner
-from harness_agent.security import wrap_untrusted_content
-from harness_agent.state import DAGStateStore
+from harness_agent.core.runner import AgyRunner
+from harness_agent.core.security import wrap_untrusted_content
+from harness_agent.core.state import DAGStateStore
 
 
 class AgentOrchestrator:
@@ -282,6 +280,7 @@ class AgentOrchestrator:
                 ]
             )
 
+        first_fallback: Optional[str] = None
         for root in expanded_roots:
             candidate_base_dirs = [
                 os.path.join(root, ".ai", "plans"),
@@ -336,9 +335,15 @@ class AgentOrchestrator:
                                             return os.path.abspath(
                                                 os.path.join(dirpath, cand_entry)
                                             )
-                            return os.path.abspath(os.path.join(dirpath, candidates[0]))
+                            if first_fallback is None:
+                                first_fallback = os.path.abspath(
+                                    os.path.join(dirpath, candidates[0])
+                                )
                 except OSError:
                     pass
+
+        if first_fallback:
+            return first_fallback
 
         return None
 
@@ -712,7 +717,7 @@ class AgentOrchestrator:
         disallowed_tools = subtask.disallowed_tools or worker.disallowed_tools
 
         if result.success and (patch_only or allowed_tools or disallowed_tools):
-            from harness_agent.patch import validate_tool_call
+            from harness_agent.evaluation.patch import validate_tool_call
 
             for tc in result.tool_calls:
                 valid, reason = validate_tool_call(
@@ -730,6 +735,8 @@ class AgentOrchestrator:
 
         # Perform evaluation checks if defined
         if task_def.checks:
+            from harness_agent.evaluation.evaluator import evaluate_task
+
             evaluate_task(task_def, result, effective_workspace)
 
         return result
@@ -747,6 +754,8 @@ class AgentOrchestrator:
         task_results: Optional[Dict[str, RunResult]] = None,
     ) -> AggregatedCriticReview:
         """Dispatch diff to Security, Performance, and Requirement critics in parallel."""
+        from harness_agent.evaluation.critics import dispatch_parallel_critics
+
         workers = plan.workers if plan else {}
         review = await dispatch_parallel_critics(
             runner=self.runner,

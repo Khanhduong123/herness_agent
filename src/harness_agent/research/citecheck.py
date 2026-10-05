@@ -13,7 +13,12 @@ from typing import Dict, List, Optional, Set, Union
 
 from pydantic import BaseModel, Field
 
-from harness_agent.claims import CitationPair, extract_numbers, is_strong_claim, triage_citation
+from harness_agent.research.claims import (
+    CitationPair,
+    extract_numbers,
+    is_strong_claim,
+    triage_citation,
+)
 
 _ABBREVIATIONS = (
     "et al.",

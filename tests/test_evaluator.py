@@ -1,12 +1,12 @@
 """Unit tests for evaluators."""
 
-from harness_agent.evaluator import (
+from harness_agent.core.models import RunResult, Task, TaskCheck
+from harness_agent.evaluation.evaluator import (
     CommandEvaluator,
     FileExistsEvaluator,
     TextMatchEvaluator,
     evaluate_task,
 )
-from harness_agent.models import RunResult, Task, TaskCheck
 
 
 def test_file_exists_evaluator(tmp_path):

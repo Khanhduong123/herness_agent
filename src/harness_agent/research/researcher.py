@@ -7,7 +7,7 @@ import urllib.request
 from html.parser import HTMLParser
 from typing import Optional, Tuple
 
-from harness_agent.security import wrap_untrusted_content
+from harness_agent.core.security import wrap_untrusted_content
 
 
 class HTMLTextExtractor(HTMLParser):

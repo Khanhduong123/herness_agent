@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from harness_agent.models import (
+from harness_agent.core.models import (
     AgentRole,
     AggregatedCriticReview,
     AgyConfig,
@@ -17,7 +17,7 @@ from harness_agent.models import (
     Task,
     WorkerAgentConfig,
 )
-from harness_agent.runner import AgyRunner
+from harness_agent.core.runner import AgyRunner
 
 
 def detect_security_issues(diff_or_code: str) -> List[str]:
@@ -289,9 +289,20 @@ def parse_critic_feedback(
     )
 
 
-def aggregate_critic_feedback(feedbacks: Dict[str, CriticFeedback]) -> AggregatedCriticReview:
+def aggregate_critic_feedback(
+    feedbacks: Dict[str, CriticFeedback] | List[CriticFeedback] | Any,
+) -> AggregatedCriticReview:
     """Aggregate individual critic feedbacks into a unified review report."""
-    all_approved = all(cf.approved for cf in feedbacks.values())
+    if isinstance(feedbacks, list):
+        feedbacks_dict: Dict[str, CriticFeedback] = {
+            getattr(cf, "critic_name", str(i)): cf for i, cf in enumerate(feedbacks)
+        }
+    elif isinstance(feedbacks, dict):
+        feedbacks_dict = feedbacks
+    else:
+        feedbacks_dict = {}
+
+    all_approved = all(cf.approved for cf in feedbacks_dict.values())
 
     status_label = "APPROVED ✓" if all_approved else "REJECTED ✗ (Remediation Required)"
     summary_lines = [
@@ -300,7 +311,7 @@ def aggregate_critic_feedback(feedbacks: Dict[str, CriticFeedback]) -> Aggregate
         "",
     ]
 
-    for role_name, cf in feedbacks.items():
+    for role_name, cf in feedbacks_dict.items():
         status_icon = "✓ PASSED" if cf.approved else "✗ FAILED"
         summary_lines.append(
             f"### Critic: {cf.critic_name} ({cf.role.value.upper()}) [{status_icon}]"
@@ -315,7 +326,7 @@ def aggregate_critic_feedback(feedbacks: Dict[str, CriticFeedback]) -> Aggregate
 
     return AggregatedCriticReview(
         approved=all_approved,
-        critics_feedback=feedbacks,
+        critics_feedback=feedbacks_dict,
         summary="\n".join(summary_lines).strip(),
     )
 

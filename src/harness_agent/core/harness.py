@@ -9,9 +9,8 @@ from typing import List, Optional
 
 import yaml
 
-from harness_agent.evaluator import evaluate_task
-from harness_agent.models import AgyConfig, EvalReport, RunResult, Task
-from harness_agent.runner import AgyRunner
+from harness_agent.core.models import AgyConfig, EvalReport, RunResult, Task
+from harness_agent.core.runner import AgyRunner
 
 
 class AgentHarness:
@@ -44,6 +43,8 @@ class AgentHarness:
 
         # Run configured evaluators
         if task.checks:
+            from harness_agent.evaluation.evaluator import evaluate_task
+
             evaluate_task(task, result, workspace_dir)
 
         return result

@@ -10,7 +10,7 @@ import subprocess
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from harness_agent.models import AgyConfig, RunResult, Task, ToolCallRecord
+from harness_agent.core.models import AgyConfig, RunResult, Task, ToolCallRecord
 
 
 class AgyRunner:

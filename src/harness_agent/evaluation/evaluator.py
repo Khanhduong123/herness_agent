@@ -8,7 +8,7 @@ import subprocess
 from abc import ABC, abstractmethod
 from typing import Dict, Tuple
 
-from harness_agent.models import RunResult, Task, TaskCheck
+from harness_agent.core.models import RunResult, Task, TaskCheck
 
 
 class BaseEvaluator(ABC):
@@ -126,7 +126,7 @@ class ToolLockEvaluator(BaseEvaluator):
     """Validates that all executed tool calls comply with configured tool-locking policies."""
 
     def evaluate(self, check: TaskCheck, result: RunResult, workspace_dir: str) -> Tuple[bool, str]:
-        from harness_agent.patch import validate_tool_call
+        from harness_agent.evaluation.patch import validate_tool_call
 
         disallowed = (
             [t.strip() for t in check.target.split(",") if t.strip()] if check.target else []

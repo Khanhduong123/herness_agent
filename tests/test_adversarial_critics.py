@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from harness_agent.critics import aggregate_critic_feedback
-from harness_agent.models import AgentRole, OrchestrationPlan, RunResult, SubTask
-from harness_agent.orchestrator import AgentOrchestrator
+from harness_agent.core.models import AgentRole, OrchestrationPlan, RunResult, SubTask
+from harness_agent.core.orchestrator import AgentOrchestrator
+from harness_agent.evaluation.critics import aggregate_critic_feedback
 
 
 def test_critic_roles_enum_and_defaults():
@@ -87,7 +87,9 @@ def find_duplicates(items):
         ),
     ]
 
-    monkeypatch.setattr("harness_agent.critics.AgyRunner.execute_task", mock_runner.execute_task)
+    monkeypatch.setattr(
+        "harness_agent.evaluation.critics.AgyRunner.execute_task", mock_runner.execute_task
+    )
 
     orchestrator = AgentOrchestrator()
     review = await orchestrator.dispatch_adversarial_critics(diff_or_content=diff_with_issues)
@@ -145,7 +147,9 @@ def find_duplicates(items):
         output_text="STATUS: APPROVED\nCode looks great.",
     )
 
-    monkeypatch.setattr("harness_agent.critics.AgyRunner.execute_task", mock_runner.execute_task)
+    monkeypatch.setattr(
+        "harness_agent.evaluation.critics.AgyRunner.execute_task", mock_runner.execute_task
+    )
 
     orchestrator = AgentOrchestrator()
     review = await orchestrator.dispatch_adversarial_critics(diff_or_content=clean_diff)
@@ -176,7 +180,7 @@ async def test_parallel_dispatch_runs_concurrently(monkeypatch):
             output_text="STATUS: APPROVED",
         )
 
-    monkeypatch.setattr("harness_agent.critics.AgyRunner.execute_task", fake_execute)
+    monkeypatch.setattr("harness_agent.evaluation.critics.AgyRunner.execute_task", fake_execute)
 
     orchestrator = AgentOrchestrator()
     start_time = time.time()
@@ -199,7 +203,7 @@ def test_create_patch_task_for_coder_or_patcher():
         workspace_dir="/tmp/repo",
     )
 
-    from harness_agent.models import CriticFeedback
+    from harness_agent.core.models import CriticFeedback
 
     feedbacks = {
         "security_reviewer": CriticFeedback(
@@ -270,8 +274,8 @@ def authenticate(cursor, user, pwd):
             output_text="STATUS: REJECTED\nSecurity issue found.",
         )
 
-    monkeypatch.setattr("harness_agent.orchestrator.AgyRunner.execute_task", mock_execute)
-    monkeypatch.setattr("harness_agent.critics.AgyRunner.execute_task", mock_execute)
+    monkeypatch.setattr("harness_agent.core.orchestrator.AgyRunner.execute_task", mock_execute)
+    monkeypatch.setattr("harness_agent.evaluation.critics.AgyRunner.execute_task", mock_execute)
 
     orchestrator = AgentOrchestrator()
     result = await orchestrator.run_plan(plan)

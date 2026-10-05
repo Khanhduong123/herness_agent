@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from harness_agent.security import wrap_untrusted_content
+from harness_agent.core.security import wrap_untrusted_content
 
 logger = logging.getLogger(__name__)
 

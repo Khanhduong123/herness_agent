@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from harness_agent.models import (
+from harness_agent.core.models import (
     AgentRole,
     AgyConfig,
     OrchestrationPlan,
@@ -14,20 +14,20 @@ from harness_agent.models import (
     TaskStatus,
     UntrustedSource,
 )
-from harness_agent.orchestrator import AgentOrchestrator
-from harness_agent.researcher import (
-    extract_text_from_html,
-    fetch_web_page,
-    read_external_file,
-    read_issue_tracker,
-    read_pdf_document,
-)
-from harness_agent.security import (
+from harness_agent.core.orchestrator import AgentOrchestrator
+from harness_agent.core.security import (
     UNTRUSTED_SOURCE_INSTRUCTION,
     detect_injection_risk,
     extract_untrusted_content,
     sanitize_delimiters,
     wrap_untrusted_content,
+)
+from harness_agent.research.researcher import (
+    extract_text_from_html,
+    fetch_web_page,
+    read_external_file,
+    read_issue_tracker,
+    read_pdf_document,
 )
 
 
@@ -303,7 +303,7 @@ async def test_subtask_4_hostile_webpage_injection_scenario(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "harness_agent.orchestrator.AgyRunner.execute_task", mock_runner.execute_task
+        "harness_agent.core.orchestrator.AgyRunner.execute_task", mock_runner.execute_task
     )
 
     result = await orchestrator.run_plan(plan)
