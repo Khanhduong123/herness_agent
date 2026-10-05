@@ -43,9 +43,10 @@
 - **Mandatory Git Worktree Isolation:** Every subtask modifying code MUST run in an isolated Git Worktree managed via native `git worktree`, branching from the active feature branch:
   `git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<feature_name>`
 - **Worktree Environment Setup:** Environment configuration files (`.env`, `.env.test`, `.env.local`, `.env.example` if present) MUST be copied from the repository root into newly created git worktrees before workers run tests.
-- **Multiplexer Workspace Protocol:** All workers must be launched in explicit Herdr panes:
-  `herdr agent start worker_<task_id> --kind agy --pane <pane_id> --cwd .worktrees/agent/<task_id> -- --dangerously-skip-permissions`
+- **Multiplexer Workspace Protocol:** All workers must be launched in explicit Herdr panes with low effort:
+  `herdr agent start worker_<task_id> --kind agy --pane <pane_id> --cwd .worktrees/agent/<task_id> -- --dangerously-skip-permissions --effort low`
 - **Socket/Prompt Communication:** Orchestrator communicates with workers strictly via Herdr socket and explicit prompts (`herdr agent prompt worker_<task_id> "..."`).
+- **Worker Background Task Lockout:** Spawning background tasks (`ManageTask`) or setting scheduling loops (`schedule`) is strictly forbidden for leaf workers. All execution must be synchronous with blocking wait.
 
 ### Tier 2: Role Isolation & Anti-Role-Drift
 - **Dedicated Role Prompts:** Never share the Orchestrator's `AGENTS.md` with Worker Agents. Every sub-agent role has its dedicated prompt/skill file:
@@ -53,11 +54,12 @@
   - Adversarial Critic: `.agents/skills/critic_agent.md`
   - Tester Agent: `.agents/skills/tester_worker.md`
 - **Role Anchoring (Mandatory First Prompt Context):** Every prompt dispatched to a worker MUST begin with an explicit role anchor:
-  - Coder: `"[SYSTEM CONTEXT: You are a leaf implementation worker. You CANNOT plan or dispatch other agents. Only write code and run tests in your worktree.]"`
+  - Coder: `"[SYSTEM CONTEXT: You are a leaf implementation worker. You CANNOT plan or dispatch other agents. Only write code and run tests in your worktree. DO NOT use background tasks, ManageTask, or schedule polling. Execute all commands synchronously in blocking mode.]"`
   - Critic: `"[SYSTEM CONTEXT: You are an Adversarial Critic Agent operating strictly in READ-ONLY mode. You CANNOT modify code or dispatch agents. You only evaluate git diffs and code against specifications.]"`
   - Tester: `"[SYSTEM CONTEXT: You are a QA & Tester Worker Agent. You CANNOT orchestrate or modify core application logic. You write unit/integration tests and verify test coverage in your worktree.]"`
 - **Strict Leaf Worker Boundaries:** Leaf workers are strictly execution engines; they cannot orchestrate, design architectures, or spawn sub-agents.
 - **Read-Only Critics:** Adversarial Critics (Security, Performance, Requirements) operate strictly in READ-ONLY mode and evaluate git diffs only.
+- **Worker Thinking Budget & Task Lock:** Coder Workers are locked to synchronous blocking commands (`WaitMsBeforeAsync=10000ms`, direct `pytest` execution) with capped reasoning effort (`--effort low`) to prevent token burn and spinlocks.
 
 ### Tier 3: Anti-Spinlock, Timeout & Loop Truncation
 - **Anti-Deadlock & Passive Waiting Ban:** DO NOT emit stream-of-consciousness waiting loops (e.g., "Let's wait for notification..."). The Orchestrator must actively query pane status.
