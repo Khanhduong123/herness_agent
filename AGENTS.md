@@ -20,26 +20,57 @@
 
 ---
 
-## ARCHITECTURAL CONSTRAINTS & WORKFLOW PROTOCOL
+## STANDARD AGENT RBAC MATRIX (ROLE-BASED ACCESS CONTROL)
 
-### Rule 0: Strict Worktree & Multiplexer Mandate
-- **CENTRAL ORCHESTRATOR IS STRICTLY FORBIDDEN FROM:**
-  1. Modifying source files directly in the root repository.
-  2. Invoking AGY internal subagent mechanisms (`invoke_subagent`, `define_subagent`).
-- **ALL subtasks modifying code MUST run in an isolated Git Worktree:**
+| Responsibility / Capability | Coder Worker | Tester / Critics | Central Orchestrator | User (Human) |
+| :--- | :---: | :---: | :---: | :---: |
+| **Formulate Task DAG & Spec (`.ai/plans/`)** | ❌ | ❌ | ✅ | 🔄 Approve / Amend |
+| **Create / Remove Git Worktree** | ❌ | ❌ | ✅ | ❌ |
+| **Dispatch Panes via Herdr** | ❌ | ❌ | ✅ | ❌ |
+| **Modify Application Source Code** | ✅ *(In Worktree only)* | ❌ | 🚫 *(FORBIDDEN - Rule 0)* | ❌ |
+| **Run `pytest` & Self-Tests** | ✅ | ✅ | 🔍 *(Read test reports only)* | ❌ |
+| **Quality Evaluation (Adversarial Review)** | ❌ | ✅ *(Read-only diffs)* | 🔍 *(Aggregate feedback)* | ❌ |
+| **Open Pull Request (`gh pr create`)** | ❌ | ❌ | ✅ | ❌ |
+| **Merge into Protected Branch (`main`/`dev`)** | ❌ | ❌ | 🚫 **(STRICTLY FORBIDDEN)** | 👑 **(Review & Merge)** |
+
+---
+
+## 4-TIER ARCHITECTURAL CONSTRAINTS & WORKFLOW PROTOCOL
+
+### Tier 1: Infrastructure & Tool-Level Guardrails
+- **Zero Root-Repo Mutations:** The Central Orchestrator is strictly forbidden from directly modifying any project files in the root directory.
+- **Internal Subagent Lockout:** Internal AGY subagent mechanisms (`invoke_subagent`, `define_subagent`) are disabled in the CLI/Orchestrator configuration to prevent AI from bypassing Herdr and mutating the root repository.
+- **Mandatory Git Worktree Isolation:** Every subtask modifying code MUST run in an isolated Git Worktree managed via Herdr:
   `herdr worktree create --branch agent/<task_id>`
-- **ALL workers MUST be managed inside visible Herdr terminal panes:**
-  `herdr agent start worker_<task_id> --kind agy --pane <pane_id>`
+- **Multiplexer Workspace Protocol:** All workers must be launched in explicit Herdr panes:
+  `herdr agent start worker_<task_id> --kind agy --pane <pane_id> --cwd <worktree_path> -- --dangerously-skip-permissions`
+- **Socket/Prompt Communication:** Orchestrator communicates with workers strictly via Herdr socket and explicit prompts (`herdr agent prompt worker_<task_id> "..."`).
 
-### Anti-Deadlock & Passive Waiting Policy
-- **DO NOT emit stream-of-consciousness waiting loops** (e.g., "Let's wait", "Awaiting notification").
-- If a sub-agent does not return immediately:
-  1. Query pane status using `herdr pane get <pane_id>` or `herdr agent read <target>`.
-  2. After 3 non-responsive checks, report TIMEOUT and escalate to User.
+### Tier 2: Role Isolation & Anti-Role-Drift
+- **Dedicated Role Prompts:** Never share the Orchestrator's `AGENTS.md` with Worker Agents. Every sub-agent role has its dedicated prompt/skill file:
+  - Coder Worker: `.agents/skills/coder_worker.md`
+  - Adversarial Critic: `.agents/skills/critic_agent.md`
+  - Tester Agent: `.agents/skills/tester_worker.md`
+- **Role Anchoring (Mandatory First Prompt Context):** Every prompt dispatched to a worker MUST begin with an explicit role anchor:
+  - Coder: `"[SYSTEM CONTEXT: You are a leaf implementation worker. You CANNOT plan or dispatch other agents. Only write code and run tests in your worktree.]"`
+  - Critic: `"[SYSTEM CONTEXT: You are an Adversarial Critic Agent operating strictly in READ-ONLY mode. You CANNOT modify code or dispatch agents. You only evaluate git diffs and code against specifications.]"`
+  - Tester: `"[SYSTEM CONTEXT: You are a QA & Tester Worker Agent. You CANNOT orchestrate or modify core application logic. You write unit/integration tests and verify test coverage in your worktree.]"`
+- **Strict Leaf Worker Boundaries:** Leaf workers are strictly execution engines; they cannot orchestrate, design architectures, or spawn sub-agents.
+- **Read-Only Critics:** Adversarial Critics (Security, Performance, Requirements) operate strictly in READ-ONLY mode and evaluate git diffs only.
 
-### Review Limits (Loop Truncation)
-- **Max Rejection Cycles: 3 iterations.**
-- If adversarial critics (Security, Performance, Requirements) or Pytest fail 3 consecutive times on the same subtask, the Orchestrator MUST abort and yield control to the User with the error trace.
+### Tier 3: Anti-Spinlock, Timeout & Loop Truncation
+- **Anti-Deadlock & Passive Waiting Ban:** DO NOT emit stream-of-consciousness waiting loops (e.g., "Let's wait for notification..."). The Orchestrator must actively query pane status.
+- **Hard Timeout Ceiling:** Enforce a hard timeout ceiling (60s–120s per socket/pane poll, 10–15 minutes total subtask max). If a worker is non-responsive or hangs, raise a `TimeoutError` instead of waiting indefinitely.
+- **Loop Truncation (Max 3 Rejection Cycles):** Maximum **3 iteration loops** between Coder and Critics/Pytest on any single subtask. If defects persist after 3 remediation cycles, the Orchestrator MUST abort immediately and escalate to the human User with complete error and critic traces.
+
+### Tier 4: Human-in-the-Loop (HITL) & Automated PR Gate
+- **Strict Automated Merge Lock:** The Orchestrator and all worker scripts are **STRICTLY FORBIDDEN** from executing `git merge main`, `git merge master`, or `git merge dev`. Direct commits to protected branches are hard-blocked.
+- **Human-Only Merge Authority:** Merging code into `main` or `dev` is exclusively reserved for the human user.
+- **Automated PR Gate Protocol:** Upon final approval (100% pytest pass + 3 Critics PASS):
+  1. Push feature branch to remote: `git push -u origin agent/<task_id>`
+  2. Create Pull Request using CLI tool: `conda run -n pytorch harness-agent pr create --base main` (or `gh pr create --title "[<task_id>] <title>" --body "<summary>"`)
+  3. Clean up the isolated worktree: `herdr worktree remove agent/<task_id>`
+  4. Provide the PR link directly to the User in chat for manual review and merge authorization.
 
 ---
 
@@ -108,7 +139,7 @@ graph TD
     EvalGate -->|FAILED: Loops < 3| Aggregate["Aggregate feedback & Re-prompt Coder"]
     Aggregate --> Coder
     EvalGate -->|FAILED: Loops >= 3| Escalate["Escalate to User (Break infinite loops)"]
-    EvalGate -->|PASSED| Merge["Merge branch into main & herdr worktree remove"]
+    EvalGate -->|PASSED| PR["Push branch & Create PR (gh pr create)<br/>Remove worktree & Human reviews/merges"]
 ```
 
 ---
@@ -208,17 +239,31 @@ Agents MUST ONLY read and apply specific skills that are relevant to their task.
 ## 7. Orchestrator Operational Commands
 
 ```powershell
-# Check agy & environment connectivity
+# 1. Check agy & environment connectivity
 conda run -n pytorch harness-agent check
 
-# Create an isolated Git worktree for the subtask via Herdr
+# 2. Create an isolated Git worktree for the subtask via Herdr
 herdr worktree create --branch agent/<task_id>
 
-# Launch an interactive worker agent in a dedicated Herdr pane
-herdr agent start worker_<task_id> --kind agy --pane <pane_id> -- --dangerously-skip-permissions
+# 3. Launch an interactive Coder Agent in a dedicated Herdr pane inside the worktree
+herdr agent start worker_<task_id> --kind agy --pane <pane_id> --cwd .herdr/worktrees/agent/<task_id> -- --dangerously-skip-permissions
 
-# Prompt worker agent with specific sub-spec contract
-herdr agent prompt worker_<task_id> "Read .ai/plans/subtasks/YYYY-MM-DD/<plan_id>/subtask_01_<task_id>.md and implement"
+# 4. Prompt Coder Agent with explicit Role Anchoring + sub-spec contract
+herdr agent prompt worker_<task_id> "[SYSTEM CONTEXT: You are a leaf implementation worker. You CANNOT plan or dispatch other agents. Only write code and run tests in your worktree.] Read .ai/plans/subtasks/YYYY-MM-DD/<plan_id>/subtask_01_<task_id>.md and implement with 100% pytest pass rate."
+
+# 5. Active status polling with timeout ceiling (60s-120s per check, 10-15m total)
+herdr pane get <pane_id>
+# Or read worker output:
+herdr agent read worker_<task_id>
+
+# 6. Dispatch parallel Adversarial Critics (Read-Only git diff inspection)
+# Critics inspect git diff origin/main...agent/<task_id> without modifying files
+
+# 7. Automated PR Creation & Worktree Cleanup (HITL gate)
+git push -u origin agent/<task_id>
+conda run -n pytorch harness-agent pr create --base main
+herdr worktree remove agent/<task_id>
+# Deliver PR URL to human user for review and merge authorization
 ```
 
 ---
