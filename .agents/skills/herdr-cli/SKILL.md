@@ -105,6 +105,9 @@ herdr agent wait worker_<task_id> --timeout 120000
 
 # Wait for a specific state (e.g. blocked, waiting for input):
 herdr agent wait worker_<task_id> --until blocked --timeout 60000
+
+# Blocking wait via harness-agent CLI:
+conda run -n pytorch harness-agent wait worker_<task_id> --timeout 120
 ```
 
 ### 3.5. Send Interactive Keystrokes
@@ -115,16 +118,37 @@ herdr agent send-keys worker_<task_id> esc
 herdr agent send-keys worker_<task_id> enter
 ```
 
+### 3.6. Stop or Terminate an Agent
+To terminate a worker process and close its associated pane:
+```powershell
+# Terminate worker process / close pane:
+herdr pane close <pane_id>
+```
+
+### 3.7. Subtask Rollback & Abort Commands
+If a subtask encounters an unrecoverable failure or exceeds 3 Critic rejection cycles:
+```powershell
+# 1. Capture diagnostic git diff to failure log:
+git diff feat/<feature_name>...agent/<task_id> > .ai/failures/<task_id>_diff.log
+
+# 2. Terminate Herdr worker pane:
+herdr pane close <pane_id>
+
+# 3. Clean up worktree and delete abandoned subtask branch:
+git worktree remove --force .worktrees/agent/<task_id>
+git branch -D agent/<task_id>
+```
+
 ---
 
 ## 4. Standard Orchestrator Dispatch Pattern
 
 ```powershell
-# 1. Create isolated Git worktree using NATIVE git:
-git worktree add -b agent/<task_id> .worktrees/agent/<task_id>
+# 1. Create isolated Git worktree branching from feature branch:
+git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<feature_name>
 
-# 2. Split a Herdr pane directed into the worktree:
-# herdr pane split --current --direction right --cwd ".worktrees/agent/<task_id>" --no-focus
+# 2. Worktree Environment Setup (copy .env files if present):
+Copy-Item -Path ".env*" -Destination ".worktrees/agent/<task_id>/" -ErrorAction SilentlyContinue
 
 # 3. Launch interactive Coder worker in the pane:
 herdr agent start worker_<task_id> --kind agy --pane <pane_id> --cwd .worktrees/agent/<task_id> -- --dangerously-skip-permissions
@@ -133,11 +157,22 @@ herdr agent start worker_<task_id> --kind agy --pane <pane_id> --cwd .worktrees/
 herdr agent prompt worker_<task_id> "[SYSTEM CONTEXT: You are a leaf implementation worker. You CANNOT plan or dispatch other agents. Only write code and run tests in your worktree.] Read .ai/plans/subtasks/YYYY-MM-DD/<plan_id>/subtask_01_<task_id>.md and implement with 100% pytest pass rate."
 
 # 5. Monitor progress (active query, no stream-of-consciousness waiting):
-herdr agent get worker_<task_id>
+herdr agent wait worker_<task_id> --timeout 120000
+# Or inspect output:
 herdr agent read worker_<task_id> --source recent-unwrapped --lines 60
 
-# 6. Quality gates passed? Push, open PR, and clean up native git worktree:
-git push -u origin agent/<task_id>
+# 6. Success Flow: Merge back, cleanup pane first, full regression, and open PR:
+git merge --no-ff agent/<task_id>
+herdr pane close <pane_id>
+git worktree remove --force .worktrees/agent/<task_id>
+git branch -d agent/<task_id>
+conda run -n pytorch pytest tests/
+git push -u origin feat/<feature_name>
 conda run -n pytorch harness-agent pr create --base main
-git worktree remove .worktrees/agent/<task_id>
+
+# 7. Abort Flow (if timed out or failed 3 critic cycles):
+git diff feat/<feature_name>...agent/<task_id> > .ai/failures/<task_id>_diff.log
+herdr pane close <pane_id>
+git worktree remove --force .worktrees/agent/<task_id>
+git branch -D agent/<task_id>
 ```
