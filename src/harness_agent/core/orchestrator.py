@@ -367,15 +367,25 @@ class AgentOrchestrator:
                                 name_slug = re.sub(r"[^a-z0-9]+", "_", subtask.name.lower()).strip(
                                     "_"
                                 )
-                                slug_words = [w for w in name_slug.split("_") if len(w) > 3]
+                                slug_words = [
+                                    w
+                                    for w in name_slug.split("_")
+                                    if len(w) >= 2
+                                    and w not in ("and", "the", "for", "with", "from", "into")
+                                ]
                                 if slug_words:
                                     for cand_entry in candidates:
-                                        cand_lower = cand_entry.lower()
-                                        if all(w in cand_lower for w in slug_words):
+                                        cand_stem = (
+                                            cand_entry[:-3].lower()
+                                            if cand_entry.endswith(".md")
+                                            else cand_entry.lower()
+                                        )
+                                        cand_words = set(cand_stem.split("_"))
+                                        if all(w in cand_words for w in slug_words):
                                             return os.path.abspath(
                                                 os.path.join(dirpath, cand_entry)
                                             )
-                                        score = sum(1 for w in slug_words if w in cand_lower)
+                                        score = sum(1 for w in slug_words if w in cand_words)
                                         if score > best_score:
                                             best_score = score
                                             best_fallback = os.path.abspath(

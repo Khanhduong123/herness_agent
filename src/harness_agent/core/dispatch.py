@@ -230,6 +230,202 @@ class HerdrDispatcher:
         return True, proc.stdout.strip()
 
     @classmethod
+    def dispatch_interactive_critics(
+        cls,
+        base_ref: str = "main",
+        task_id: Optional[str] = None,
+        executable: str = "herdr",
+        repo_root: Optional[Path] = None,
+    ) -> Tuple[bool, str]:
+        """Launch an interactive Adversarial Critic inspection session in a Herdr split pane.
+
+        Args:
+            base_ref: Base git reference to compute diff against (default: main).
+            task_id: Optional task identifier for naming the critic agent.
+            executable: Herdr executable binary name or path.
+            repo_root: Optional repository root path.
+
+        Returns:
+            Tuple[bool, str]: (success, status_or_error_message)
+        """
+        if not cls.is_herdr_available(executable=executable):
+            return False, f"Herdr CLI '{executable}' is not installed or not in PATH"
+
+        root = repo_root or Path.cwd()
+
+        # 1. Retrieve git diff against base_ref
+        diff_text = ""
+        try:
+            diff_proc = subprocess.run(
+                ["git", "diff", f"{base_ref}...HEAD"],
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if diff_proc.returncode == 0 and diff_proc.stdout.strip():
+                diff_text = diff_proc.stdout.strip()
+            else:
+                diff_proc2 = subprocess.run(
+                    ["git", "diff", base_ref],
+                    cwd=str(root),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if diff_proc2.returncode == 0:
+                    diff_text = diff_proc2.stdout.strip()
+        except Exception as exc:
+            return False, f"Failed to retrieve git diff against {base_ref}: {exc}"
+
+        from harness_agent.evaluation.critics import sanitize_and_truncate_diff
+
+        sanitized_diff, _, _ = sanitize_and_truncate_diff(diff_text)
+        if not sanitized_diff:
+            sanitized_diff = "[No diff changes detected against base branch]"
+
+        # 2. Create a dedicated split pane in Herdr
+        split_cmd = [executable, "pane", "split", "--direction", "right", "--no-focus"]
+        try:
+            proc = subprocess.run(
+                split_cmd,
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if proc.returncode != 0:
+                fallback_cmd = [executable, "pane", "split"]
+                proc = subprocess.run(
+                    fallback_cmd,
+                    cwd=str(root),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+        except FileNotFoundError:
+            return False, f"Executable '{executable}' not found"
+        except Exception as exc:
+            return False, f"Failed to create Herdr split pane: {exc}"
+
+        if proc.returncode != 0:
+            err = (
+                proc.stderr.strip()
+                or proc.stdout.strip()
+                or f"Process exited with code {proc.returncode}"
+            )
+            return False, f"Failed to create Herdr split pane: {err}"
+
+        stdout = proc.stdout.strip()
+        pane_id: Optional[str] = None
+        try:
+            data = json.loads(stdout)
+            if isinstance(data, dict):
+                res = data.get("result", data)
+                if isinstance(res, dict):
+                    pane_id = (
+                        res.get("pane_id")
+                        or res.get("pane", {}).get("pane_id")
+                        or res.get("workspace", {}).get("pane_id")
+                        or res.get("workspace", {}).get("active_pane_id")
+                    )
+        except Exception:
+            pass
+
+        if not pane_id:
+            m = re.search(r"\b([a-zA-Z0-9_\-]+:p\d+)\b", stdout)
+            if m:
+                pane_id = m.group(1)
+            else:
+                m2 = re.search(r"\b(pane_[a-zA-Z0-9_\-]+)\b", stdout)
+                if m2:
+                    pane_id = m2.group(1)
+
+        if not pane_id:
+            return False, f"Could not extract pane ID from Herdr split pane output: {stdout}"
+
+        # 3. Launch interactive Critic agent in the split pane
+        critic_name = (
+            f"critic_{task_id.replace('agent/', '').replace('worker_', '')}"
+            if task_id
+            else f"critic_review_{int(time.time())}"
+        )
+        start_cmd = [
+            executable,
+            "agent",
+            "start",
+            critic_name,
+            "--kind",
+            "agy",
+            "--pane",
+            pane_id,
+            "--",
+            "--dangerously-skip-permissions",
+        ]
+        try:
+            start_proc = subprocess.run(
+                start_cmd,
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except Exception as exc:
+            return False, f"Failed to start critic agent in pane {pane_id}: {exc}"
+
+        if start_proc.returncode != 0:
+            err = (
+                start_proc.stderr.strip()
+                or start_proc.stdout.strip()
+                or f"Process exited with code {start_proc.returncode}"
+            )
+            return False, f"Failed to start critic agent: {err}"
+
+        # 4. Feed sanitized diff with role anchor
+        role_anchor = (
+            "[SYSTEM CONTEXT: You are an Adversarial Critic Agent operating strictly in "
+            "READ-ONLY mode. You CANNOT modify code or dispatch agents. You only evaluate "
+            "git diffs and code against specifications.]"
+        )
+        prompt_content = (
+            f"{role_anchor}\n\n"
+            f"# Adversarial Critic Inspection (Target Base: {base_ref})\n\n"
+            f"Review the following git diff against {base_ref} strictly for:\n"
+            f"1. Security vulnerabilities (SQLi, command injection, secrets, unsafe eval)\n"
+            f"2. Algorithmic complexity and bottlenecks (nested O(N^2) loops, leaks)\n"
+            f"3. Functional correctness, type safety, and acceptance criteria\n\n"
+            f"```diff\n"
+            f"{sanitized_diff}\n"
+            f"```\n\n"
+            f"Output STATUS: APPROVED if all criteria pass, or STATUS: REJECTED with defects."
+        )
+
+        prompt_cmd = [executable, "agent", "prompt", critic_name, prompt_content]
+        try:
+            prompt_proc = subprocess.run(
+                prompt_cmd,
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except Exception as exc:
+            return False, f"Failed to prompt critic agent: {exc}"
+
+        if prompt_proc.returncode != 0:
+            err = (
+                prompt_proc.stderr.strip()
+                or prompt_proc.stdout.strip()
+                or f"Process exited with code {prompt_proc.returncode}"
+            )
+            return False, f"Failed to prompt critic agent: {err}"
+
+        return (
+            True,
+            f"Dispatched interactive critic inspection agent '{critic_name}' in pane '{pane_id}'",
+        )
+
+    @classmethod
     def wait_for_task(
         cls,
         task_id: str,
@@ -618,12 +814,14 @@ stop_agent = HerdrDispatcher.stop_agent
 cleanup_worktree = HerdrDispatcher.cleanup_worktree
 setup_worktree_env = HerdrDispatcher.setup_worktree_env
 abort_task = HerdrDispatcher.abort_task
+dispatch_interactive_critics = HerdrDispatcher.dispatch_interactive_critics
 
 __all__ = [
     "HerdrDispatcher",
     "abort_task",
     "cleanup_worktree",
     "create_feature_branch",
+    "dispatch_interactive_critics",
     "merge_worktree_to_feature",
     "setup_worktree_env",
     "stop_agent",

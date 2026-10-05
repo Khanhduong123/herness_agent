@@ -20,6 +20,7 @@ from harness_agent.evaluation.critics import (
     aggregate_critic_feedback,
     dispatch_parallel_critics,
     sanitize_and_truncate_diff,
+    save_critic_report,
 )
 
 
@@ -475,3 +476,95 @@ diff --git a/src/code.py b/src/code.py
     for p in received_prompts:
         assert "package-lock.json" not in p
         assert "valid_code" in p
+
+
+def test_save_critic_report_default_path(tmp_path, monkeypatch):
+    """Verify save_critic_report saves JSON and Markdown files under .runs/ by default."""
+    monkeypatch.chdir(tmp_path)
+    feedbacks = [
+        CriticFeedback(
+            role=AgentRole.SECURITY_REVIEWER,
+            critic_name="security-reviewer-agent",
+            approved=True,
+            issues=[],
+            feedback="All checks passed.",
+        ),
+        CriticFeedback(
+            role=AgentRole.PERFORMANCE_REVIEWER,
+            critic_name="performance-reviewer-agent",
+            approved=True,
+            issues=[],
+            feedback="No performance bottlenecks.",
+        ),
+        CriticFeedback(
+            role=AgentRole.REQUIREMENT_REVIEWER,
+            critic_name="requirement-reviewer-agent",
+            approved=True,
+            issues=[],
+            feedback="All requirements met.",
+        ),
+    ]
+    review = aggregate_critic_feedback(feedbacks)
+
+    json_path, md_path = save_critic_report(review)
+
+    assert json_path.exists()
+    assert md_path.exists()
+    assert json_path.parent.name == ".runs"
+    assert md_path.parent.name == ".runs"
+    assert json_path.suffix == ".json"
+    assert md_path.suffix == ".md"
+
+    # Verify JSON content
+    import json
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["approved"] is True
+    assert any(cf.get("role") == "security_reviewer" for cf in data["critics_feedback"].values())
+
+    # Verify Markdown content and token-efficient ASCII indicators
+    md_content = md_path.read_text(encoding="utf-8")
+    assert "[OK]" in md_content
+    assert "[PASSED]" in md_content
+    assert "## Adversarial Critic Review Report" in md_content
+
+
+def test_save_critic_report_custom_directory_and_rejection(tmp_path):
+    """Verify save_critic_report handles custom directory and rejected review."""
+    feedbacks = [
+        CriticFeedback(
+            role=AgentRole.SECURITY_REVIEWER,
+            critic_name="security-reviewer-agent",
+            approved=False,
+            issues=["SQL Injection risk detected"],
+            feedback="Reject: Vulnerability found.",
+        ),
+    ]
+    review = aggregate_critic_feedback(feedbacks)
+    custom_dir = tmp_path / "custom_reports"
+
+    json_path, md_path = save_critic_report(review, output_path=custom_dir)
+
+    assert json_path.parent == custom_dir
+    assert md_path.parent == custom_dir
+    assert json_path.exists()
+    assert md_path.exists()
+
+    md_content = md_path.read_text(encoding="utf-8")
+    assert "[FAIL]" in md_content
+    assert "[FAILED]" in md_content
+    assert "SQL Injection risk detected" in md_content
+
+
+def test_save_critic_report_custom_file_extension(tmp_path):
+    """Verify save_critic_report handles explicit filename with .json extension."""
+    review = aggregate_critic_feedback([])
+    target_file = tmp_path / "my_review.json"
+
+    json_path, md_path = save_critic_report(review, output_path=target_file)
+
+    assert json_path == target_file
+    assert md_path == tmp_path / "my_review.md"
+    assert json_path.exists()
+    assert md_path.exists()
