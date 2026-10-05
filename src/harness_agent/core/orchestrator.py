@@ -223,21 +223,8 @@ class AgentOrchestrator:
 
         return ordered
 
-    def resolve_subtask_plan_file(
-        self, subtask: SubTask, workspace_dir: Optional[str] = None
-    ) -> Optional[str]:
-        """Locate the specific .ai/plans/subtask_[id].md file on disk."""
-        if subtask.plan_file:
-            if os.path.isabs(subtask.plan_file) and os.path.isfile(subtask.plan_file):
-                return subtask.plan_file
-            if workspace_dir:
-                cand = os.path.join(workspace_dir, subtask.plan_file)
-                if os.path.isfile(cand):
-                    return os.path.abspath(cand)
-            cand = os.path.join(os.getcwd(), subtask.plan_file)
-            if os.path.isfile(cand):
-                return os.path.abspath(cand)
-
+    def _get_expanded_roots(self, workspace_dir: Optional[str] = None) -> List[str]:
+        """Expand search roots including parents and Git worktree main repositories."""
         search_roots = []
         if workspace_dir:
             search_roots.append(os.path.abspath(workspace_dir))
@@ -253,6 +240,56 @@ class AgentOrchestrator:
                 if parent == curr:
                     break
                 curr = parent
+
+        git_roots: List[str] = []
+        for root in list(expanded_roots):
+            git_file = os.path.join(root, ".git")
+            if os.path.isfile(git_file):
+                try:
+                    with open(git_file, "r", encoding="utf-8") as f:
+                        for line in f:
+                            if line.startswith("gitdir:"):
+                                git_target = line.split(":", 1)[1].strip().replace("\\", "/")
+                                if "/.git/worktrees" in git_target:
+                                    main_git_dir = os.path.dirname(os.path.dirname(git_target))
+                                    main_repo = os.path.dirname(main_git_dir)
+                                    if os.path.isdir(main_repo) and main_repo not in expanded_roots:
+                                        git_roots.append(os.path.abspath(main_repo))
+                                elif os.path.isdir(git_target):
+                                    main_repo = os.path.dirname(git_target)
+                                    if os.path.isdir(main_repo) and main_repo not in expanded_roots:
+                                        git_roots.append(os.path.abspath(main_repo))
+                except OSError:
+                    pass
+
+        for gr in git_roots:
+            curr = gr
+            for _ in range(6):
+                if curr not in expanded_roots:
+                    expanded_roots.append(curr)
+                parent = os.path.dirname(curr)
+                if parent == curr:
+                    break
+                curr = parent
+
+        return expanded_roots
+
+    def resolve_subtask_plan_file(
+        self, subtask: SubTask, workspace_dir: Optional[str] = None
+    ) -> Optional[str]:
+        """Locate the specific .ai/plans/subtask_[id].md file on disk."""
+        if subtask.plan_file:
+            if os.path.isabs(subtask.plan_file) and os.path.isfile(subtask.plan_file):
+                return subtask.plan_file
+            if workspace_dir:
+                cand = os.path.join(workspace_dir, subtask.plan_file)
+                if os.path.isfile(cand):
+                    return os.path.abspath(cand)
+            cand = os.path.join(os.getcwd(), subtask.plan_file)
+            if os.path.isfile(cand):
+                return os.path.abspath(cand)
+
+        expanded_roots = self._get_expanded_roots(workspace_dir)
 
         if subtask.plan_file:
             for root in expanded_roots:
@@ -281,6 +318,8 @@ class AgentOrchestrator:
             )
 
         first_fallback: Optional[str] = None
+        best_fallback: Optional[str] = None
+        best_score = 0
         for root in expanded_roots:
             candidate_base_dirs = [
                 os.path.join(root, ".ai", "plans"),
@@ -331,8 +370,15 @@ class AgentOrchestrator:
                                 slug_words = [w for w in name_slug.split("_") if len(w) > 3]
                                 if slug_words:
                                     for cand_entry in candidates:
-                                        if any(w in cand_entry.lower() for w in slug_words):
+                                        cand_lower = cand_entry.lower()
+                                        if all(w in cand_lower for w in slug_words):
                                             return os.path.abspath(
+                                                os.path.join(dirpath, cand_entry)
+                                            )
+                                        score = sum(1 for w in slug_words if w in cand_lower)
+                                        if score > best_score:
+                                            best_score = score
+                                            best_fallback = os.path.abspath(
                                                 os.path.join(dirpath, cand_entry)
                                             )
                             if first_fallback is None:
@@ -342,6 +388,8 @@ class AgentOrchestrator:
                 except OSError:
                     pass
 
+        if best_fallback:
+            return best_fallback
         if first_fallback:
             return first_fallback
 
@@ -362,21 +410,7 @@ class AgentOrchestrator:
 
     def resolve_agents_rule_file(self, workspace_dir: Optional[str] = None) -> Optional[str]:
         """Locate the AGENTS.md rule file on disk."""
-        search_roots = []
-        if workspace_dir:
-            search_roots.append(os.path.abspath(workspace_dir))
-        search_roots.append(os.path.abspath(os.getcwd()))
-
-        expanded_roots: List[str] = []
-        for root in search_roots:
-            curr = root
-            for _ in range(6):
-                if curr not in expanded_roots:
-                    expanded_roots.append(curr)
-                parent = os.path.dirname(curr)
-                if parent == curr:
-                    break
-                curr = parent
+        expanded_roots = self._get_expanded_roots(workspace_dir)
 
         for root in expanded_roots:
             for name in ("AGENTS.md", "Agent.md"):

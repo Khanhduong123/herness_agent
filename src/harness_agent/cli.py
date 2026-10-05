@@ -11,6 +11,7 @@ from typing import List, Optional, Set
 
 import click
 
+from harness_agent.core.dispatch import HerdrDispatcher
 from harness_agent.core.harness import AgentHarness
 from harness_agent.core.models import AgyConfig, OrchestrationResult, Task, TaskStatus
 from harness_agent.core.orchestrator import AgentOrchestrator
@@ -739,6 +740,191 @@ def cite_check_cmd(report_file: str, sources_dir: Optional[str], is_json: bool) 
             if pair.details:
                 click.echo(f"    Details:  {pair.details}")
             click.echo("")
+
+
+@main.command(name="dispatch")
+@click.option("--task-id", required=True, help="Task ID to branch and name the worker")
+@click.option(
+    "--spec-file",
+    default=None,
+    type=click.Path(),
+    help="Path to the subtask spec file to instruct the worker with",
+)
+@click.option("--kind", default="agy", help="Agent kind (default: agy)")
+@click.option(
+    "--dangerously-skip-permissions/--require-permissions",
+    default=True,
+    help="Auto-approve tool permissions",
+)
+@click.option("--prompt", "prompt_override", default=None, help="Custom prompt override")
+@click.option("--wait", is_flag=True, default=False, help="Wait for worker agent to finish")
+def dispatch_cmd(
+    task_id: str,
+    spec_file: Optional[str],
+    kind: str,
+    dangerously_skip_permissions: bool,
+    prompt_override: Optional[str],
+    wait: bool,
+) -> None:
+    """Interactively dispatch a task to a worker agent running in a Herdr workspace."""
+    if not spec_file and not prompt_override:
+        click.secho("✗ Either --spec-file or --prompt must be provided.", fg="red")
+        sys.exit(1)
+
+    prompt_text = prompt_override
+    if not prompt_text:
+        spec_path = Path(spec_file)  # type: ignore[arg-type]
+        if not spec_path.exists():
+            click.secho(f"✗ Spec file not found: {spec_file}", fg="red")
+            sys.exit(1)
+        prompt_text = (
+            f"Read {spec_path.resolve()} and implement according to specifications. "
+            f"Ensure 100% test pass rate and commit your changes."
+        )
+
+    if not HerdrDispatcher.is_herdr_available():
+        click.secho("✗ Herdr CLI is not installed or not in PATH.", fg="red")
+        sys.exit(1)
+
+    click.echo(f"Creating git worktree for task '{task_id}'...")
+    ok, msg_or_path, pane_id = HerdrDispatcher.create_agent_worktree(task_id)
+    if not ok:
+        click.secho(f"✗ Failed to create worktree: {msg_or_path}", fg="red")
+        sys.exit(1)
+
+    if not pane_id:
+        click.secho("✗ Could not extract pane ID from Herdr worktree output.", fg="red")
+        sys.exit(1)
+
+    click.secho(f"✓ Worktree ready: {msg_or_path} (pane: {pane_id})", fg="green")
+
+    click.echo(f"Starting worker agent for task '{task_id}' in pane {pane_id} (kind={kind})...")
+    ok, start_msg = HerdrDispatcher.start_agent(
+        task_id=task_id,
+        pane_id=pane_id,
+        kind=kind,
+        dangerously_skip_permissions=dangerously_skip_permissions,
+    )
+    if not ok:
+        click.secho(f"✗ Failed to start agent: {start_msg}", fg="red")
+        sys.exit(1)
+
+    worker_name = HerdrDispatcher.get_worker_name(task_id)
+    click.secho(f"✓ Agent started: {worker_name}", fg="green")
+
+    click.echo(f"Submitting prompt to {worker_name}...")
+    ok, prompt_msg = HerdrDispatcher.prompt_agent(
+        task_id=task_id,
+        prompt=prompt_text,
+        wait=wait,
+    )
+    if not ok:
+        click.secho(f"✗ Failed to prompt agent: {prompt_msg}", fg="red")
+        sys.exit(1)
+
+    click.secho(f"✓ Dispatched task '{task_id}' to {worker_name} successfully!", fg="green")
+
+
+@main.group(name="pr")
+def pr_group() -> None:
+    """Pull request utilities and template automation."""
+    pass
+
+
+@pr_group.command(name="fill")
+@click.option("--base", default="main", help="Target base branch (default: main)")
+@click.option("--title", default=None, help="Custom PR title")
+@click.option("--issue", default=None, help="Issue number or identifier to link (Fixes #...)")
+@click.option("--output", "-o", default=None, help="Write output to file instead of stdout")
+def pr_fill_cmd(
+    base: str,
+    title: Optional[str],
+    issue: Optional[str],
+    output: Optional[str],
+) -> None:
+    """Generate and preview populated PR template markdown."""
+    from harness_agent.core.pr import PRGenerator
+
+    _, generated_body = PRGenerator.generate_pr_content(
+        base_branch=base,
+        issue_id=issue,
+        custom_title=title,
+    )
+    if output:
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(generated_body, encoding="utf-8")
+        click.secho(f"✓ PR template written to {output}", fg="green")
+    else:
+        click.echo(generated_body)
+
+
+@pr_group.command(name="create")
+@click.option("--base", default="main", help="Target base branch (default: main)")
+@click.option("--title", default=None, help="Custom PR title")
+@click.option("--issue", default=None, help="Issue number or identifier to link")
+@click.option(
+    "--push/--no-push",
+    default=True,
+    help="Push current branch to remote before creating PR",
+)
+@click.option("--draft", is_flag=True, default=False, help="Create PR as draft")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Print generated PR without creating or pushing",
+)
+def pr_create_cmd(
+    base: str,
+    title: Optional[str],
+    issue: Optional[str],
+    push: bool,
+    draft: bool,
+    dry_run: bool,
+) -> None:
+    """Automatically populate PR template, push branch, and create PR via gh CLI
+    or output web link.
+    """
+    from harness_agent.core.pr import PRGenerator
+
+    if dry_run:
+        gen_title, gen_body = PRGenerator.generate_pr_content(
+            base_branch=base,
+            issue_id=issue,
+            custom_title=title,
+        )
+        click.secho(f"=== PR Title: {gen_title} ===", fg="cyan", bold=True)
+        click.echo(gen_body)
+        return
+
+    result = PRGenerator.create_pr(
+        base_branch=base,
+        title=title,
+        issue_id=issue,
+        push=push,
+        draft=draft,
+    )
+
+    if not result.success:
+        click.secho(f"✗ Failed to create pull request: {result.error_message}", fg="red")
+        sys.exit(1)
+
+    if result.web_fallback:
+        draft_file = Path(".github") / "PULL_REQUEST_DRAFT.md"
+        try:
+            draft_file.parent.mkdir(parents=True, exist_ok=True)
+            draft_file.write_text(result.body, encoding="utf-8")
+            saved_msg = f" (saved description to {draft_file})"
+        except Exception:
+            saved_msg = ""
+        fallback_msg = (
+            f"! gh CLI unavailable or not authenticated. Direct web PR link:\n"
+            f"{result.pr_url}{saved_msg}"
+        )
+        click.secho(fallback_msg, fg="yellow")
+    else:
+        click.secho(f"✓ Pull Request created successfully: {result.pr_url}", fg="green")
 
 
 if __name__ == "__main__":

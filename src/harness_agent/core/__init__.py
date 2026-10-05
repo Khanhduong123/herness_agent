@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from harness_agent.core.dispatch import HerdrDispatcher
 from harness_agent.core.harness import AgentHarness
 from harness_agent.core.models import (
     AgentRole,
@@ -27,6 +28,7 @@ from harness_agent.core.models import (
     WorkerAgentConfig,
 )
 from harness_agent.core.orchestrator import AgentOrchestrator
+from harness_agent.core.pr import PRContext, PRGenerator, PRResult
 from harness_agent.core.runner import AgyRunner
 from harness_agent.core.security import (
     UNTRUSTED_SOURCE_INSTRUCTION,
@@ -49,8 +51,12 @@ __all__ = [
     "DAGStateStore",
     "EvalReport",
     "FunctionSpec",
+    "HerdrDispatcher",
     "OrchestrationPlan",
     "OrchestrationResult",
+    "PRContext",
+    "PRGenerator",
+    "PRResult",
     "RiskLevel",
     "RunResult",
     "SpecStatus",
