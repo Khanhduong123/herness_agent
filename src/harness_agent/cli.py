@@ -400,7 +400,7 @@ def init_cmd(
     _ensure_gitignore(target_path)
     _cleanup_legacy_artifacts(target_path)
     repo_root = Path(__file__).resolve().parent.parent.parent
-    files_to_copy = ["AGENTS.md", ".pre-commit-config.yaml"]
+    files_to_copy = ["AGENTS.md"]
     click.echo(f"Đang thiết lập Harness Agent & SDLC rules tại: {target_path}")
 
     copied = 0
@@ -411,6 +411,9 @@ def init_cmd(
             shutil.copy2(src, dest)
             click.secho(f"  [+] Created {filename}", fg="green")
             copied += 1
+
+    if _sync_precommit_config(repo_root, target_path):
+        copied += 1
 
     examples_src = repo_root / "examples" / "orchestrator_plan.yaml"
     if examples_src.exists():
@@ -511,96 +514,68 @@ def _cleanup_legacy_artifacts(target_path: Path) -> None:
 
 def _ensure_gitignore(target_path: Path) -> None:
     gitignore_path = target_path / ".gitignore"
-    entries = [
-        "# ========================================\n",
-        "# AI Orchestrator & Configs\n",
-        "# ========================================\n",
+    harness_entries = [
+        "# Harness Agent & AI Orchestration\n",
         ".agents/\n",
         ".runs/\n",
         ".ai/\n",
+        ".worktrees/\n",
         "AGENTS.md\n",
-        "\n# ========================================\n",
-        "# OS & IDE\n",
-        "# ========================================\n",
-        ".DS_Store\n",
-        ".vscode/\n",
-        ".idea/\n",
-        "*.swp\n",
-        "*.log\n",
-        ".expo/\n",
-        ".expo-shared/\n",
-        "dist/\n",
-        "web-build/\n",
-        "node_modules/\n",
-        "\n# ========================================\n",
-        "# Python / FastAPI Backend\n",
-        "# ========================================\n",
-        "venv/\n",
-        "env/\n",
-        ".env\n",
-        ".env.*\n",
-        "! .env.example\n",
-        "__pycache__/\n",
-        "*.py[cod]\n",
-        "*$py.class\n",
-        "*.pyc\n",
-        "token.json\n",
-        "**/token.json\n",
-        "credentials.json\n",
-        "**/credentials.json\n",
-        "\n# Pytest / Coverage\n",
-        ".pytest_cache/\n",
-        "htmlcov/\n",
-        ".coverage\n",
-        ".mypy_cache/\n",
-        "\n# ========================================\n",
-        "# AI / Data Science / Models\n",
-        "# ========================================\n",
-        "*.pt\n",
-        "*.pth\n",
-        "*.onnx\n",
-        "*.h5\n",
-        "*.pb\n",
-        "*.tflite\n",
-        "*.safetensors\n",
-        "*.ckpt\n",
-        "\n*.csv\n",
-        "*.tsv\n",
-        "*.mp4\n",
-        "*.avi\n",
-        "*.jpeg\n",
-        "*.jpg\n",
-        "*.png\n",
-        "img/\n",
-        "video/\n",
-        "\n# Jupyter Notebook temporary data\n",
-        ".ipynb_checkpoints/\n",
-        "*/.ipynb_checkpoints/*\n",
-        "\n# Keystores (DO NOT COMMIT SECRETS)\n",
-        "*.jks\n",
-        "*.keystore\n",
-        "*.p12\n",
-        "*.key\n",
-        "*.mobileprovision\n",
-        "\n#antigravitycli\n",
-        ".antigravitycli/\n",
     ]
     if not gitignore_path.exists():
         with open(gitignore_path, "w", encoding="utf-8") as f:
-            f.writelines(entries)
+            f.writelines(harness_entries)
     else:
         with open(gitignore_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        if ".agents/" not in content:
+            lines = f.readlines()
+        existing_lines = {line.strip() for line in lines}
+        to_append = [entry for entry in harness_entries if entry.strip() not in existing_lines]
+        if to_append:
             with open(gitignore_path, "a", encoding="utf-8") as f:
-                f.writelines(entries)
+                if lines and not lines[-1].endswith("\n"):
+                    f.write("\n")
+                f.writelines(to_append)
+
+
+def _sync_precommit_config(repo_root: Path, target_path: Path) -> bool:
+    """Safely setup or update .pre-commit-config.yaml without overwriting existing user hooks."""
+    target_precommit = target_path / ".pre-commit-config.yaml"
+    src_precommit = repo_root / ".pre-commit-config.yaml"
+
+    if not target_precommit.exists():
+        if src_precommit.exists():
+            shutil.copy2(src_precommit, target_precommit)
+            click.secho(
+                "  [+] Created .pre-commit-config.yaml (Branch protection active)", fg="green"
+            )
+            return True
+        return False
+
+    content = target_precommit.read_text(encoding="utf-8")
+    if "no-commit-to-branch" not in content:
+        hook_snippet = (
+            "\n\n  # Harness Agent Branch Protection Hook\n"
+            "  - repo: https://github.com/pre-commit/pre-commit-hooks\n"
+            "    rev: v4.6.0\n"
+            "    hooks:\n"
+            "      - id: no-commit-to-branch\n"
+            "        args: [--branch, main, --branch, master, --branch, dev, --branch, develop]\n"
+        )
+        with open(target_precommit, "a", encoding="utf-8") as f:
+            f.write(hook_snippet)
+        click.secho(
+            "  [+] Appended no-commit-to-branch hook to existing .pre-commit-config.yaml",
+            fg="green",
+        )
+        return True
+    return False
 
 
 def _sync_single_project(repo_root: Path, target_path: Path, link: bool = False) -> int:
     target_path.mkdir(parents=True, exist_ok=True)
     _ensure_gitignore(target_path)
     _cleanup_legacy_artifacts(target_path)
-    files_to_copy = ["AGENTS.md", ".pre-commit-config.yaml"]
+    files_to_copy = ["AGENTS.md"]
     copied = 0
 
     for filename in files_to_copy:
@@ -610,6 +585,9 @@ def _sync_single_project(repo_root: Path, target_path: Path, link: bool = False)
             shutil.copy2(src, dest)
             click.secho(f"  [+] Updated {filename}", fg="green")
             copied += 1
+
+    if _sync_precommit_config(repo_root, target_path):
+        copied += 1
 
     examples_src = repo_root / "examples" / "orchestrator_plan.yaml"
     if examples_src.exists():
