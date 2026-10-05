@@ -40,8 +40,9 @@
 ### Tier 1: Infrastructure & Tool-Level Guardrails
 - **Zero Root-Repo Mutations:** The Central Orchestrator is strictly forbidden from directly modifying any project files in the root directory.
 - **Internal Subagent Lockout:** Internal AGY subagent mechanisms (`invoke_subagent`, `define_subagent`) are disabled in the CLI/Orchestrator configuration to prevent AI from bypassing Herdr and mutating the root repository.
-- **Mandatory Git Worktree Isolation:** Every subtask modifying code MUST run in an isolated Git Worktree managed via native `git worktree`:
-  `git worktree add -b agent/<task_id> .worktrees/agent/<task_id>`
+- **Mandatory Git Worktree Isolation:** Every subtask modifying code MUST run in an isolated Git Worktree managed via native `git worktree`, branching from the active feature branch:
+  `git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<feature_name>`
+- **Worktree Environment Setup:** Environment configuration files (`.env`, `.env.test`, `.env.local`, `.env.example` if present) MUST be copied from the repository root into newly created git worktrees before workers run tests.
 - **Multiplexer Workspace Protocol:** All workers must be launched in explicit Herdr panes:
   `herdr agent start worker_<task_id> --kind agy --pane <pane_id> --cwd .worktrees/agent/<task_id> -- --dangerously-skip-permissions`
 - **Socket/Prompt Communication:** Orchestrator communicates with workers strictly via Herdr socket and explicit prompts (`herdr agent prompt worker_<task_id> "..."`).
@@ -60,17 +61,25 @@
 
 ### Tier 3: Anti-Spinlock, Timeout & Loop Truncation
 - **Anti-Deadlock & Passive Waiting Ban:** DO NOT emit stream-of-consciousness waiting loops (e.g., "Let's wait for notification..."). The Orchestrator must actively query pane status.
+- **Anti-Monologue & Stream-of-Consciousness Ban:** Strictly ban roleplaying or outputting internal monologues during waiting states (e.g., "I am currently in a state of watchful waiting..."). During asynchronous execution, agents must either invoke a blocking tool (like `herdr agent wait` or `harness-agent wait`) or stop calling tools immediately without emitting commentary.
 - **Hard Timeout Ceiling:** Enforce a hard timeout ceiling (60s–120s per socket/pane poll, 10–15 minutes total subtask max). If a worker is non-responsive or hangs, raise a `TimeoutError` instead of waiting indefinitely.
 - **Loop Truncation (Max 3 Rejection Cycles):** Maximum **3 iteration loops** between Coder and Critics/Pytest on any single subtask. If defects persist after 3 remediation cycles, the Orchestrator MUST abort immediately and escalate to the human User with complete error and critic traces.
+- **Rollback & Abort Protocol:** When a subtask times out or fails 3 consecutive Critic cycles:
+  1. Dump diagnostic git diff and error traceback to `.ai/failures/<task_id>_<timestamp>.log`.
+  2. Terminate the Herdr worker pane / process.
+  3. Remove the abandoned worktree (`git worktree remove --force .worktrees/agent/<task_id>`) and delete the subtask branch (`git branch -D agent/<task_id>`).
+  4. Escalate to the human User with the failure log path for intervention.
 
 ### Tier 4: Human-in-the-Loop (HITL) & Automated PR Gate
 - **Strict Automated Merge Lock:** The Orchestrator and all worker scripts are **STRICTLY FORBIDDEN** from executing `git merge main`, `git merge master`, or `git merge dev`. Direct commits to protected branches are hard-blocked.
 - **Human-Only Merge Authority:** Merging code into `main` or `dev` is exclusively reserved for the human user.
-- **Automated PR Gate Protocol:** Upon final approval (100% pytest pass + 3 Critics PASS):
-  1. Push feature branch to remote: `git push -u origin agent/<task_id>`
-  2. Create Pull Request using CLI tool: `conda run -n pytorch harness-agent pr create --base main`
-  3. Clean up the isolated worktree: `git worktree remove .worktrees/agent/<task_id>`
-  4. Provide the PR link directly to the User in chat for manual review and merge authorization.
+- **Automated PR Gate Protocol (Feature Branch Hierarchy):** Upon final subtask approval (100% pytest pass + 3 Critics PASS):
+  1. Merge subtask branch back into the feature branch: `git merge --no-ff agent/<task_id>`
+  2. Clean up the isolated workspace: Stop/kill the active Herdr worker pane FIRST, then remove worktree: `git worktree remove --force .worktrees/agent/<task_id>`, and delete the local branch `git branch -d agent/<task_id>`.
+  3. Run full regression test suite (`conda run -n pytorch pytest tests/`) on the feature branch.
+  4. Push feature branch to remote: `git push -u origin feat/<feature_name>`
+  5. Create Pull Request using CLI tool: `conda run -n pytorch harness-agent pr create --base main`
+  6. Provide the PR link directly to the User in chat for manual review and merge authorization.
 
 ---
 
@@ -123,6 +132,8 @@ When a **Coder** completes a feature implementation or code change:
 5. **Loop Truncation & Escalation**:
    - **Maximum Rejection Cycles**: 3 iterations.
    - If critics or test gates reject the submission for 3 consecutive cycles, the loop truncates immediately and escalates to the human user with diagnostic traces.
+6. **Critics Diff Guardrails (Diff Size & Binary Filtering)**:
+   - If the git diff exceeds 500 lines or contains generated/binary files, the Orchestrator MUST filter out generated/binary files or require splitting the diff before dispatching to the 3 Critics to prevent LLM context overflow.
 
 ```mermaid
 graph TD
@@ -162,6 +173,7 @@ All agents must strictly adhere to the following environment rules:
 - All new features or bug fixes must include unit tests.
 - Run tests via `conda run -n pytorch pytest`.
 - **Gatekeeper Rule:** A task cannot be marked as complete if any tests fail.
+- **Full Regression Testing Gate:** Before opening any PR, the full regression test suite (`conda run -n pytorch pytest tests/`) covering all affected modules must pass 100%. Running only isolated new test files or skipping existing tests is strictly prohibited.
 
 ### 2.4. Tool-Locking & Patching Policy ("Patch, Never Regenerate")
 - **Patch-Only Rule for Existing Files:** All code modifications to existing files must be executed exclusively via diff hunks using patch-based tools (`apply_patch`, `replace_file_content`, `multi_replace_file_content`). Regenerating or rewriting whole files causes context rot, hallucination, and loss of unrelated comments/functions.
@@ -183,6 +195,19 @@ All agents must strictly adhere to the following environment rules:
   - **NO DIRECT COMMITTING:** Committing directly to `main`, `master`, `dev`, or `develop` is strictly blocked (enforced via `.pre-commit-config.yaml` `no-commit-to-branch` hook).
   - **HUMAN-ONLY MERGE AUTHORITY:** Merging code into `main` or `dev` is exclusively reserved for the human user.
   - **Dedicated Branches Only:** Always work exclusively on dedicated branches (`feat/...`, `fix/...`, `agent/...`).
+- **Feature Branch & Worktree Hierarchy Protocol**:
+  1. Create feature branch first from `main`: `git checkout -b feat/<feature_name> main` (or `fix/...`).
+  2. Provision isolated subtask worktrees branching from the feature branch:
+     `git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<feature_name>`
+  3. Worker implements, tests, and commits changes atomically on `agent/<task_id>`.
+  4. After worker completes and passes quality gates, merge the subtask branch back into the feature branch:
+     `git merge --no-ff agent/<task_id>`
+  5. Remove the temporary worktree and branch (stop worker pane first, then `git worktree remove --force .worktrees/agent/<task_id>` and `git branch -d agent/<task_id>`).
+  6. Run 100% full regression tests on the feature branch:
+     `conda run -n pytorch pytest tests/`
+  7. Push feature branch to remote and create Pull Request to `main`:
+     `git push -u origin feat/<feature_name>`
+     `conda run -n pytorch harness-agent pr create --base main`
 - **Conventional Commits & Pre-Commit Hook Recovery**:
   - Use conventional prefixes: `feat:`, `fix:`, `test:`, `docs:`, `refactor:`. Always inspect `git status` and `git diff` before committing.
   - **Pre-Commit Hook Abort Handling**: Pre-commit hooks (`black`, `isort`, `flake8`) automatically run upon `git commit`. If hooks modify/reformat files or abort the commit:
@@ -230,7 +255,7 @@ Agents MUST ONLY read and apply specific skills that are relevant to their task.
 - `sdlc-test-driven-development`: Write tests covering happy paths and edge cases.
 
 ### 6.3. Post-Task Quality Gate
-- `sdlc-posttask-quality-gate`: Ensure 100% pytest pass rate, run linters, and inspect git diffs.
+- `sdlc-posttask-quality-gate`: Ensure 100% pytest pass rate, execute full regression suite (`pytest tests/`), merge back to feature branch, run linters, and inspect git diffs.
 - `sdlc-security-audit`: Check for leaked secrets and injection vulnerabilities.
 - `sdlc-conventional-commit`: Commit code directly via the terminal using conventional naming.
 
@@ -242,29 +267,49 @@ Agents MUST ONLY read and apply specific skills that are relevant to their task.
 # 1. Check agy & environment connectivity
 conda run -n pytorch harness-agent check
 
-# 2. Create an isolated Git worktree for the subtask via native git
-git worktree add -b agent/<task_id> .worktrees/agent/<task_id>
+# 2. Create an isolated Git worktree branching from the active feature branch
+git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<feature_name>
 
-# 3. Launch an interactive Coder Agent in a dedicated Herdr pane inside the worktree
+# 3. Worktree Environment Setup (copy .env files if present)
+Copy-Item -Path ".env*" -Destination ".worktrees/agent/<task_id>/" -ErrorAction SilentlyContinue
+
+# 4. Launch an interactive Coder Agent in a dedicated Herdr pane inside the worktree
 herdr agent start worker_<task_id> --kind agy --pane <pane_id> --cwd .worktrees/agent/<task_id> -- --dangerously-skip-permissions
 
-# 4. Prompt Coder Agent with explicit Role Anchoring + sub-spec contract
+# 5. Prompt Coder Agent with explicit Role Anchoring + sub-spec contract
 herdr agent prompt worker_<task_id> "[SYSTEM CONTEXT: You are a leaf implementation worker. You CANNOT plan or dispatch other agents. Only write code and run tests in your worktree.] Read .ai/plans/subtasks/YYYY-MM-DD/<plan_id>/subtask_01_<task_id>.md and implement with 100% pytest pass rate."
 
-# 5. Active status polling with timeout ceiling (60s-120s per check, 10-15m total)
-# See .agents/skills/herdr-cli/SKILL.md for complete CLI cheat sheet
-herdr pane get <pane_id>
-# Or read worker output:
+# 6. Active status polling or wait (anti-monologue: no commentary while waiting)
+herdr agent wait worker_<task_id> --timeout 120000
+# Or inspect output:
 herdr agent read worker_<task_id>
 
-# 6. Dispatch parallel Adversarial Critics (Read-Only git diff inspection)
-# Critics inspect git diff origin/main...agent/<task_id> without modifying files
+# 7. Dispatch parallel Adversarial Critics (diff size <= 500 lines, filter binary/generated)
+# Critics inspect git diff feat/<feature_name>...agent/<task_id> without modifying files
 
-# 7. Automated PR Creation & Worktree Cleanup (HITL gate)
-git push -u origin agent/<task_id>
+# 8. Success Flow: Merge Back, Cleanup, Full Regression & PR
+# Merge subtask branch back into feature branch:
+git merge --no-ff agent/<task_id>
+# Cleanup: STOP/KILL worker pane FIRST, then remove worktree:
+herdr pane close <pane_id>
+git worktree remove --force .worktrees/agent/<task_id>
+git branch -d agent/<task_id>
+# Run full regression tests on feature branch:
+conda run -n pytorch pytest tests/
+# Push feature branch and create Pull Request to main:
+git push -u origin feat/<feature_name>
 conda run -n pytorch harness-agent pr create --base main
-git worktree remove .worktrees/agent/<task_id>
 # Deliver PR URL to human user for review and merge authorization
+
+# 9. Rollback & Abort Protocol (if timeout or 3 consecutive critic rejections)
+# Dump diagnostic git diff and error traceback:
+git diff feat/<feature_name>...agent/<task_id> > .ai/failures/<task_id>_diff.log
+# Terminate Herdr worker pane first:
+herdr pane close <pane_id>
+# Remove abandoned worktree and delete branch:
+git worktree remove --force .worktrees/agent/<task_id>
+git branch -D agent/<task_id>
+# Escalate to human user with failure log path
 ```
 
 ---
@@ -273,3 +318,4 @@ git worktree remove .worktrees/agent/<task_id>
 
 - **Code, Docs, & Plans**: All generated plans, specs, code, and docs MUST be written in **English**.
 - **Chat**: Agents should communicate with the user in the user's preferred language (e.g., Vietnamese) when responding in the chat UI.
+- **ASCII Status Formatting vs. Markdown**: Use human-friendly emojis only in user-facing Markdown documentation; use token-efficient plain ASCII indicators (`[OK]`, `[ERROR]`, `[PASSED]`, `[FAILED]`, `[TASK_DONE]`) in code, logs, and CLI output.

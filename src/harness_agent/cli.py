@@ -48,9 +48,9 @@ def check(executable: str) -> None:
 
     ok, version_info = runner.check_version()
     if ok:
-        click.secho(f"✓ agy is ready: {version_info}", fg="green")
+        click.secho(f"[OK] agy is ready: {version_info}", fg="green")
     else:
-        click.secho(f"✗ agy check failed: {version_info}", fg="red")
+        click.secho(f"[FAIL] agy check failed: {version_info}", fg="red")
         sys.exit(1)
 
 
@@ -90,10 +90,11 @@ def run_prompt_cmd(
     if result.success:
         click.secho("\n--- Output ---", fg="cyan")
         click.echo(result.output_text)
-        click.secho(f"\n✓ Completed in {result.duration_seconds}s", fg="green")
+        click.secho(f"\n[OK] Completed in {result.duration_seconds}s", fg="green")
     else:
+        err = result.error_message or result.stderr
         click.secho(
-            f"\n✗ Failed (exit code {result.exit_code}): {result.error_message or result.stderr}",
+            f"\n[FAIL] Failed (exit code {result.exit_code}): {err}",
             fg="red",
         )
         sys.exit(result.exit_code if result.exit_code != 0 else 1)
@@ -143,7 +144,7 @@ def _print_orchestration_summary(result: OrchestrationResult, output: str) -> No
     click.echo("\n================ Orchestration Summary ================")
     click.echo(f"Plan ID:         {result.plan_id}")
     click.echo(f"Goal:            {result.goal}")
-    click.echo(f"Overall Success: {'✓ YES' if result.success else '✗ NO'}")
+    click.echo(f"Overall Success: {'[OK] YES' if result.success else '[FAIL] NO'}")
     click.echo(f"Total SubTasks:  {result.total_tasks}")
     click.echo(f"Completed:       {result.completed_tasks}")
     click.echo(f"Failed/Blocked:  {result.failed_tasks}")
@@ -224,7 +225,7 @@ def resume_cmd(
     try:
         result = asyncio.run(orchestrator.resume_plan(plan_or_id=plan_or_id))
     except Exception as exc:
-        click.secho(f"✗ Failed to resume orchestration: {exc}", fg="red")
+        click.secho(f"[FAIL] Failed to resume orchestration: {exc}", fg="red")
         sys.exit(1)
 
     orchestrator.save_result(result, output)
@@ -298,7 +299,7 @@ def init_cmd(
         dest = target_path / filename
         if src.exists():
             shutil.copy2(src, dest)
-            click.secho(f"  [✓] Created {filename}", fg="green")
+            click.secho(f"  [+] Created {filename}", fg="green")
             copied += 1
 
     examples_src = repo_root / "examples" / "orchestrator_plan.yaml"
@@ -306,16 +307,16 @@ def init_cmd(
         target_examples = target_path / "examples"
         target_examples.mkdir(parents=True, exist_ok=True)
         shutil.copy2(examples_src, target_examples / "orchestrator_plan.yaml")
-        click.secho("  [✓] Created examples/orchestrator_plan.yaml", fg="green")
+        click.secho("  [+] Created examples/orchestrator_plan.yaml", fg="green")
         copied += 1
 
     agents_src = repo_root / ".agents"
     if agents_src.exists():
         target_agents = target_path / ".agents"
         shutil.copytree(agents_src, target_agents, dirs_exist_ok=True)
-        click.secho("  [✓] Created .agents/skills/ (SDLC Skills)", fg="green")
+        click.secho("  [+] Created .agents/skills/ (SDLC Skills)", fg="green")
         if (target_agents / "hooks.json").exists():
-            click.secho("  [✓] Created .agents/hooks.json (Lifecycle Hooks config)", fg="green")
+            click.secho("  [+] Created .agents/hooks.json (Lifecycle Hooks config)", fg="green")
         copied += 1
 
     hooks_src = repo_root / ".agents" / "hooks"
@@ -324,13 +325,13 @@ def init_cmd(
     if hooks_src.exists():
         target_hooks = target_path / ".agents" / "hooks"
         shutil.copytree(hooks_src, target_hooks, dirs_exist_ok=True)
-        click.secho("  [✓] Created .agents/hooks/ (Lifecycle Hooks)", fg="green")
+        click.secho("  [+] Created .agents/hooks/ (Lifecycle Hooks)", fg="green")
         copied += 1
 
     _cleanup_legacy_artifacts(target_path)
 
     _register_project(repo_root, target_path)
-    click.secho(f"\n✓ Successfully initialized {copied} items in {target_path}", fg="cyan")
+    click.secho(f"\n[OK] Successfully initialized {copied} items in {target_path}", fg="cyan")
     click.echo(
         "agy-cli is now configured to automatically discover rules and context in this repository."
     )
@@ -666,10 +667,10 @@ def web_crawl_cmd(url: str, browser: bool, is_json: bool) -> None:
             provider = BuiltinProvider()
         result = provider.fetch(url)
     except SafeHTTPError as exc:
-        click.secho(f"✗ SSRF / Security refusal: {exc}", fg="red")
+        click.secho(f"[FAIL] SSRF / Security refusal: {exc}", fg="red")
         sys.exit(1)
     except Exception as exc:
-        click.secho(f"✗ Fetch failed: {exc}", fg="red")
+        click.secho(f"[FAIL] Fetch failed: {exc}", fg="red")
         sys.exit(1)
 
     if is_json:
@@ -694,7 +695,7 @@ def web_search_cmd(query: str, limit: int, is_json: bool) -> None:
     try:
         results = search_duckduckgo(query=query, max_results=limit)
     except Exception as exc:
-        click.secho(f"✗ Search failed: {exc}", fg="red")
+        click.secho(f"[FAIL] Search failed: {exc}", fg="red")
         sys.exit(1)
 
     if is_json:
@@ -730,7 +731,7 @@ def cite_check_cmd(report_file: str, sources_dir: Optional[str], is_json: bool) 
     try:
         report = check_report_file(report_path=report_file, sources_dir=sources_dir)
     except Exception as exc:
-        click.secho(f"✗ Cite check failed: {exc}", fg="red")
+        click.secho(f"[FAIL] Cite check failed: {exc}", fg="red")
         sys.exit(1)
 
     if is_json:
@@ -794,6 +795,13 @@ def cite_check_cmd(report_file: str, sources_dir: Optional[str], is_json: bool) 
 )
 @click.option("--prompt", "prompt_override", default=None, help="Custom prompt override")
 @click.option("--wait", is_flag=True, default=False, help="Wait for worker agent to finish")
+@click.option(
+    "--feature",
+    "--base",
+    "base_ref",
+    default=None,
+    help="Base branch/reference for the worktree branch",
+)
 def dispatch_cmd(
     task_id: str,
     spec_file: Optional[str],
@@ -801,17 +809,18 @@ def dispatch_cmd(
     dangerously_skip_permissions: bool,
     prompt_override: Optional[str],
     wait: bool,
+    base_ref: Optional[str] = None,
 ) -> None:
     """Interactively dispatch a task to a worker agent running in a Herdr workspace."""
     if not spec_file and not prompt_override:
-        click.secho("✗ Either --spec-file or --prompt must be provided.", fg="red")
+        click.secho("[FAIL] Either --spec-file or --prompt must be provided.", fg="red")
         sys.exit(1)
 
     prompt_text = prompt_override
     if not prompt_text:
         spec_path = Path(spec_file)  # type: ignore[arg-type]
         if not spec_path.exists():
-            click.secho(f"✗ Spec file not found: {spec_file}", fg="red")
+            click.secho(f"[FAIL] Spec file not found: {spec_file}", fg="red")
             sys.exit(1)
         prompt_text = (
             f"Read {spec_path.resolve()} and implement according to specifications. "
@@ -819,20 +828,20 @@ def dispatch_cmd(
         )
 
     if not HerdrDispatcher.is_herdr_available():
-        click.secho("✗ Herdr CLI is not installed or not in PATH.", fg="red")
+        click.secho("[FAIL] Herdr CLI is not installed or not in PATH.", fg="red")
         sys.exit(1)
 
     click.echo(f"Creating git worktree for task '{task_id}'...")
-    ok, msg_or_path, pane_id = HerdrDispatcher.create_agent_worktree(task_id)
+    ok, msg_or_path, pane_id = HerdrDispatcher.create_agent_worktree(task_id, base_ref=base_ref)
     if not ok:
-        click.secho(f"✗ Failed to create worktree: {msg_or_path}", fg="red")
+        click.secho(f"[FAIL] Failed to create worktree: {msg_or_path}", fg="red")
         sys.exit(1)
 
     if not pane_id:
-        click.secho("✗ Could not extract pane ID from Herdr worktree output.", fg="red")
+        click.secho("[FAIL] Could not extract pane ID from Herdr worktree output.", fg="red")
         sys.exit(1)
 
-    click.secho(f"✓ Worktree ready: {msg_or_path} (pane: {pane_id})", fg="green")
+    click.secho(f"[OK] Worktree ready: {msg_or_path} (pane: {pane_id})", fg="green")
 
     click.echo(f"Starting worker agent for task '{task_id}' in pane {pane_id} (kind={kind})...")
     ok, start_msg = HerdrDispatcher.start_agent(
@@ -842,11 +851,11 @@ def dispatch_cmd(
         dangerously_skip_permissions=dangerously_skip_permissions,
     )
     if not ok:
-        click.secho(f"✗ Failed to start agent: {start_msg}", fg="red")
+        click.secho(f"[FAIL] Failed to start agent: {start_msg}", fg="red")
         sys.exit(1)
 
     worker_name = HerdrDispatcher.get_worker_name(task_id)
-    click.secho(f"✓ Agent started: {worker_name}", fg="green")
+    click.secho(f"[OK] Agent started: {worker_name}", fg="green")
 
     click.echo(f"Submitting prompt to {worker_name}...")
     ok, prompt_msg = HerdrDispatcher.prompt_agent(
@@ -855,10 +864,10 @@ def dispatch_cmd(
         wait=wait,
     )
     if not ok:
-        click.secho(f"✗ Failed to prompt agent: {prompt_msg}", fg="red")
+        click.secho(f"[FAIL] Failed to prompt agent: {prompt_msg}", fg="red")
         sys.exit(1)
 
-    click.secho(f"✓ Dispatched task '{task_id}' to {worker_name} successfully!", fg="green")
+    click.secho(f"[OK] Dispatched task '{task_id}' to {worker_name} successfully!", fg="green")
 
 
 @main.group(name="pr")
@@ -893,7 +902,7 @@ def pr_fill_cmd(
         out_path = Path(output)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(generated_body, encoding="utf-8")
-        click.secho(f"✓ PR template written to {output}", fg="green")
+        click.secho(f"[OK] PR template written to {output}", fg="green")
     else:
         click.echo(generated_body)
 
@@ -950,7 +959,7 @@ def pr_create_cmd(
     )
 
     if not result.success:
-        click.secho(f"✗ Failed to create pull request: {result.error_message}", fg="red")
+        click.secho(f"[FAIL] Failed to create pull request: {result.error_message}", fg="red")
         sys.exit(1)
 
     if result.web_fallback:
@@ -962,12 +971,130 @@ def pr_create_cmd(
         except Exception:
             saved_msg = ""
         fallback_msg = (
-            f"! gh CLI unavailable or not authenticated. Direct web PR link:\n"
+            f"[-] gh CLI unavailable or not authenticated. Direct web PR link:\n"
             f"{result.pr_url}{saved_msg}"
         )
         click.secho(fallback_msg, fg="yellow")
     else:
-        click.secho(f"✓ Pull Request created successfully: {result.pr_url}", fg="green")
+        click.secho(f"[OK] Pull Request created successfully: {result.pr_url}", fg="green")
+
+
+@main.group(name="feature")
+def feature_group() -> None:
+    """Feature branch management commands."""
+    pass
+
+
+@feature_group.command(name="create")
+@click.argument("feature_name")
+@click.option(
+    "--base",
+    default="main",
+    help="Base branch to create feature branch from (default: main)",
+)
+def feature_create_cmd(feature_name: str, base: str) -> None:
+    """Create and checkout a new feature branch."""
+    ok, msg = HerdrDispatcher.create_feature_branch(feature_name=feature_name, base_branch=base)
+    if ok:
+        click.secho(f"✓ {msg}", fg="green")
+    else:
+        click.secho(f"✗ Failed to create feature branch: {msg}", fg="red")
+        sys.exit(1)
+
+
+@main.group(name="worktree")
+def worktree_group() -> None:
+    """Git worktree and worker workspace lifecycle commands."""
+    pass
+
+
+@worktree_group.command(name="merge")
+@click.argument("task_id")
+@click.option(
+    "--into",
+    "target_branch",
+    required=True,
+    help="Target feature branch to merge into",
+)
+@click.option(
+    "--no-ff/--ff",
+    default=True,
+    help="Use --no-ff merge strategy (default: True)",
+)
+def worktree_merge_cmd(task_id: str, target_branch: str, no_ff: bool) -> None:
+    """Merge a completed subtask worktree branch into a feature branch and cleanup."""
+    click.echo(f"Merging worktree branch for task '{task_id}' into '{target_branch}'...")
+    ok, msg = HerdrDispatcher.merge_worktree_to_feature(
+        task_id=task_id, target_branch=target_branch, no_ff=no_ff
+    )
+    if ok:
+        click.secho(f"✓ {msg}", fg="green")
+    else:
+        click.secho(f"✗ Failed to merge worktree: {msg}", fg="red")
+        sys.exit(1)
+
+
+@worktree_group.command(name="cleanup")
+@click.argument("task_id")
+@click.option(
+    "--force/--no-force",
+    default=True,
+    help="Force remove worktree (default: True)",
+)
+def worktree_cleanup_cmd(task_id: str, force: bool) -> None:
+    """Stop worker agent and safely remove its isolated worktree."""
+    click.echo(f"Cleaning up worktree for task '{task_id}'...")
+    ok, msg = HerdrDispatcher.cleanup_worktree(task_id=task_id, force=force)
+    if ok:
+        click.secho(f"✓ {msg}", fg="green")
+    else:
+        click.secho(f"✗ Failed to clean up worktree: {msg}", fg="red")
+        sys.exit(1)
+
+
+@main.command(name="wait")
+@click.argument("task_id")
+@click.option(
+    "--timeout",
+    default=600,
+    type=int,
+    help="Timeout in seconds to wait (default: 600)",
+)
+@click.option(
+    "--poll-interval",
+    default=2.0,
+    type=float,
+    help="Seconds between poll checks (default: 2.0)",
+)
+def wait_cmd(task_id: str, timeout: int, poll_interval: float) -> None:
+    """Wait for a subtask worker agent to complete (blocking, zero tokens)."""
+    click.echo(f"Waiting for task '{task_id}' to complete (timeout={timeout}s)...")
+    ok, msg = HerdrDispatcher.wait_for_task(
+        task_id=task_id, timeout_seconds=timeout, poll_interval=poll_interval
+    )
+    if ok:
+        click.secho(f"✓ Task '{task_id}' completed: {msg}", fg="green")
+    else:
+        click.secho(f"✗ {msg}", fg="red")
+        sys.exit(1)
+
+
+@main.command(name="abort")
+@click.argument("task_id")
+@click.option(
+    "--reason",
+    default="Aborted via CLI",
+    help="Reason for aborting task",
+)
+def abort_cmd(task_id: str, reason: str) -> None:
+    """Abort subtask, archive failure diagnostic diff, stop agent, and remove worktree."""
+    click.echo(f"Aborting task '{task_id}'...")
+    ok, msg = HerdrDispatcher.abort_task(task_id=task_id, reason=reason)
+    if ok:
+        click.secho(f"✓ {msg}", fg="green")
+    else:
+        click.secho(f"✗ Failed to abort task: {msg}", fg="red")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

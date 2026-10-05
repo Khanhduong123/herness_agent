@@ -6,9 +6,21 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from harness_agent.core.models import AgentRole, OrchestrationPlan, RunResult, SubTask
+from harness_agent.core.models import (
+    AgentRole,
+    CriticFeedback,
+    OrchestrationPlan,
+    RunResult,
+    SubTask,
+    TaskStatus,
+)
 from harness_agent.core.orchestrator import AgentOrchestrator
-from harness_agent.evaluation.critics import aggregate_critic_feedback
+from harness_agent.core.state import DAGStateStore
+from harness_agent.evaluation.critics import (
+    aggregate_critic_feedback,
+    dispatch_parallel_critics,
+    sanitize_and_truncate_diff,
+)
 
 
 def test_critic_roles_enum_and_defaults():
@@ -290,3 +302,176 @@ def authenticate(cursor, user, pwd):
     coder_res = result.task_results["coder_subtask"]
     assert coder_res.critic_review is not None
     assert "Adversarial Critic Review Report" in coder_res.output_text
+
+
+def test_sanitize_and_truncate_diff_filters_binary_and_lockfiles():
+    """Verify that binary diffs, lockfiles, minified files, and .pyc are filtered out."""
+    bloated_diff = """diff --git a/package-lock.json b/package-lock.json
+index 1111111..2222222 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,5 +1,5 @@
+-"name": "bloated-lock"
++"name": "bloated-lock-v2"
+diff --git a/poetry.lock b/poetry.lock
+index 3333333..4444444 100644
+--- a/poetry.lock
++++ b/poetry.lock
+@@ -1,3 +1,3 @@
+-[[package]]
++[[package-updated]]
+diff --git a/static/bundle.min.js b/static/bundle.min.js
+index 5555555..6666666 100644
+--- a/static/bundle.min.js
++++ b/static/bundle.min.js
+@@ -1 +1 @@
+-var a=1;
++var a=2;
+diff --git a/assets/logo.png b/assets/logo.png
+Binary files a/assets/logo.png and b/assets/logo.png differ
+diff --git a/src/app.py b/src/app.py
+index 7777777..8888888 100644
+--- a/src/app.py
++++ b/src/app.py
+@@ -10,3 +10,4 @@
+ def handle_request():
++    return "ok"
+"""
+    sanitized, was_truncated, reason = sanitize_and_truncate_diff(bloated_diff, max_lines=500)
+
+    # Excluded files must not appear in the sanitized diff
+    assert "package-lock.json" not in sanitized
+    assert "poetry.lock" not in sanitized
+    assert "bundle.min.js" not in sanitized
+    assert "logo.png" not in sanitized
+
+    # Legitimate application code must remain intact
+    assert "src/app.py" in sanitized
+    assert "def handle_request():" in sanitized
+    assert was_truncated is False
+    assert "Filtered out" in reason
+
+
+def test_sanitize_and_truncate_diff_truncates_large_diff():
+    """Verify that diffs exceeding max_lines (500) are truncated with notification."""
+    lines = [f"+    line_{i} = {i}" for i in range(600)]
+    large_diff = (
+        "diff --git a/src/big.py b/src/big.py\n"
+        "--- a/src/big.py\n"
+        "+++ b/src/big.py\n" + "\n".join(lines)
+    )
+
+    sanitized, was_truncated, reason = sanitize_and_truncate_diff(large_diff, max_lines=500)
+
+    assert was_truncated is True
+    assert "Diff exceeded 500 lines threshold." in reason
+    expected_notice = (
+        "[DIFF_TRUNCATED: Diff exceeded 500 lines threshold. "
+        "Remaining hunks omitted to avoid context saturation.]"
+    )
+    assert expected_notice in sanitized
+
+    sanitized_lines = sanitized.splitlines()
+    # Lines before notice should be <= 500
+    assert len(sanitized_lines) <= 505
+
+
+def test_aggregate_critic_feedback_ascii_tokens():
+    """Verify ASCII tokens in aggregate_critic_feedback:
+    APPROVED [OK], REJECTED [FAIL], [PASSED], [FAILED].
+    """
+    # 1. Approved case
+    approved_feedbacks = {
+        "security_reviewer": CriticFeedback(
+            role=AgentRole.SECURITY_REVIEWER,
+            critic_name="security-agent",
+            approved=True,
+            issues=[],
+        ),
+        "performance_reviewer": CriticFeedback(
+            role=AgentRole.PERFORMANCE_REVIEWER,
+            critic_name="perf-agent",
+            approved=True,
+            issues=[],
+        ),
+    }
+    app_review = aggregate_critic_feedback(approved_feedbacks)
+    assert app_review.approved is True
+    assert "APPROVED [OK]" in app_review.summary
+    assert "[PASSED]" in app_review.summary
+    assert "✓" not in app_review.summary
+
+    # 2. Rejected case
+    rejected_feedbacks = {
+        "security_reviewer": CriticFeedback(
+            role=AgentRole.SECURITY_REVIEWER,
+            critic_name="security-agent",
+            approved=False,
+            issues=["Vulnerability found"],
+        ),
+    }
+    rej_review = aggregate_critic_feedback(rejected_feedbacks)
+    assert rej_review.approved is False
+    assert "REJECTED [FAIL]" in rej_review.summary
+    assert "[FAILED]" in rej_review.summary
+    assert "✗" not in rej_review.summary
+
+
+def test_state_markdown_status_icons_ascii(tmp_path):
+    """Verify DAGStateStore.update_markdown_status uses clean ASCII token tags."""
+    md_file = tmp_path / "plan.md"
+    md_file.write_text("# Plan\n", encoding="utf-8")
+
+    statuses = {
+        "task_1": TaskStatus.PENDING,
+        "task_2": TaskStatus.RUNNING,
+        "task_3": TaskStatus.COMPLETED,
+        "task_4": TaskStatus.FAILED,
+        "task_5": TaskStatus.BLOCKED,
+    }
+    DAGStateStore.update_markdown_status(str(md_file), statuses)
+
+    content = md_file.read_text(encoding="utf-8")
+    assert "[PENDING]" in content
+    assert "[RUNNING]" in content
+    assert "[COMPLETED]" in content
+    assert "[FAILED]" in content
+    assert "[BLOCKED]" in content
+
+    # Unicode spinners/icons must not be present
+    for unicode_symbol in ["⏳", "🔄", "✅", "❌", "🚫", "⚠️"]:
+        assert unicode_symbol not in content
+
+
+@pytest.mark.asyncio
+async def test_dispatch_parallel_critics_sanitizes_diff(monkeypatch):
+    """Verify dispatch_parallel_critics passes sanitized diff to critic runner."""
+    received_prompts = []
+
+    async def fake_execute(self, task):
+        received_prompts.append(task.prompt)
+        return RunResult(
+            task_id=task.id,
+            success=True,
+            exit_code=0,
+            duration_seconds=0.01,
+            output_text="STATUS: APPROVED",
+        )
+
+    monkeypatch.setattr("harness_agent.evaluation.critics.AgyRunner.execute_task", fake_execute)
+
+    bloated_diff = """diff --git a/package-lock.json b/package-lock.json
++lockfile_junk
+diff --git a/src/code.py b/src/code.py
++def valid_code(): pass
+"""
+    from harness_agent.core.runner import AgyRunner
+
+    runner = AgyRunner()
+    review = await dispatch_parallel_critics(runner, bloated_diff)
+
+    assert review.approved is True
+    # Lockfile junk was filtered out from all critic prompts
+    for p in received_prompts:
+        assert "package-lock.json" not in p
+        assert "valid_code" in p

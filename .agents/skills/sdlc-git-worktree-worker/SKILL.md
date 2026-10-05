@@ -18,15 +18,19 @@ This protocol enforces that every Worker Agent (e.g., Coder, Tester) must perfor
 When a Worker Agent receives a subtask from the Orchestrator, it must **not** modify the main working directory directly. The Orchestrator manages the dispatch lifecycle through Herdr:
 
 ### Orchestrator Interactive Dispatch Lifecycle
-1. **Create Isolated Worktree (Native Git)**:
+1. **Create Isolated Worktree from Feature Branch (Native Git)**:
    ```powershell
-   git worktree add -b agent/<task_id> .worktrees/agent/<task_id>
+   git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<feature_name>
    ```
-2. **Start Interactive Worker in Dedicated Pane**:
+2. **Worktree Environment Setup (Copy Configuration Files)**:
+   ```powershell
+   Copy-Item -Path ".env*" -Destination ".worktrees/agent/<task_id>/" -ErrorAction SilentlyContinue
+   ```
+3. **Start Interactive Worker in Dedicated Pane**:
    ```powershell
    herdr agent start worker_<task_id> --kind agy --pane <pane> --cwd .worktrees/agent/<task_id> -- --dangerously-skip-permissions
    ```
-3. **Prompt Worker with Sub-Spec Contract**:
+4. **Prompt Worker with Sub-Spec Contract**:
    ```powershell
    herdr agent prompt worker_<task_id> "Read .ai/plans/subtasks/YYYY-MM-DD/<plan_id>/subtask_01_<task_id>.md and implement"
    ```
@@ -58,9 +62,27 @@ After the commit is successful, the Worker Agent **MUST** explicitly notify the 
 2. The notification confirms that all tests pass 100% and quality gates are satisfied.
 3. The Worker Agent must return execution control, updating the task status to `COMPLETED`.
 
-## 5. Cleanup (By Orchestrator)
+## 5. Merge Back & Cleanup Sequence (By Orchestrator)
 
-The Central Orchestrator is responsible for reviewing the work, pushing the branch, creating the PR, and subsequently removing the native git worktree:
-```powershell
-git worktree remove .worktrees/agent/<task_id>
-```
+The Central Orchestrator is responsible for reviewing the work, merging back to the feature branch, terminating the worker, cleaning up the worktree, and running full regression:
+1. **Merge Back to Feature Branch**:
+   ```powershell
+   git merge --no-ff agent/<task_id>
+   ```
+2. **Termination-First Cleanup Sequence**:
+   To avoid file locking errors on Windows and Linux, stop/kill the active Herdr worker pane FIRST, then remove the worktree and branch:
+   ```powershell
+   herdr pane close <pane_id>
+   git worktree remove --force .worktrees/agent/<task_id>
+   git branch -d agent/<task_id>
+   ```
+3. **Full Regression Testing Gate**:
+   Execute the full test suite on the feature branch:
+   ```powershell
+   conda run -n pytorch pytest tests/
+   ```
+4. **Push & Create Pull Request to Main**:
+   ```powershell
+   git push -u origin feat/<feature_name>
+   conda run -n pytorch harness-agent pr create --base main
+   ```
