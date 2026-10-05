@@ -9,6 +9,7 @@ from harness_agent.evaluation.critics import (
     detect_requirement_issues,
     detect_security_issues,
     dispatch_parallel_critics,
+    save_critic_report,
 )
 from harness_agent.evaluation.evaluator import (
     BaseEvaluator,
@@ -53,5 +54,6 @@ __all__ = [
     "evaluate_task",
     "multi_replace_file_content",
     "parse_unified_diff",
+    "save_critic_report",
     "validate_tool_call",
 ]

@@ -71,15 +71,21 @@ After committing in the subtask worktree and completing initial quality checks:
    ```powershell
    conda run -n pytorch pytest tests/
    ```
-3. **Push Feature Branch to Remote**:
+3. **Execute Automated Adversarial Critics Gate**:
+   Verify that all 3 adversarial critics (Security, Performance, Requirements) approve the diff:
+   ```powershell
+   conda run -n pytorch harness-agent review --base main
+   ```
+   **Rule**: PR creation is strictly blocked if any critic rejects the changes.
+4. **Push Feature Branch to Remote**:
    The agent **MUST automatically push** the feature branch to the remote repository:
    ```powershell
    git push -u origin feat/<feature_name>
    ```
-4. **Create Pull Request**:
+5. **Create Pull Request**:
    The agent **MUST create a Pull Request** targeting `main` (or `dev`) using the automated CLI tool:
    ```powershell
    conda run -n pytorch harness-agent pr create --base main
    ```
-5. **Report PR Link to User**:
+6. **Report PR Link to User**:
    The agent **MUST provide the resulting Pull Request URL directly to the user** in the response. Under no circumstances should the agent merge the PR into protected branches (merging remains exclusively the human user's authority).

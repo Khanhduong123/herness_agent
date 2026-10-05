@@ -29,6 +29,7 @@ from harness_agent.core import (
     UntrustedSource,
     WorkerAgentConfig,
     detect_injection_risk,
+    dispatch_interactive_critics,
     extract_untrusted_content,
     sanitize_delimiters,
     wrap_untrusted_content,
@@ -55,6 +56,7 @@ from harness_agent.evaluation import (
     evaluate_task,
     multi_replace_file_content,
     parse_unified_diff,
+    save_critic_report,
     validate_tool_call,
 )
 from harness_agent.research import (
@@ -151,6 +153,7 @@ __all__ = [
     "detect_performance_issues",
     "detect_requirement_issues",
     "detect_security_issues",
+    "dispatch_interactive_critics",
     "dispatch_parallel_critics",
     "evaluate_task",
     "extract_numbers",
@@ -171,6 +174,7 @@ __all__ = [
     "read_pdf_document",
     "safe_get",
     "sanitize_delimiters",
+    "save_critic_report",
     "search_ai_papers",
     "search_arxiv",
     "search_duckduckgo",

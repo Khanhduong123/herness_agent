@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional, Set
@@ -16,6 +17,35 @@ from harness_agent.core.harness import AgentHarness
 from harness_agent.core.models import AgyConfig, OrchestrationResult, Task, TaskStatus
 from harness_agent.core.orchestrator import AgentOrchestrator
 from harness_agent.core.runner import AgyRunner
+
+
+def _get_git_diff(
+    base: str, target: str = "HEAD", repo_root: Optional[Path] = None
+) -> Optional[str]:
+    """Safely obtain git diff between base and target refs."""
+    try:
+        proc = subprocess.run(
+            ["git", "diff", f"{base}...{target}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=str(repo_root) if repo_root else None,
+        )
+        if proc.returncode == 0:
+            return proc.stdout
+        proc = subprocess.run(
+            ["git", "diff", f"origin/{base}...{target}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=str(repo_root) if repo_root else None,
+        )
+        if proc.returncode == 0:
+            return proc.stdout
+        return None
+    except Exception:
+        return None
+
 
 if sys.platform == "win32":
     if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -35,6 +65,86 @@ if sys.platform == "win32":
 def main() -> None:
     """Harness Agent: Benchmark and execution harness for agy CLI."""
     pass
+
+
+@main.command(name="review")
+@click.option("--base", default="main", help="Base branch to compare against (default: main)")
+@click.option("--target", default="HEAD", help="Target ref or branch (default: HEAD)")
+@click.option(
+    "--fail-on-reject/--allow-reject",
+    default=True,
+    help="Fail with exit code 1 if any critic rejects (default: True)",
+)
+@click.option(
+    "--output",
+    "-o",
+    default=".runs/critics_report.json",
+    help="Optional path to save markdown/json report (defaults to .runs/critics_report.json)",
+)
+@click.option(
+    "--diff-file",
+    default=None,
+    help="Optional pre-generated diff file to inspect",
+)
+def review_cmd(
+    base: str,
+    target: str,
+    fail_on_reject: bool,
+    output: Optional[str],
+    diff_file: Optional[str],
+) -> None:
+    """Run parallel Adversarial Critics (Security, Performance, Requirement) on diff."""
+    from harness_agent.evaluation.critics import dispatch_parallel_critics
+
+    if diff_file:
+        diff_path = Path(diff_file)
+        if not diff_path.is_file():
+            click.secho(f"[FAIL] Diff file not found: {diff_file}", fg="red")
+            sys.exit(1)
+        diff_content = diff_path.read_text(encoding="utf-8", errors="replace")
+    else:
+        diff_content = _get_git_diff(base, target)
+        if diff_content is None:
+            click.secho(
+                f"[FAIL] Failed to obtain git diff between '{base}' and '{target}'.",
+                fg="red",
+            )
+            sys.exit(1)
+
+    runner = AgyRunner()
+    review = asyncio.run(dispatch_parallel_critics(runner=runner, diff_or_content=diff_content))
+
+    click.echo("=" * 60)
+    click.echo("             ADVERSARIAL CRITIC REVIEW REPORT")
+    click.echo("=" * 60)
+    status_label = "[PASSED]" if review.approved else "[FAILED]"
+    click.echo(f"Overall Status: {status_label}")
+    click.echo(f"Base: {base} ... Target: {target}")
+    click.echo("-" * 60)
+    click.echo("Critics Feedback:")
+    for role_name, cf in review.critics_feedback.items():
+        res_label = "[PASSED]" if cf.approved else "[FAILED]"
+        click.echo(f"  * {cf.critic_name} ({cf.role.value}): {res_label}")
+        if cf.issues:
+            for issue in cf.issues:
+                click.echo(f"      - {issue}")
+    click.echo("=" * 60)
+
+    if output:
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        if str(output).endswith(".json"):
+            out_path.write_text(review.model_dump_json(indent=2), encoding="utf-8")
+        else:
+            out_path.write_text(review.summary, encoding="utf-8")
+        click.echo(f"Report saved to: {output}")
+
+    if review.approved:
+        click.secho("[OK] Adversarial Critic Review: PASSED", fg="green")
+    else:
+        click.secho("[FAIL] Adversarial Critic Review: REJECTED", fg="red")
+        if fail_on_reject:
+            sys.exit(1)
 
 
 @main.command()
@@ -924,6 +1034,11 @@ def pr_fill_cmd(
     default=False,
     help="Print generated PR without creating or pushing",
 )
+@click.option(
+    "--review/--no-review",
+    default=True,
+    help="Run adversarial critics review before creating PR",
+)
 def pr_create_cmd(
     base: str,
     title: Optional[str],
@@ -932,11 +1047,42 @@ def pr_create_cmd(
     push: bool,
     draft: bool,
     dry_run: bool,
+    review: bool,
 ) -> None:
     """Automatically populate PR template, push branch, and create PR via gh CLI
     or output web link.
     """
     from harness_agent.core.pr import PRGenerator
+
+    review_res = None
+    if review:
+        from harness_agent.evaluation.critics import dispatch_parallel_critics
+
+        diff_content = _get_git_diff(base, "HEAD")
+        if diff_content is not None:
+            runner = AgyRunner()
+            review_res = asyncio.run(
+                dispatch_parallel_critics(runner=runner, diff_or_content=diff_content)
+            )
+            if not review_res.approved and not draft:
+                click.secho(
+                    "[FAIL] Pull request creation aborted: "
+                    "Adversarial Critics detected critical issues.",
+                    fg="red",
+                )
+                for cf in review_res.critics_feedback.values():
+                    if cf.issues:
+                        click.echo(f"  * {cf.critic_name} ({cf.role.value}):")
+                        for issue_item in cf.issues:
+                            click.echo(f"      - {issue_item}")
+                sys.exit(1)
+            elif review_res.approved:
+                click.secho("[OK] Adversarial Critics approved changes.", fg="green")
+            else:
+                click.secho(
+                    "[WARN] Adversarial Critics detected issues, continuing for draft PR.",
+                    fg="yellow",
+                )
 
     if dry_run:
         gen_title, gen_body = PRGenerator.generate_pr_content(
@@ -944,6 +1090,8 @@ def pr_create_cmd(
             issue_id=issue,
             custom_title=title,
             custom_description=description,
+            critic_review=review_res,
+            no_review=(not review),
         )
         click.secho(f"=== PR Title: {gen_title} ===", fg="cyan", bold=True)
         click.echo(gen_body)
@@ -956,6 +1104,8 @@ def pr_create_cmd(
         push=push,
         draft=draft,
         custom_description=description,
+        critic_review=review_res,
+        no_review=(not review),
     )
 
     if not result.success:
@@ -1021,8 +1171,37 @@ def worktree_group() -> None:
     default=True,
     help="Use --no-ff merge strategy (default: True)",
 )
-def worktree_merge_cmd(task_id: str, target_branch: str, no_ff: bool) -> None:
+@click.option(
+    "--review/--no-review",
+    default=True,
+    help="Run adversarial critics review on subtask diff before merging",
+)
+def worktree_merge_cmd(task_id: str, target_branch: str, no_ff: bool, review: bool) -> None:
     """Merge a completed subtask worktree branch into a feature branch and cleanup."""
+    if review:
+        from harness_agent.evaluation.critics import dispatch_parallel_critics
+
+        branch_name = HerdrDispatcher.get_branch_name(task_id)
+        diff_content = _get_git_diff(target_branch, branch_name)
+        if diff_content is not None:
+            runner = AgyRunner()
+            review_res = asyncio.run(
+                dispatch_parallel_critics(runner=runner, diff_or_content=diff_content)
+            )
+            if not review_res.approved:
+                click.secho(
+                    f"[FAIL] Worktree merge aborted: Adversarial Critics detected "
+                    f"critical issues on '{branch_name}'.",
+                    fg="red",
+                )
+                for cf in review_res.critics_feedback.values():
+                    if cf.issues:
+                        click.echo(f"  * {cf.critic_name} ({cf.role.value}):")
+                        for issue_item in cf.issues:
+                            click.echo(f"      - {issue_item}")
+                sys.exit(1)
+            click.secho("[OK] Adversarial Critics approved changes.", fg="green")
+
     click.echo(f"Merging worktree branch for task '{task_id}' into '{target_branch}'...")
     ok, msg = HerdrDispatcher.merge_worktree_to_feature(
         task_id=task_id, target_branch=target_branch, no_ff=no_ff
