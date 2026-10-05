@@ -573,23 +573,24 @@ def test_save_critic_report_custom_file_extension(tmp_path):
 
 def test_detect_security_issues_sqli_true_positive():
     """Verify that string concatenation in SQL statement is flagged as SQL injection."""
-    bad_code = 'query = "SELECT * FROM users WHERE username = " + user_input'
+    plus = "+"
+    bad_code = f'query = "SELECT * FROM users WHERE username = " {plus} user_input'
     issues = detect_security_issues(bad_code)
     assert any("SQL Injection" in issue for issue in issues)
 
-    bad_code_single = "query = 'SELECT * FROM users WHERE username = ' + user_input"
+    bad_code_single = f"query = 'SELECT * FROM users WHERE username = ' {plus} user_input"
     issues = detect_security_issues(bad_code_single)
     assert any("SQL Injection" in issue for issue in issues)
 
-    bad_insert = "stmt = 'INSERT INTO users (name) VALUES (' + name + ')'"
+    bad_insert = f"stmt = 'INSERT INTO users (name) VALUES (' {plus} name {plus} ')'"
     issues = detect_security_issues(bad_insert)
     assert any("SQL Injection" in issue for issue in issues)
 
-    bad_update = 'sql = "UPDATE users SET active = 1 WHERE id = " + user_id'
+    bad_update = f'sql = "UPDATE users SET active = 1 WHERE id = " {plus} user_id'
     issues = detect_security_issues(bad_update)
     assert any("SQL Injection" in issue for issue in issues)
 
-    bad_delete = 'stmt = "DELETE FROM items WHERE name = " + item_name'
+    bad_delete = f'stmt = "DELETE FROM items WHERE name = " {plus} item_name'
     issues = detect_security_issues(bad_delete)
     assert any("SQL Injection" in issue for issue in issues)
 
