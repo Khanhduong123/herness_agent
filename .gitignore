@@ -1,5 +1,7 @@
 # Local AI Agent Specs
 .ai/
+.worktrees/
+.herdr/
 
 # Byte-compiled / optimized / C-extension files
 __pycache__/
