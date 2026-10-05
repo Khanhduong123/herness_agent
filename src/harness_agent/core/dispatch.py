@@ -142,6 +142,7 @@ class HerdrDispatcher:
         pane_id: str,
         kind: str = "agy",
         dangerously_skip_permissions: bool = True,
+        effort: str = "low",
         executable: str = "herdr",
     ) -> Tuple[bool, str]:
         """Run 'herdr agent start worker_<task_id> --kind <kind> --pane <pane_id>'.
@@ -151,6 +152,7 @@ class HerdrDispatcher:
             pane_id: Pane ID where the interactive agent will run.
             kind: Agent kind (default: 'agy').
             dangerously_skip_permissions: Auto-approve permissions if True.
+            effort: Model reasoning effort (default: 'low').
             executable: Herdr executable binary name or path.
 
         Returns:
@@ -158,8 +160,14 @@ class HerdrDispatcher:
         """
         worker_name = cls.get_worker_name(task_id)
         cmd = [executable, "agent", "start", worker_name, "--kind", kind, "--pane", pane_id]
+        agy_flags: List[str] = []
         if dangerously_skip_permissions:
-            cmd.extend(["--", "--dangerously-skip-permissions"])
+            agy_flags.append("--dangerously-skip-permissions")
+        if effort:
+            agy_flags.extend(["--effort", effort])
+        if agy_flags:
+            cmd.append("--")
+            cmd.extend(agy_flags)
 
         try:
             proc = subprocess.run(

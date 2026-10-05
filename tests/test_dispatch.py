@@ -91,7 +91,7 @@ class TestHerdrDispatcher:
             assert pane_id is None
 
     def test_tc03_start_agent_command_construction(self) -> None:
-        """TC-03: start_agent builds and executes expected CLI command with permissions flag."""
+        """TC-03: start_agent builds CLI command with permissions and effort flag."""
         mock_proc = MagicMock(returncode=0, stdout="agent ready", stderr="")
         with patch("subprocess.run", return_value=mock_proc) as mock_run:
             ok, out = HerdrDispatcher.start_agent(
@@ -114,6 +114,8 @@ class TestHerdrDispatcher:
                     "w1B:p1",
                     "--",
                     "--dangerously-skip-permissions",
+                    "--effort",
+                    "low",
                 ],
                 capture_output=True,
                 text=True,
@@ -129,6 +131,7 @@ class TestHerdrDispatcher:
                 pane_id="w1:p1",
                 kind="codex",
                 dangerously_skip_permissions=False,
+                effort="",
             )
             assert ok is True
             mock_run.assert_called_once_with(
@@ -141,6 +144,37 @@ class TestHerdrDispatcher:
                     "codex",
                     "--pane",
                     "w1:p1",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+    def test_start_agent_custom_effort(self) -> None:
+        """Test start_agent command with custom effort string."""
+        mock_proc = MagicMock(returncode=0, stdout="agent ready", stderr="")
+        with patch("subprocess.run", return_value=mock_proc) as mock_run:
+            ok, out = HerdrDispatcher.start_agent(
+                task_id="t1",
+                pane_id="w1:p1",
+                kind="agy",
+                dangerously_skip_permissions=False,
+                effort="high",
+            )
+            assert ok is True
+            mock_run.assert_called_once_with(
+                [
+                    "herdr",
+                    "agent",
+                    "start",
+                    "worker_t1",
+                    "--kind",
+                    "agy",
+                    "--pane",
+                    "w1:p1",
+                    "--",
+                    "--effort",
+                    "high",
                 ],
                 capture_output=True,
                 text=True,
