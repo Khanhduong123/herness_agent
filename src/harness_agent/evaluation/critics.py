@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from harness_agent.core.models import (
     AgentRole,
@@ -18,6 +18,137 @@ from harness_agent.core.models import (
     WorkerAgentConfig,
 )
 from harness_agent.core.runner import AgyRunner
+
+EXCLUDED_DIFF_FILE_PATTERNS = [
+    # Lockfiles
+    r"(?:^|/)package-lock\.json$",
+    r"(?:^|/)yarn\.lock$",
+    r"(?:^|/)poetry\.lock$",
+    r"(?:^|/)pnpm-lock\.yaml$",
+    r"(?:^|/)Pipfile\.lock$",
+    r"(?:^|/)composer\.lock$",
+    r"(?:^|/)Cargo\.lock$",
+    r"(?:^|/)flake\.lock$",
+    # Minified assets
+    r"\.min\.js$",
+    r"\.min\.css$",
+    # Bytecode
+    r"\.py[cod]$",
+    # Snapshots & source maps
+    r"\.snap$",
+    r"\.snapshot$",
+    r"\.min\.js\.map$",
+    r"\.min\.css\.map$",
+    # Binary extensions & artifacts
+    (
+        r"\.(?:png|jpe?g|gif|ico|webp|svg|bmp|tiff?|pdf|zip|tar|gz|tgz|bz2|"
+        r"xz|7z|whl|exe|bin|dll|so|dylib|db|sqlite[0-9]?|parquet|arrow)$"
+    ),
+]
+
+
+def _is_binary_diff_chunk(chunk: str) -> bool:
+    """Check if diff chunk represents binary files."""
+    if re.search(r"Binary files .* differ", chunk, re.IGNORECASE):
+        return True
+    if "GIT binary patch" in chunk or "GIT binary diff" in chunk:
+        return True
+    return False
+
+
+def _extract_diff_filenames(chunk: str) -> List[str]:
+    """Extract affected file paths from a diff hunk/header."""
+    filenames: List[str] = []
+    # diff --git a/path b/path
+    m = re.search(r"^diff --git a/(.*?)\s+b/(.*?)$", chunk, re.MULTILINE)
+    if m:
+        filenames.extend([m.group(1), m.group(2)])
+    # --- a/path or --- path
+    m = re.search(r"^---\s+(?:[ab]/)?([^\s\t\n]+)", chunk, re.MULTILINE)
+    if m:
+        filenames.append(m.group(1))
+    # +++ b/path or +++ path
+    m = re.search(r"^\+\+\+\s+(?:[ab]/)?([^\s\t\n]+)", chunk, re.MULTILINE)
+    if m:
+        filenames.append(m.group(1))
+    # Binary files a/path and b/path differ
+    m = re.search(r"Binary files (?:a/)?(.*?) and (?:b/)?(.*?) differ", chunk, re.IGNORECASE)
+    if m:
+        filenames.extend([m.group(1), m.group(2)])
+    return [f for f in filenames if f and f != "/dev/null"]
+
+
+def _is_excluded_diff_file(filename: str) -> bool:
+    """Check if file matches lockfile, minified asset, snapshot, or binary pattern."""
+    norm = filename.replace("\\", "/")
+    return any(re.search(pat, norm, re.IGNORECASE) for pat in EXCLUDED_DIFF_FILE_PATTERNS)
+
+
+def _split_diff_into_chunks(diff_text: str) -> List[str]:
+    """Split diff into per-file chunks or unified diff blocks."""
+    if re.search(r"^diff --git ", diff_text, flags=re.MULTILINE):
+        parts = re.split(r"(?=^diff --git )", diff_text, flags=re.MULTILINE)
+        return [p for p in parts if p.strip()]
+    if re.search(r"^--- [ab]/", diff_text, flags=re.MULTILINE):
+        parts = re.split(r"(?=^--- [ab]/)", diff_text, flags=re.MULTILINE)
+        return [p for p in parts if p.strip()]
+    return [diff_text] if diff_text.strip() else []
+
+
+def sanitize_and_truncate_diff(diff_text: str, max_lines: int = 500) -> Tuple[str, bool, str]:
+    """Analyze, sanitize, and truncate git diff to protect critic context windows.
+
+    Filters out:
+    - Binary file diffs ('Binary files a/... and b/... differ' or git binary patches)
+    - Auto-generated or lock files (package-lock.json, poetry.lock, pnpm-lock.yaml,
+      minified JS/CSS, *.pyc)
+    - Large machine-generated snapshots and binary artifacts
+
+    If the remaining diff exceeds max_lines (default 500), retains top lines up to
+    max_lines and appends a truncation notice block.
+
+    Returns:
+        (sanitized_diff, was_truncated, reason)
+    """
+    if not diff_text or not diff_text.strip():
+        return "", False, ""
+
+    chunks = _split_diff_into_chunks(diff_text)
+    kept_chunks: List[str] = []
+    excluded_files: List[str] = []
+
+    for chunk in chunks:
+        if _is_binary_diff_chunk(chunk):
+            filenames = _extract_diff_filenames(chunk)
+            excluded_files.extend(filenames or ["binary file"])
+            continue
+
+        filenames = _extract_diff_filenames(chunk)
+        if filenames and any(_is_excluded_diff_file(fn) for fn in filenames):
+            excluded_files.extend(filenames)
+            continue
+
+        kept_chunks.append(chunk)
+
+    if not kept_chunks:
+        reason = f"Filtered out {len(excluded_files)} auto-generated/binary file(s)."
+        return "", False, reason
+
+    combined = "\n".join(chunk.rstrip("\r\n") for chunk in kept_chunks)
+    lines = combined.splitlines()
+
+    if len(lines) > max_lines:
+        truncated_lines = lines[:max_lines]
+        notice = (
+            f"[DIFF_TRUNCATED: Diff exceeded {max_lines} lines threshold. "
+            f"Remaining hunks omitted to avoid context saturation.]"
+        )
+        sanitized_diff = "\n".join(truncated_lines) + "\n\n" + notice
+        reason = f"Diff exceeded {max_lines} lines threshold."
+        return sanitized_diff, True, reason
+
+    reason = f"Filtered out {len(excluded_files)} excluded file(s)." if excluded_files else ""
+    return combined, False, reason
 
 
 def detect_security_issues(diff_or_code: str) -> List[str]:
@@ -304,7 +435,7 @@ def aggregate_critic_feedback(
 
     all_approved = all(cf.approved for cf in feedbacks_dict.values())
 
-    status_label = "APPROVED ✓" if all_approved else "REJECTED ✗ (Remediation Required)"
+    status_label = "APPROVED [OK]" if all_approved else "REJECTED [FAIL] (Remediation Required)"
     summary_lines = [
         "## Adversarial Critic Review Report",
         f"**Overall Status:** {status_label}",
@@ -312,9 +443,9 @@ def aggregate_critic_feedback(
     ]
 
     for role_name, cf in feedbacks_dict.items():
-        status_icon = "✓ PASSED" if cf.approved else "✗ FAILED"
+        status_icon = "[PASSED]" if cf.approved else "[FAILED]"
         summary_lines.append(
-            f"### Critic: {cf.critic_name} ({cf.role.value.upper()}) [{status_icon}]"
+            f"### Critic: {cf.critic_name} ({cf.role.value.upper()}) {status_icon}"
         )
         if cf.issues:
             summary_lines.append("**Issues Detected:**")
@@ -349,12 +480,14 @@ async def dispatch_parallel_critics(
     workers = workers or {}
     base_config = base_config or AgyConfig()
 
+    sanitized_diff, _, _ = sanitize_and_truncate_diff(diff_or_content)
+
     async def _run_single_critic(role: AgentRole) -> tuple[str, CriticFeedback]:
         worker_cfg = workers.get(role.value) or WorkerAgentConfig(
             role=role, name=f"{role.value.replace('_', '-')}-agent"
         )
         prompt = build_critic_prompt(
-            role=role, diff_or_content=diff_or_content, subtask=subtask, plan=plan
+            role=role, diff_or_content=sanitized_diff, subtask=subtask, plan=plan
         )
 
         task_def = Task(
@@ -380,7 +513,7 @@ async def dispatch_parallel_critics(
             role=role,
             critic_name=worker_cfg.name,
             run_result=run_res,
-            diff_or_content=diff_or_content,
+            diff_or_content=sanitized_diff,
             requirements=criteria,
         )
         return role.value, feedback
