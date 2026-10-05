@@ -11,6 +11,7 @@ from typing import List, Optional, Set
 
 import click
 
+from harness_agent.core.dispatch import HerdrDispatcher
 from harness_agent.core.harness import AgentHarness
 from harness_agent.core.models import AgyConfig, OrchestrationResult, Task, TaskStatus
 from harness_agent.core.orchestrator import AgentOrchestrator
@@ -739,6 +740,89 @@ def cite_check_cmd(report_file: str, sources_dir: Optional[str], is_json: bool) 
             if pair.details:
                 click.echo(f"    Details:  {pair.details}")
             click.echo("")
+
+
+@main.command(name="dispatch")
+@click.option("--task-id", required=True, help="Task ID to branch and name the worker")
+@click.option(
+    "--spec-file",
+    default=None,
+    type=click.Path(),
+    help="Path to the subtask spec file to instruct the worker with",
+)
+@click.option("--kind", default="agy", help="Agent kind (default: agy)")
+@click.option(
+    "--dangerously-skip-permissions/--require-permissions",
+    default=True,
+    help="Auto-approve tool permissions",
+)
+@click.option("--prompt", "prompt_override", default=None, help="Custom prompt override")
+@click.option("--wait", is_flag=True, default=False, help="Wait for worker agent to finish")
+def dispatch_cmd(
+    task_id: str,
+    spec_file: Optional[str],
+    kind: str,
+    dangerously_skip_permissions: bool,
+    prompt_override: Optional[str],
+    wait: bool,
+) -> None:
+    """Interactively dispatch a task to a worker agent running in a Herdr workspace."""
+    if not spec_file and not prompt_override:
+        click.secho("✗ Either --spec-file or --prompt must be provided.", fg="red")
+        sys.exit(1)
+
+    prompt_text = prompt_override
+    if not prompt_text:
+        spec_path = Path(spec_file)  # type: ignore[arg-type]
+        if not spec_path.exists():
+            click.secho(f"✗ Spec file not found: {spec_file}", fg="red")
+            sys.exit(1)
+        prompt_text = (
+            f"Read {spec_path.resolve()} and implement according to specifications. "
+            f"Ensure 100% test pass rate and commit your changes."
+        )
+
+    if not HerdrDispatcher.is_herdr_available():
+        click.secho("✗ Herdr CLI is not installed or not in PATH.", fg="red")
+        sys.exit(1)
+
+    click.echo(f"Creating git worktree for task '{task_id}'...")
+    ok, msg_or_path, pane_id = HerdrDispatcher.create_agent_worktree(task_id)
+    if not ok:
+        click.secho(f"✗ Failed to create worktree: {msg_or_path}", fg="red")
+        sys.exit(1)
+
+    if not pane_id:
+        click.secho("✗ Could not extract pane ID from Herdr worktree output.", fg="red")
+        sys.exit(1)
+
+    click.secho(f"✓ Worktree ready: {msg_or_path} (pane: {pane_id})", fg="green")
+
+    click.echo(f"Starting worker agent for task '{task_id}' in pane {pane_id} (kind={kind})...")
+    ok, start_msg = HerdrDispatcher.start_agent(
+        task_id=task_id,
+        pane_id=pane_id,
+        kind=kind,
+        dangerously_skip_permissions=dangerously_skip_permissions,
+    )
+    if not ok:
+        click.secho(f"✗ Failed to start agent: {start_msg}", fg="red")
+        sys.exit(1)
+
+    worker_name = HerdrDispatcher.get_worker_name(task_id)
+    click.secho(f"✓ Agent started: {worker_name}", fg="green")
+
+    click.echo(f"Submitting prompt to {worker_name}...")
+    ok, prompt_msg = HerdrDispatcher.prompt_agent(
+        task_id=task_id,
+        prompt=prompt_text,
+        wait=wait,
+    )
+    if not ok:
+        click.secho(f"✗ Failed to prompt agent: {prompt_msg}", fg="red")
+        sys.exit(1)
+
+    click.secho(f"✓ Dispatched task '{task_id}' to {worker_name} successfully!", fg="green")
 
 
 if __name__ == "__main__":
