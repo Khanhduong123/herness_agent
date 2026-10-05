@@ -397,6 +397,18 @@ class PRGenerator:
             msg = c.get("message", "").strip()
             if not msg:
                 continue
+
+            # Filter out merge commits (e.g., "Merge branch ...",
+            # "merge subtask ...", "feat(...): merge ...")
+            lower_msg = msg.lower()
+            if (
+                lower_msg.startswith("merge ")
+                or "merge branch" in lower_msg
+                or "merge subtask" in lower_msg
+                or re.match(r"^\w+(?:\([^)]+\))?:\s*merge\b", lower_msg)
+            ):
+                continue
+
             match = re.match(r"^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.*)", msg)
             if match:
                 ctype, scope, breaking, desc = match.groups()
@@ -424,15 +436,66 @@ class PRGenerator:
             for c in context.commits:
                 sections.append(f"- {c['message']}")
 
-        # 4. Modified files:
-        if context.changed_files:
-            sections.append("\n### Modified files:")
-            for f in context.changed_files[:15]:
-                sections.append(f"- `{f}`")
-            if len(context.changed_files) > 15:
-                sections.append(f"- ... and {len(context.changed_files) - 15} more files")
-
         return "\n".join(sections)
+
+    @classmethod
+    def _derive_title(
+        cls,
+        branch_name: str,
+        plan_goal: Optional[str] = None,
+        commits: Optional[List[Dict[str, str]]] = None,
+    ) -> str:
+        """Derive PR title from feature branch name or plan goal, avoiding raw merge commits."""
+        # 1. Clean branch name
+        # Examples: feat/safe-gitignore-and-precommit-setup, fix/login-bug, agent/subtask_01_xyz
+        branch_clean = branch_name.strip()
+        prefix = "feat"
+        slug = branch_clean
+
+        if "/" in branch_clean:
+            parts = branch_clean.split("/", 1)
+            prefix = parts[0]
+            slug = parts[1]
+
+        # Normalize slug into readable words
+        words = [w for w in re.split(r"[-_]", slug) if w]
+
+        # Check for scope or keywords in words
+        scope = ""
+        # If first word or known keywords indicate scope
+        if words and words[0] in ("setup", "cli", "core", "eval", "ui", "auth", "pr"):
+            scope = words[0]
+            words = words[1:]
+        elif any(w in ("gitignore", "precommit") for w in words):
+            scope = "setup"
+
+        readable_slug = " ".join(words) if words else slug
+
+        # If prefix is "agent" or "head", fallback to feat or plan goal
+        if prefix in ("agent", "head", "main", "dev"):
+            prefix = "feat"
+
+        scope_str = f"({scope})" if scope else ""
+        derived_from_branch = f"{prefix}{scope_str}: {readable_slug}"
+
+        # If we have a clean first non-merge commit and branch doesn't provide good slug
+        if commits:
+            for c in commits:
+                msg = c.get("message", "").strip()
+                lower = msg.lower()
+                if (
+                    not lower.startswith("merge ")
+                    and "merge branch" not in lower
+                    and "merge subtask" not in lower
+                    and not re.match(r"^\w+(?:\([^)]+\))?:\s*merge\b", lower)
+                ):
+                    # Valid commit title available
+                    # If branch is a generic agent/... worktree branch, prefer clean commit message
+                    if branch_clean.startswith("agent/") or branch_clean in ("HEAD", "main"):
+                        return msg
+                    break
+
+        return derived_from_branch
 
     @classmethod
     def generate_pr_content(
@@ -447,15 +510,19 @@ class PRGenerator:
         no_review: bool = False,
     ) -> Tuple[str, str]:
         """Generate PR title and markdown body populated with git context."""
-        context = cls.collect_git_context(repo_root=repo_root, base_branch=base_branch)
+        root = repo_root or cls._resolve_repo_root()
+        context = cls.collect_git_context(repo_root=root, base_branch=base_branch)
 
         # Title derivation
         if custom_title:
             title = custom_title
-        elif context.commits:
-            title = context.commits[0]["message"]
         else:
-            title = f"feat: updates on {context.branch_name}"
+            plan_goal = cls._extract_plan_goal(root, context.branch_name)
+            title = cls._derive_title(
+                branch_name=context.branch_name,
+                plan_goal=plan_goal,
+                commits=context.commits,
+            )
 
         # Load template
         template_file = cls.find_template(repo_root)
