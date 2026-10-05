@@ -314,6 +314,15 @@ def init_cmd(
         target_agents = target_path / ".agents"
         shutil.copytree(agents_src, target_agents, dirs_exist_ok=True)
         click.secho("  [✓] Created .agents/skills/ (SDLC Skills)", fg="green")
+        if (target_agents / "hooks.json").exists():
+            click.secho("  [✓] Created .agents/hooks.json (Lifecycle Hooks config)", fg="green")
+        copied += 1
+
+    hooks_src = repo_root / "src" / "harness_agent" / "hooks"
+    if hooks_src.exists():
+        target_hooks = target_path / "src" / "harness_agent" / "hooks"
+        shutil.copytree(hooks_src, target_hooks, dirs_exist_ok=True)
+        click.secho("  [✓] Created src/harness_agent/hooks/ (Lifecycle Hooks)", fg="green")
         copied += 1
 
     _register_project(repo_root, target_path)
@@ -487,6 +496,20 @@ def _sync_single_project(repo_root: Path, target_path: Path, link: bool = False)
             click.secho("  [+] Synced .agents/skills/ (SDLC Skills updated)", fg="green")
             copied += 1
 
+        hooks_file = agents_src / "hooks.json"
+        if hooks_file.exists():
+            target_agents.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(hooks_file, target_agents / "hooks.json")
+            click.secho("  [+] Synced .agents/hooks.json (Lifecycle Hooks config)", fg="green")
+            copied += 1
+
+    hooks_src = repo_root / "src" / "harness_agent" / "hooks"
+    if hooks_src.exists():
+        target_hooks = target_path / "src" / "harness_agent" / "hooks"
+        shutil.copytree(hooks_src, target_hooks, dirs_exist_ok=True)
+        click.secho("  [+] Synced src/harness_agent/hooks/ (Lifecycle Hooks)", fg="green")
+        copied += 1
+
     _register_project(repo_root, target_path)
     return copied
 
@@ -496,7 +519,7 @@ def _sync_single_project(repo_root: Path, target_path: Path, link: bool = False)
 @click.option("--all", "sync_all", is_flag=True, help="Sync all registered working projects")
 @click.option("--link", is_flag=True, help="Create live symlink/junction for SDLC skills")
 def sync_cmd(target_dir: Optional[str], sync_all: bool, link: bool) -> None:
-    """Synchronize Agent.md, AGENTS.md, and SDLC skills to working projects."""
+    """Synchronize Agent.md, AGENTS.md, SDLC skills, and lifecycle hooks to working projects."""
     repo_root = Path(__file__).resolve().parent.parent.parent
     targets: List[Path] = []
 

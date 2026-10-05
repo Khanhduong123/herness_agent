@@ -128,15 +128,46 @@ if ((-not (Test-Path $TargetPlan)) -and (Test-Path $SourcePlan)) {
 $SourceAgents = Join-Path $ScriptDir ".agents"
 $TargetAgents = Join-Path $ResolvedTarget ".agents"
 if (Test-Path $SourceAgents) {
-    Copy-Item -Path $SourceAgents -Destination $TargetAgents -Recurse -Force
+    if (-not (Test-Path $TargetAgents)) {
+        New-Item -ItemType Directory -Path $TargetAgents -Force | Out-Null
+    }
+    Get-ChildItem -Path $SourceAgents | ForEach-Object {
+        Copy-Item -Path $_.FullName -Destination $TargetAgents -Recurse -Force
+    }
     Write-Host "  [+] Copied SDLC Skills to .agents\skills\" -ForegroundColor Green
 }
 
-# 4b. Copy GitHub Templates
+# 4a. Copy Lifecycle Hooks Configuration
+$SourceHooks = Join-Path $ScriptDir ".agents\hooks.json"
+$TargetHooks = Join-Path $ResolvedTarget ".agents\hooks.json"
+if (Test-Path $SourceHooks) {
+    Copy-Item -Path $SourceHooks -Destination $TargetHooks -Force
+    Write-Host "  [+] Created .agents\hooks.json (Lifecycle Hooks config)" -ForegroundColor Green
+}
+
+# 4b. Copy Orchestrator Hooks Script
+$SourceHooksDir = Join-Path $ScriptDir "src\harness_agent\hooks"
+if (Test-Path $SourceHooksDir) {
+    $TargetHooksDir = Join-Path $ResolvedTarget "src\harness_agent\hooks"
+    if (-not (Test-Path $TargetHooksDir)) {
+        New-Item -ItemType Directory -Path $TargetHooksDir -Force | Out-Null
+    }
+    Get-ChildItem -Path $SourceHooksDir | ForEach-Object {
+        Copy-Item -Path $_.FullName -Destination $TargetHooksDir -Recurse -Force
+    }
+    Write-Host "  [+] Copied Orchestrator hook script to src\harness_agent\hooks\" -ForegroundColor Green
+}
+
+# 4c. Copy GitHub Templates
 $SourceGithub = Join-Path $ScriptDir ".github"
 $TargetGithub = Join-Path $ResolvedTarget ".github"
 if (Test-Path $SourceGithub) {
-    Copy-Item -Path $SourceGithub -Destination $TargetGithub -Recurse -Force
+    if (-not (Test-Path $TargetGithub)) {
+        New-Item -ItemType Directory -Path $TargetGithub -Force | Out-Null
+    }
+    Get-ChildItem -Path $SourceGithub | ForEach-Object {
+        Copy-Item -Path $_.FullName -Destination $TargetGithub -Recurse -Force
+    }
     Write-Host "  [+] Copied GitHub templates to .github\" -ForegroundColor Green
 }
 
