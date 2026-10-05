@@ -10,6 +10,10 @@ description: >-
 > [!NOTE]
 > This skill defines how the **Central Orchestrator** transforms an academic research blueprint (`.ai/plans/main/YYYY-MM-DD/research_[topic].md`) into an executable Task DAG and targeted Sub-Specs for specialized Worker Agents.
 
+> [!CAUTION]
+> ### 🚨 STRICT PROHIBITION: NO HIDDEN BACKGROUND AGENTS (`invoke_subagent` / `define_subagent`)
+> Calling `invoke_subagent` or `define_subagent` is strictly forbidden across all agents (spawns hidden background agents / 'agents ngầm'). All worker agents must be dispatched interactively via dedicated Herdr terminal panes.
+
 ---
 
 ## 1. The Translation Pipeline
@@ -77,13 +81,19 @@ For each subtask, generate `.ai/plans/subtasks/YYYY-MM-DD/subtask_[id].md`.
 - For `agent-trainer`: Inject ONLY Section 4 (Optimization) and loss formulas.
 - For `agent-data`: Inject ONLY Section 5 (Data & Preprocessing).
 
-### Step 4: Dispatch via Herdr Workspaces
-Launch each worker in an isolated Herdr workspace:
+### Step 4: Interactive Dispatch via Herdr Workspaces
+Launch each worker in an isolated Herdr git worktree pane:
 ```powershell
-herdr workspace create --label agent_[task_id] --cwd <repo_path>
-herdr agent start worker_[task_id] --kind agy --pane <pane_id> -- --dangerously-skip-permissions
-herdr agent prompt worker_[task_id] "Implement subtask according to .ai/plans/subtasks/YYYY-MM-DD/subtask_[id].md..." --wait
+# Create isolated git worktree
+herdr worktree create --branch agent/<task_id>
+
+# Start interactive worker agent in dedicated pane
+herdr agent start worker_<task_id> --kind agy --pane <pane_id> -- --dangerously-skip-permissions
+
+# Prompt worker with specific sub-spec contract
+herdr agent prompt worker_<task_id> "Read .ai/plans/subtasks/YYYY-MM-DD/<plan_id>/subtask_01_<task_id>.md and implement"
 ```
+Worker agents report completion by outputting `[WORKER_COMPLETED]` or writing `.ai/status/<task_id>.complete`.
 
 ### Step 5: Testing & Quality Gate
 Run `pytest` to verify forward pass, backward pass, and shapes:
