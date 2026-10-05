@@ -5,13 +5,31 @@ from __future__ import annotations
 import json
 import os
 import re
-import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import text
+from sqlmodel import Field, Session, SQLModel, create_engine, select
+
 from harness_agent.core.models import OrchestrationPlan, RunResult, TaskStatus
+
+
+class OrchestrationRunRecord(SQLModel, table=True):
+    """Database model for storing orchestration run records."""
+
+    __tablename__ = "orchestration_runs"
+
+    plan_id: str = Field(primary_key=True)
+    goal: str
+    status: str
+    plan_file: Optional[str] = None
+    plan_data: str
+    task_statuses: str
+    task_results: str
+    created_at: float
+    updated_at: float
 
 
 class DAGStateStore:
@@ -24,37 +42,20 @@ class DAGStateStore:
 
     def __init__(self, db_path: Optional[str] = None) -> None:
         self.db_path = str(db_path or self.DEFAULT_DB_PATH)
-        self._init_db()
-
-    def _get_connection(self) -> sqlite3.Connection:
-        """Create a sqlite connection with row access by column name."""
         db_dir = os.path.dirname(os.path.abspath(self.db_path))
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
-        conn = sqlite3.connect(self.db_path, timeout=10.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        # Use sqlite URL format for SQLAlchemy/SQLModel
+        normalized_path = Path(self.db_path).resolve().as_posix()
+        self.engine = create_engine(f"sqlite:///{normalized_path}", echo=False)
+        self._init_db()
 
     def _init_db(self) -> None:
-        """Initialize SQLite schema if not exists."""
-        with self._get_connection() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS orchestration_runs (
-                    plan_id TEXT PRIMARY KEY,
-                    goal TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    plan_file TEXT,
-                    plan_data TEXT NOT NULL,
-                    task_statuses TEXT NOT NULL,
-                    task_results TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL
-                )
-                """
-            )
+        """Initialize SQLite schema if not exists and configure PRAGMA."""
+        with self.engine.connect() as conn:
+            conn.execute(text("PRAGMA journal_mode=WAL"))
             conn.commit()
+        SQLModel.metadata.create_all(self.engine)
 
     def save_run_state(
         self,
@@ -70,49 +71,33 @@ class DAGStateStore:
         statuses_json = json.dumps({k: v.value for k, v in task_statuses.items()})
         results_json = json.dumps({k: v.model_dump() for k, v in task_results.items()})
 
-        with self._get_connection() as conn:
-            # Check if record exists to keep original created_at
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT created_at, plan_file FROM orchestration_runs WHERE plan_id = ?",
-                (plan.plan_id,),
-            )
-            row = cur.fetchone()
-            if row:
-                created_at = row["created_at"]
-                effective_plan_file = plan_file or row["plan_file"]
+        effective_plan_file = plan_file
+        with Session(self.engine) as session:
+            record = session.get(OrchestrationRunRecord, plan.plan_id)
+            if record:
+                record.goal = plan.goal
+                record.status = status
+                if plan_file:
+                    record.plan_file = plan_file
+                effective_plan_file = record.plan_file
+                record.plan_data = plan_json
+                record.task_statuses = statuses_json
+                record.task_results = results_json
+                record.updated_at = now
             else:
-                created_at = now
-                effective_plan_file = plan_file
-
-            conn.execute(
-                """
-                INSERT INTO orchestration_runs (
-                    plan_id, goal, status, plan_file, plan_data,
-                    task_statuses, task_results, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(plan_id) DO UPDATE SET
-                    goal=excluded.goal,
-                    status=excluded.status,
-                    plan_file=coalesce(excluded.plan_file, orchestration_runs.plan_file),
-                    plan_data=excluded.plan_data,
-                    task_statuses=excluded.task_statuses,
-                    task_results=excluded.task_results,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    plan.plan_id,
-                    plan.goal,
-                    status,
-                    effective_plan_file,
-                    plan_json,
-                    statuses_json,
-                    results_json,
-                    created_at,
-                    now,
-                ),
-            )
-            conn.commit()
+                record = OrchestrationRunRecord(
+                    plan_id=plan.plan_id,
+                    goal=plan.goal,
+                    status=status,
+                    plan_file=plan_file,
+                    plan_data=plan_json,
+                    task_statuses=statuses_json,
+                    task_results=results_json,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(record)
+            session.commit()
 
         if effective_plan_file and effective_plan_file.endswith(".md"):
             self.update_markdown_status(effective_plan_file, task_statuses, plan.goal)
@@ -128,44 +113,26 @@ class DAGStateStore:
     ) -> None:
         """Continuously update status of a single task in SQLite and optional Markdown."""
         now = time.time()
-        with self._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT goal, task_statuses, task_results, plan_file, status
-                FROM orchestration_runs WHERE plan_id = ?
-                """,
-                (plan_id,),
-            )
-            row = cur.fetchone()
-            if not row:
+        with Session(self.engine) as session:
+            record = session.get(OrchestrationRunRecord, plan_id)
+            if not record:
                 return
 
-            statuses: Dict[str, str] = json.loads(row["task_statuses"])
-            results: Dict[str, Any] = json.loads(row["task_results"])
-            effective_plan_file = plan_file or row["plan_file"]
-            goal = row["goal"]
-            current_overall = overall_status or row["status"]
+            statuses: Dict[str, str] = json.loads(record.task_statuses)
+            results: Dict[str, Any] = json.loads(record.task_results)
+            effective_plan_file = plan_file or record.plan_file
+            goal = record.goal
+            current_overall = overall_status or record.status
 
             statuses[task_id] = status.value
             if result:
                 results[task_id] = result.model_dump()
 
-            conn.execute(
-                """
-                UPDATE orchestration_runs
-                SET task_statuses = ?, task_results = ?, updated_at = ?, status = ?
-                WHERE plan_id = ?
-                """,
-                (
-                    json.dumps(statuses),
-                    json.dumps(results),
-                    now,
-                    current_overall,
-                    plan_id,
-                ),
-            )
-            conn.commit()
+            record.task_statuses = json.dumps(statuses)
+            record.task_results = json.dumps(results)
+            record.updated_at = now
+            record.status = current_overall
+            session.commit()
 
         typed_statuses = {k: TaskStatus(v) for k, v in statuses.items()}
         if effective_plan_file and effective_plan_file.endswith(".md"):
@@ -173,46 +140,52 @@ class DAGStateStore:
 
     def load_run_state(self, plan_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Load state for a specific plan_id or the most recently updated run."""
-        with self._get_connection() as conn:
-            cur = conn.cursor()
+        with Session(self.engine) as session:
             if plan_id:
-                cur.execute(
-                    "SELECT * FROM orchestration_runs WHERE plan_id = ?",
-                    (plan_id,),
-                )
+                record = session.get(OrchestrationRunRecord, plan_id)
             else:
-                cur.execute("SELECT * FROM orchestration_runs ORDER BY updated_at DESC LIMIT 1")
+                stmt = (
+                    select(OrchestrationRunRecord)
+                    .order_by(OrchestrationRunRecord.updated_at.desc())
+                    .limit(1)
+                )
+                record = session.exec(stmt).first()
 
-            row = cur.fetchone()
-            if not row:
+            if not record:
                 return None
 
-            raw_statuses = json.loads(row["task_statuses"])
-            raw_results = json.loads(row["task_results"])
-            plan_dict = json.loads(row["plan_data"])
+            raw_statuses = json.loads(record.task_statuses)
+            raw_results = json.loads(record.task_results)
+            plan_dict = json.loads(record.plan_data)
 
             return {
-                "plan_id": row["plan_id"],
-                "goal": row["goal"],
-                "status": row["status"],
-                "plan_file": row["plan_file"],
+                "plan_id": record.plan_id,
+                "goal": record.goal,
+                "status": record.status,
+                "plan_file": record.plan_file,
                 "plan": OrchestrationPlan(**plan_dict),
                 "task_statuses": {k: TaskStatus(v) for k, v in raw_statuses.items()},
                 "task_results": {k: RunResult(**v) for k, v in raw_results.items()},
-                "created_at": row["created_at"],
-                "updated_at": row["updated_at"],
+                "created_at": record.created_at,
+                "updated_at": record.updated_at,
             }
 
     def list_runs(self) -> List[Dict[str, Any]]:
         """List all tracked orchestration runs."""
-        with self._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT plan_id, goal, status, plan_file, created_at, updated_at "
-                "FROM orchestration_runs ORDER BY updated_at DESC"
-            )
-            rows = cur.fetchall()
-            return [dict(r) for r in rows]
+        with Session(self.engine) as session:
+            stmt = select(OrchestrationRunRecord).order_by(OrchestrationRunRecord.updated_at.desc())
+            records = session.exec(stmt).all()
+            return [
+                {
+                    "plan_id": r.plan_id,
+                    "goal": r.goal,
+                    "status": r.status,
+                    "plan_file": r.plan_file,
+                    "created_at": r.created_at,
+                    "updated_at": r.updated_at,
+                }
+                for r in records
+            ]
 
     @staticmethod
     def update_markdown_status(
