@@ -412,6 +412,7 @@ def test_cli_pr_create_end_to_end() -> None:
             issue_id="99",
             push=True,
             draft=True,
+            custom_description=None,
         )
 
 
@@ -447,3 +448,159 @@ def test_cli_pr_create_failure() -> None:
         result = runner.invoke(main, ["pr", "create"])
         assert result.exit_code != 0
         assert "Failed to create pull request: Git push failed: network error" in result.output
+
+
+def test_generate_pr_content_narrative_overview(tmp_path: Path) -> None:
+    """Verifies automated narrative overview, key changes, and commits/files sections."""
+    mock_context = PRContext(
+        branch_name="feat/billing-system",
+        base_branch="main",
+        commits=[
+            {
+                "hash": "abc1234",
+                "message": "feat(billing): implement checkout webhook",
+                "sha": "abc1234",
+                "subject": "implement checkout webhook",
+            },
+            {
+                "hash": "def5678",
+                "message": "fix(billing): handle stripe timeout error",
+                "sha": "def5678",
+                "subject": "handle stripe timeout error",
+            },
+        ],
+        diff_stat="2 files changed",
+        changed_files=["src/billing/webhook.py", "src/billing/stripe.py"],
+        inferred_types=["New feature", "Bug fix"],
+        python_version="3.11.0",
+        os_info="Linux",
+    )
+
+    with patch.object(PRGenerator, "collect_git_context", return_value=mock_context):
+        title, body = PRGenerator.generate_pr_content(repo_root=tmp_path, base_branch="main")
+
+        assert title == "feat(billing): implement checkout webhook"
+        assert "### Overview" in body
+        expected_overview = (
+            "This pull request introduces new features and fixes bugs and stability "
+            "issues on `feat/billing-system`."
+        )
+        assert expected_overview in body
+        assert "### Key Changes" in body
+        assert "- **feat (billing)**: implement checkout webhook" in body
+        assert "- **fix (billing)**: handle stripe timeout error" in body
+        assert "### Commits:" in body
+        assert "- feat(billing): implement checkout webhook" in body
+        assert "### Modified files:" in body
+        assert "- `src/billing/webhook.py`" in body
+
+
+def test_generate_pr_content_with_plan_goal_extraction(tmp_path: Path) -> None:
+    """Verifies that plan goal is extracted from .ai/plans/main/ into PR overview."""
+    plans_dir = tmp_path / ".ai" / "plans" / "main" / "2026-10-05"
+    plans_dir.mkdir(parents=True)
+    plan_file = plans_dir / "main_plan_billing_upgrade.md"
+    plan_file.write_text(
+        "---\n"
+        "plan_id: plan_billing_upgrade\n"
+        "goal: Upgrade billing engine to support automated Stripe webhooks.\n"
+        "---\n\n"
+        "# Plan details\n",
+        encoding="utf-8",
+    )
+
+    mock_context = PRContext(
+        branch_name="agent/billing_upgrade_task",
+        base_branch="main",
+        commits=[{"hash": "111", "message": "feat: billing hook", "sha": "111", "subject": "hook"}],
+        diff_stat="1 file changed",
+        changed_files=["src/hook.py"],
+        inferred_types=["New feature"],
+        python_version="3.11.0",
+        os_info="Linux",
+    )
+
+    with patch.object(PRGenerator, "collect_git_context", return_value=mock_context):
+        _, body = PRGenerator.generate_pr_content(repo_root=tmp_path, base_branch="main")
+
+        assert "### Overview" in body
+        assert "**Goal**: Upgrade billing engine to support automated Stripe webhooks." in body
+
+
+def test_generate_pr_content_custom_description(tmp_path: Path) -> None:
+    """Verifies that custom_description overrides the automated overview text."""
+    mock_context = PRContext(
+        branch_name="feat/auth",
+        base_branch="main",
+        commits=[{"hash": "222", "message": "feat: oauth login", "sha": "222", "subject": "oauth"}],
+        diff_stat="1 file changed",
+        changed_files=["src/auth.py"],
+        inferred_types=["New feature"],
+        python_version="3.11.0",
+        os_info="Linux",
+    )
+
+    custom_desc = "Custom crafted description explaining why this OAuth change was necessary."
+
+    with patch.object(PRGenerator, "collect_git_context", return_value=mock_context):
+        _, body = PRGenerator.generate_pr_content(
+            repo_root=tmp_path,
+            custom_description=custom_desc,
+        )
+
+        assert "### Overview" in body
+        assert custom_desc in body
+        assert "### Key Changes" in body
+        assert "- **feat**: oauth login" in body
+
+
+def test_cli_pr_fill_with_description() -> None:
+    """Tests harness-agent pr fill -d embeds custom description."""
+    runner = CliRunner()
+    with patch.object(
+        PRGenerator,
+        "generate_pr_content",
+        return_value=("feat: awesome", "## Description\n\n### Overview\nMy custom description"),
+    ) as mock_gen:
+        result = runner.invoke(main, ["pr", "fill", "-d", "My custom description"])
+        assert result.exit_code == 0
+        assert "My custom description" in result.output
+        mock_gen.assert_called_once_with(
+            base_branch="main",
+            issue_id=None,
+            custom_title=None,
+            custom_description="My custom description",
+        )
+
+
+def test_cli_pr_create_with_description() -> None:
+    """Tests harness-agent pr create -d passes custom description to PRGenerator.create_pr."""
+    runner = CliRunner()
+    mock_res = PRResult(
+        success=True,
+        pr_url="https://github.com/org/repo/pull/123",
+        title="feat: custom",
+        body="Body",
+        web_fallback=False,
+    )
+    with patch.object(PRGenerator, "create_pr", return_value=mock_res) as mock_create:
+        result = runner.invoke(
+            main,
+            [
+                "pr",
+                "create",
+                "--base",
+                "main",
+                "-d",
+                "Feature overview narrative",
+            ],
+        )
+        assert result.exit_code == 0
+        mock_create.assert_called_once_with(
+            base_branch="main",
+            title=None,
+            issue_id=None,
+            push=True,
+            draft=False,
+            custom_description="Feature overview narrative",
+        )
