@@ -825,5 +825,107 @@ def dispatch_cmd(
     click.secho(f"✓ Dispatched task '{task_id}' to {worker_name} successfully!", fg="green")
 
 
+@main.group(name="pr")
+def pr_group() -> None:
+    """Pull request utilities and template automation."""
+    pass
+
+
+@pr_group.command(name="fill")
+@click.option("--base", default="main", help="Target base branch (default: main)")
+@click.option("--title", default=None, help="Custom PR title")
+@click.option("--issue", default=None, help="Issue number or identifier to link (Fixes #...)")
+@click.option("--output", "-o", default=None, help="Write output to file instead of stdout")
+def pr_fill_cmd(
+    base: str,
+    title: Optional[str],
+    issue: Optional[str],
+    output: Optional[str],
+) -> None:
+    """Generate and preview populated PR template markdown."""
+    from harness_agent.core.pr import PRGenerator
+
+    _, generated_body = PRGenerator.generate_pr_content(
+        base_branch=base,
+        issue_id=issue,
+        custom_title=title,
+    )
+    if output:
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(generated_body, encoding="utf-8")
+        click.secho(f"✓ PR template written to {output}", fg="green")
+    else:
+        click.echo(generated_body)
+
+
+@pr_group.command(name="create")
+@click.option("--base", default="main", help="Target base branch (default: main)")
+@click.option("--title", default=None, help="Custom PR title")
+@click.option("--issue", default=None, help="Issue number or identifier to link")
+@click.option(
+    "--push/--no-push",
+    default=True,
+    help="Push current branch to remote before creating PR",
+)
+@click.option("--draft", is_flag=True, default=False, help="Create PR as draft")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Print generated PR without creating or pushing",
+)
+def pr_create_cmd(
+    base: str,
+    title: Optional[str],
+    issue: Optional[str],
+    push: bool,
+    draft: bool,
+    dry_run: bool,
+) -> None:
+    """Automatically populate PR template, push branch, and create PR via gh CLI
+    or output web link.
+    """
+    from harness_agent.core.pr import PRGenerator
+
+    if dry_run:
+        gen_title, gen_body = PRGenerator.generate_pr_content(
+            base_branch=base,
+            issue_id=issue,
+            custom_title=title,
+        )
+        click.secho(f"=== PR Title: {gen_title} ===", fg="cyan", bold=True)
+        click.echo(gen_body)
+        return
+
+    result = PRGenerator.create_pr(
+        base_branch=base,
+        title=title,
+        issue_id=issue,
+        push=push,
+        draft=draft,
+    )
+
+    if not result.success:
+        click.secho(f"✗ Failed to create pull request: {result.error_message}", fg="red")
+        sys.exit(1)
+
+    if result.web_fallback:
+        draft_file = Path(".github") / "PULL_REQUEST_DRAFT.md"
+        try:
+            draft_file.parent.mkdir(parents=True, exist_ok=True)
+            draft_file.write_text(result.body, encoding="utf-8")
+            saved_msg = f" (saved description to {draft_file})"
+        except Exception:
+            saved_msg = ""
+        fallback_msg = (
+            f"! gh CLI unavailable or not authenticated. Direct web PR link:\n"
+            f"{result.pr_url}{saved_msg}"
+        )
+        click.secho(fallback_msg, fg="yellow")
+    else:
+        click.secho(f"✓ Pull Request created successfully: {result.pr_url}", fg="green")
+
+
 if __name__ == "__main__":
     main()

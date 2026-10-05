@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from harness_agent.core.pr import DEFAULT_PR_TEMPLATE, PRContext, PRGenerator
+from click.testing import CliRunner
+
+from harness_agent.cli import main
+from harness_agent.core.pr import DEFAULT_PR_TEMPLATE, PRContext, PRGenerator, PRResult
 
 
 def test_find_template(tmp_path: Path) -> None:
@@ -329,3 +332,118 @@ def test_create_pr_push_failure(tmp_path: Path) -> None:
             res = PRGenerator.create_pr(repo_root=tmp_path, push=True)
             assert res.success is False
             assert "Git push failed" in (res.error_message or "")
+
+
+def test_cli_pr_fill_stdout() -> None:
+    """Tests harness-agent pr fill prints populated markdown."""
+    runner = CliRunner()
+    with patch.object(
+        PRGenerator,
+        "generate_pr_content",
+        return_value=("feat: awesome", "## Description\n\nPopulated content"),
+    ):
+        result = runner.invoke(main, ["pr", "fill"])
+        assert result.exit_code == 0
+        assert "## Description" in result.output
+        assert "Populated content" in result.output
+
+
+def test_cli_pr_fill_output_file(tmp_path: Path) -> None:
+    """Tests harness-agent pr fill -o output.md writes file correctly."""
+    runner = CliRunner()
+    output_file = tmp_path / "custom_pr.md"
+    with patch.object(
+        PRGenerator,
+        "generate_pr_content",
+        return_value=("feat: awesome", "## Output to file content"),
+    ):
+        result = runner.invoke(main, ["pr", "fill", "-o", str(output_file)])
+        assert result.exit_code == 0
+        assert f"PR template written to {output_file}" in result.output
+        assert output_file.exists()
+        assert output_file.read_text(encoding="utf-8") == "## Output to file content"
+
+
+def test_cli_pr_create_dry_run() -> None:
+    """Tests harness-agent pr create --dry-run."""
+    runner = CliRunner()
+    with patch.object(
+        PRGenerator,
+        "generate_pr_content",
+        return_value=("feat: dry run feature", "## Dry Run Body"),
+    ):
+        result = runner.invoke(main, ["pr", "create", "--dry-run"])
+        assert result.exit_code == 0
+        assert "=== PR Title: feat: dry run feature ===" in result.output
+        assert "## Dry Run Body" in result.output
+
+
+def test_cli_pr_create_end_to_end() -> None:
+    """Tests harness-agent pr create invokes PRGenerator.create_pr."""
+    runner = CliRunner()
+    mock_res = PRResult(
+        success=True,
+        pr_url="https://github.com/org/repo/pull/123",
+        title="feat: end-to-end",
+        body="Body",
+        web_fallback=False,
+    )
+    with patch.object(PRGenerator, "create_pr", return_value=mock_res) as mock_create:
+        result = runner.invoke(
+            main,
+            [
+                "pr",
+                "create",
+                "--base",
+                "dev",
+                "--title",
+                "feat: custom",
+                "--issue",
+                "99",
+                "--draft",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Pull Request created successfully" in result.output
+        assert "https://github.com/org/repo/pull/123" in result.output
+        mock_create.assert_called_once_with(
+            base_branch="dev",
+            title="feat: custom",
+            issue_id="99",
+            push=True,
+            draft=True,
+        )
+
+
+def test_cli_pr_create_web_fallback(tmp_path: Path) -> None:
+    """Tests harness-agent pr create falls back to web link and draft file."""
+    runner = CliRunner()
+    mock_res = PRResult(
+        success=True,
+        pr_url="https://github.com/org/repo/pull/new/feat/branch",
+        title="feat: web fallback",
+        body="Fallback Body Content",
+        web_fallback=True,
+    )
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch.object(PRGenerator, "create_pr", return_value=mock_res):
+            result = runner.invoke(main, ["pr", "create"])
+            assert result.exit_code == 0
+            assert "gh CLI unavailable or not authenticated" in result.output
+            assert "https://github.com/org/repo/pull/new/feat/branch" in result.output
+            draft_path = Path(".github") / "PULL_REQUEST_DRAFT.md"
+            assert draft_path.exists()
+            assert draft_path.read_text(encoding="utf-8") == "Fallback Body Content"
+
+
+def test_cli_pr_create_failure() -> None:
+    """Tests harness-agent pr create with failure exit code and error message."""
+    runner = CliRunner()
+    mock_res = PRResult(
+        success=False,
+        error_message="Git push failed: network error",
+    )
+    with patch.object(PRGenerator, "create_pr", return_value=mock_res):
+        result = runner.invoke(main, ["pr", "create"])
+        assert result.exit_code != 0
+        assert "Failed to create pull request: Git push failed: network error" in result.output
