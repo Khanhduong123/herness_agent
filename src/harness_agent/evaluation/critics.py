@@ -173,7 +173,11 @@ def detect_security_issues(diff_or_code: str) -> List[str]:
             "SQL Injection risk: Unsanitized variable interpolated directly in cursor.execute().",
         ),
         (
-            r"""(?i)(?:SELECT|INSERT|UPDATE|DELETE)\s+.*["']\s*\+\s*[\w_]+""",
+            (
+                r"""(?i)(?:"[^"\r\n]*\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b[^"\r\n]*"|"""
+                r"""'[^'\r\n]*\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b[^'\r\n]*')"""
+                r"""[^\S\r\n]*\+[^\S\r\n]*[\w_]+"""
+            ),
             "SQL Injection risk: String concatenation in SQL statement.",
         ),
     ]
