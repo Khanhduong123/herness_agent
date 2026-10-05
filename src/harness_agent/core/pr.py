@@ -267,12 +267,171 @@ class PRGenerator:
         return f"https://github.com/pull/new/{branch}"
 
     @classmethod
+    def _extract_plan_goal(cls, repo_root: Path, branch_name: str) -> Optional[str]:
+        """Extract relevant plan goal from .ai/plans/main/ matching branch or most recent."""
+        plans_dir = repo_root / ".ai" / "plans" / "main"
+        if not plans_dir.is_dir():
+            return None
+
+        plan_files: List[Path] = [p for p in plans_dir.rglob("*.md") if p.is_file()]
+        if not plan_files:
+            return None
+
+        # Clean branch name to find keywords
+        branch_clean = branch_name.lower().replace("-", "_")
+        branch_tokens = [
+            tok
+            for tok in re.split(r"[/_]", branch_clean)
+            if len(tok) > 2 and tok not in ("feat", "fix", "agent", "subtask", "main", "dev")
+        ]
+
+        best_match: Optional[Path] = None
+        best_score = 0
+
+        for pf in plan_files:
+            pf_name = pf.name.lower()
+            score = sum(1 for tok in branch_tokens if tok in pf_name)
+            if score > best_score:
+                best_score = score
+                best_match = pf
+
+        # If no token match, pick most recently modified plan file
+        if not best_match or best_score == 0:
+            plan_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            best_match = plan_files[0]
+
+        # Extract goal from frontmatter or text
+        try:
+            content = best_match.read_text(encoding="utf-8")
+            if content.startswith("---"):
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    try:
+                        import yaml
+
+                        data = yaml.safe_load(parts[1])
+                        if isinstance(data, dict) and "goal" in data and data["goal"]:
+                            return str(data["goal"]).strip()
+                    except Exception:
+                        pass
+            match = re.search(r"^goal:\s*(.+)$", content, re.MULTILINE)
+            if match:
+                return match.group(1).strip()
+        except Exception:
+            pass
+
+        return None
+
+    @classmethod
+    def _build_narrative_summary(
+        cls,
+        context: PRContext,
+        repo_root: Optional[Path] = None,
+        custom_description: Optional[str] = None,
+    ) -> str:
+        """Construct structured narrative description including Overview, Key Changes,
+        Commits, and Modified files.
+        """
+        root = repo_root or cls._resolve_repo_root()
+        sections: List[str] = []
+
+        # 1. Overview
+        if custom_description and custom_description.strip():
+            desc_text = custom_description.strip()
+            if not desc_text.startswith("#"):
+                sections.append("### Overview")
+            sections.append(desc_text)
+        else:
+            sections.append("### Overview")
+            plan_goal = cls._extract_plan_goal(root, context.branch_name)
+
+            # Synthesize overview sentence based on inferred change types
+            type_descriptions = []
+            if "New feature" in context.inferred_types:
+                type_descriptions.append("introduces new features")
+            if "Bug fix" in context.inferred_types:
+                type_descriptions.append("fixes bugs and stability issues")
+            if "Breaking change" in context.inferred_types:
+                type_descriptions.append("includes breaking changes")
+            if "Refactoring" in context.inferred_types:
+                type_descriptions.append("refactors code structure")
+            if "Documentation update" in context.inferred_types:
+                type_descriptions.append("updates documentation")
+            if "CI/CD / DevOps" in context.inferred_types:
+                type_descriptions.append("updates CI/CD pipelines")
+
+            if type_descriptions:
+                if len(type_descriptions) == 1:
+                    actions_str = type_descriptions[0]
+                elif len(type_descriptions) == 2:
+                    actions_str = f"{type_descriptions[0]} and {type_descriptions[1]}"
+                else:
+                    head_actions = ", ".join(type_descriptions[:-1])
+                    actions_str = f"{head_actions}, and {type_descriptions[-1]}"
+                synth_sentence = f"This pull request {actions_str} on `{context.branch_name}`."
+            else:
+                synth_sentence = (
+                    f"This pull request provides updates on branch `{context.branch_name}`."
+                )
+
+            if plan_goal:
+                overview_text = f"{synth_sentence}\n\n**Goal**: {plan_goal}"
+            else:
+                overview_text = synth_sentence
+            sections.append(overview_text)
+
+        # 2. Key Changes
+        sections.append("\n### Key Changes")
+        key_changes: List[str] = []
+        for c in context.commits:
+            msg = c.get("message", "").strip()
+            if not msg:
+                continue
+            match = re.match(r"^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.*)", msg)
+            if match:
+                ctype, scope, breaking, desc = match.groups()
+                scope_str = f" ({scope})" if scope else ""
+                key_changes.append(f"- **{ctype}{scope_str}**: {desc}")
+            else:
+                key_changes.append(f"- {msg}")
+
+        if key_changes:
+            seen = set()
+            unique_changes = []
+            for kc in key_changes:
+                if kc not in seen:
+                    seen.add(kc)
+                    unique_changes.append(kc)
+                    if len(unique_changes) >= 10:
+                        break
+            sections.extend(unique_changes)
+        else:
+            sections.append("- General updates and improvements.")
+
+        # 3. Commits:
+        if context.commits:
+            sections.append("\n### Commits:")
+            for c in context.commits:
+                sections.append(f"- {c['message']}")
+
+        # 4. Modified files:
+        if context.changed_files:
+            sections.append("\n### Modified files:")
+            for f in context.changed_files[:15]:
+                sections.append(f"- `{f}`")
+            if len(context.changed_files) > 15:
+                sections.append(f"- ... and {len(context.changed_files) - 15} more files")
+
+        return "\n".join(sections)
+
+    @classmethod
     def generate_pr_content(
         cls,
         repo_root: Optional[Path] = None,
         base_branch: str = "main",
         issue_id: Optional[str] = None,
         custom_title: Optional[str] = None,
+        custom_description: Optional[str] = None,
         test_output: Optional[str] = None,
     ) -> Tuple[str, str]:
         """Generate PR title and markdown body populated with git context."""
@@ -294,19 +453,11 @@ class PRGenerator:
             content = DEFAULT_PR_TEMPLATE
 
         # 1. Populate Description & Summary
-        summary_lines: List[str] = []
-        if context.commits:
-            summary_lines.append("### Commits:")
-            for c in context.commits:
-                summary_lines.append(f"- {c['message']}")
-        if context.changed_files:
-            summary_lines.append("\n### Modified files:")
-            for f in context.changed_files[:15]:
-                summary_lines.append(f"- `{f}`")
-            if len(context.changed_files) > 15:
-                summary_lines.append(f"- ... and {len(context.changed_files) - 15} more files")
-
-        summary_block = "\n".join(summary_lines) if summary_lines else "Automatic PR updates."
+        summary_block = cls._build_narrative_summary(
+            context=context,
+            repo_root=repo_root,
+            custom_description=custom_description,
+        )
 
         # Replace description placeholder comment if present
         desc_comment_pattern = (
@@ -403,6 +554,7 @@ class PRGenerator:
         issue_id: Optional[str] = None,
         push: bool = True,
         draft: bool = False,
+        custom_description: Optional[str] = None,
     ) -> PRResult:
         """Create a PR using gh CLI or provide web URL fallback."""
         root = repo_root or cls._resolve_repo_root()
@@ -430,6 +582,7 @@ class PRGenerator:
                 base_branch=base_branch,
                 issue_id=issue_id,
                 custom_title=title,
+                custom_description=custom_description,
             )
             title = title or gen_title
             body = body or gen_body

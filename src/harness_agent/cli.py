@@ -834,11 +834,13 @@ def pr_group() -> None:
 @pr_group.command(name="fill")
 @click.option("--base", default="main", help="Target base branch (default: main)")
 @click.option("--title", default=None, help="Custom PR title")
+@click.option("--description", "-d", default=None, help="Custom PR description / overview")
 @click.option("--issue", default=None, help="Issue number or identifier to link (Fixes #...)")
 @click.option("--output", "-o", default=None, help="Write output to file instead of stdout")
 def pr_fill_cmd(
     base: str,
     title: Optional[str],
+    description: Optional[str],
     issue: Optional[str],
     output: Optional[str],
 ) -> None:
@@ -849,6 +851,7 @@ def pr_fill_cmd(
         base_branch=base,
         issue_id=issue,
         custom_title=title,
+        custom_description=description,
     )
     if output:
         out_path = Path(output)
@@ -862,6 +865,7 @@ def pr_fill_cmd(
 @pr_group.command(name="create")
 @click.option("--base", default="main", help="Target base branch (default: main)")
 @click.option("--title", default=None, help="Custom PR title")
+@click.option("--description", "-d", default=None, help="Custom PR description / overview")
 @click.option("--issue", default=None, help="Issue number or identifier to link")
 @click.option(
     "--push/--no-push",
@@ -878,6 +882,7 @@ def pr_fill_cmd(
 def pr_create_cmd(
     base: str,
     title: Optional[str],
+    description: Optional[str],
     issue: Optional[str],
     push: bool,
     draft: bool,
@@ -893,6 +898,7 @@ def pr_create_cmd(
             base_branch=base,
             issue_id=issue,
             custom_title=title,
+            custom_description=description,
         )
         click.secho(f"=== PR Title: {gen_title} ===", fg="cyan", bold=True)
         click.echo(gen_body)
@@ -904,6 +910,7 @@ def pr_create_cmd(
         issue_id=issue,
         push=push,
         draft=draft,
+        custom_description=description,
     )
 
     if not result.success:
