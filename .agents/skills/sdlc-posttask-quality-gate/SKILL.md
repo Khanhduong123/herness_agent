@@ -11,12 +11,12 @@ This skill defines the mandatory verification gates that must pass **AFTER** com
 
 ---
 
-## 1. Test Suite Verification (100% Pass Required)
-- Run the full pytest suite in the `pytorch` environment:
+## 1. Test Suite & Full Regression Verification (100% Pass Required)
+- Run the full pytest suite covering all modules in the `pytorch` environment:
   ```powershell
-  conda run -n pytorch pytest
+  conda run -n pytorch pytest tests/
   ```
-- **Rule**: If even 1 test fails, the task CANNOT be marked complete. Debug and resolve all failures first.
+- **Rule**: If even 1 test fails, the task CANNOT be marked complete. Running only isolated new test files is prohibited; full regression verification across `tests/` is mandatory. Debug and resolve all failures first.
 
 ---
 
@@ -59,17 +59,27 @@ This skill defines the mandatory verification gates that must pass **AFTER** com
 
 ---
 
-## 5. Remote Push & Pull Request Creation Gate
-After committing to the dedicated feature or fix branch and completing the quality checks:
-1. **Push Branch to Remote**:
-   The agent **MUST automatically push** the local branch to the remote repository:
+## 5. Merge Back, Full Regression & Pull Request Creation Gate
+After committing in the subtask worktree and completing initial quality checks:
+1. **Merge Back to Feature Branch**:
+   Merge the subtask branch into the parent feature branch:
    ```powershell
-   git push -u origin <branch-name>
+   git merge --no-ff agent/<task_id>
    ```
-2. **Create Pull Request**:
+2. **Execute Full Regression Suite**:
+   Verify that all integration and regression tests pass cleanly on the feature branch:
+   ```powershell
+   conda run -n pytorch pytest tests/
+   ```
+3. **Push Feature Branch to Remote**:
+   The agent **MUST automatically push** the feature branch to the remote repository:
+   ```powershell
+   git push -u origin feat/<feature_name>
+   ```
+4. **Create Pull Request**:
    The agent **MUST create a Pull Request** targeting `main` (or `dev`) using the automated CLI tool:
    ```powershell
    conda run -n pytorch harness-agent pr create --base main
    ```
-3. **Report PR Link to User**:
+5. **Report PR Link to User**:
    The agent **MUST provide the resulting Pull Request URL directly to the user** in the response. Under no circumstances should the agent merge the PR into protected branches (merging remains exclusively the human user's authority).
