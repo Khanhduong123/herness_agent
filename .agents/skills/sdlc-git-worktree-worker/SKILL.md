@@ -18,13 +18,13 @@ This protocol enforces that every Worker Agent (e.g., Coder, Tester) must perfor
 When a Worker Agent receives a subtask from the Orchestrator, it must **not** modify the main working directory directly. The Orchestrator manages the dispatch lifecycle through Herdr:
 
 ### Orchestrator Interactive Dispatch Lifecycle
-1. **Create Isolated Worktree**:
+1. **Create Isolated Worktree (Native Git)**:
    ```powershell
-   herdr worktree create --branch agent/<task_id>
+   git worktree add -b agent/<task_id> .worktrees/agent/<task_id>
    ```
 2. **Start Interactive Worker in Dedicated Pane**:
    ```powershell
-   herdr agent start worker_<task_id> --kind agy --pane <pane> -- --dangerously-skip-permissions
+   herdr agent start worker_<task_id> --kind agy --pane <pane> --cwd .worktrees/agent/<task_id> -- --dangerously-skip-permissions
    ```
 3. **Prompt Worker with Sub-Spec Contract**:
    ```powershell
@@ -34,7 +34,7 @@ When a Worker Agent receives a subtask from the Orchestrator, it must **not** mo
 ### Worker Workspace Rules
 1. Identify the task ID (e.g., `subtask_01_feature`).
 2. The mandatory naming convention for the branch and workspace is: `agent/<task_id>`.
-3. Because the Orchestrator runs the agent *inside* the Herdr workspace pane, your current working directory (`cwd`) is already the worktree (`.herdr/worktrees/...`). Verify this by checking `git status` or `pwd`, and avoid `cd` commands across worktrees.
+3. Because the Orchestrator runs the agent *inside* the dedicated worktree pane, your current working directory (`cwd`) is already the worktree (`.worktrees/agent/<task_id>`). Verify this by checking `git status` or `pwd`, and avoid `cd` commands across worktrees.
 
 ## 2. Implementing the Task
 
@@ -60,7 +60,7 @@ After the commit is successful, the Worker Agent **MUST** explicitly notify the 
 
 ## 5. Cleanup (By Orchestrator)
 
-The Central Orchestrator is responsible for reviewing the work, merging or verifying the `agent/<task_id>` branch, and subsequently removing the Herdr workspace/worktree:
+The Central Orchestrator is responsible for reviewing the work, pushing the branch, creating the PR, and subsequently removing the native git worktree:
 ```powershell
-herdr worktree remove agent/<task_id>
+git worktree remove .worktrees/agent/<task_id>
 ```

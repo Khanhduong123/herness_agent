@@ -84,11 +84,11 @@ For each subtask, generate `.ai/plans/subtasks/YYYY-MM-DD/subtask_[id].md`.
 ### Step 4: Interactive Dispatch via Herdr Workspaces
 Launch each worker in an isolated Herdr git worktree pane:
 ```powershell
-# Create isolated git worktree
-herdr worktree create --branch agent/<task_id>
+# Create isolated git worktree via native git
+git worktree add -b agent/<task_id> .worktrees/agent/<task_id>
 
 # Start interactive worker agent in dedicated pane
-herdr agent start worker_<task_id> --kind agy --pane <pane_id> -- --dangerously-skip-permissions
+herdr agent start worker_<task_id> --kind agy --pane <pane_id> --cwd .worktrees/agent/<task_id> -- --dangerously-skip-permissions
 
 # Prompt worker with specific sub-spec contract
 herdr agent prompt worker_<task_id> "Read .ai/plans/subtasks/YYYY-MM-DD/<plan_id>/subtask_01_<task_id>.md and implement"
