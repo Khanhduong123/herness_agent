@@ -20,6 +20,29 @@
 
 ---
 
+## ARCHITECTURAL CONSTRAINTS & WORKFLOW PROTOCOL
+
+### Rule 0: Strict Worktree & Multiplexer Mandate
+- **CENTRAL ORCHESTRATOR IS STRICTLY FORBIDDEN FROM:**
+  1. Modifying source files directly in the root repository.
+  2. Invoking AGY internal subagent mechanisms (`invoke_subagent`, `define_subagent`).
+- **ALL subtasks modifying code MUST run in an isolated Git Worktree:**
+  `herdr worktree create --branch agent/<task_id>`
+- **ALL workers MUST be managed inside visible Herdr terminal panes:**
+  `herdr agent start worker_<task_id> --kind agy --pane <pane_id>`
+
+### Anti-Deadlock & Passive Waiting Policy
+- **DO NOT emit stream-of-consciousness waiting loops** (e.g., "Let's wait", "Awaiting notification").
+- If a sub-agent does not return immediately:
+  1. Query pane status using `herdr pane get <pane_id>` or `herdr agent read <target>`.
+  2. After 3 non-responsive checks, report TIMEOUT and escalate to User.
+
+### Review Limits (Loop Truncation)
+- **Max Rejection Cycles: 3 iterations.**
+- If adversarial critics (Security, Performance, Requirements) or Pytest fail 3 consecutive times on the same subtask, the Orchestrator MUST abort and yield control to the User with the error trace.
+
+---
+
 ## 1. System Architecture: Central Orchestrator Pattern
 
 The system uses a **Central Orchestrator Pattern** to coordinate specialized **Worker Agents**:
@@ -60,12 +83,33 @@ graph TD
 | **Requirement Reviewer** | `requirement_reviewer`, `requirement-reviewer` | • Evaluates code against functional specifications, acceptance criteria, and sub-spec contracts. |
 | **Reviewer** | `reviewer` | • Evaluates code diffs, linting, typing, conventions, and security.<br/>• Verifies that code modifications are atomic diff patches rather than full-file regenerations (retained for backward compatibility). |
 
-### 1.1. Adversarial Critics Review Protocol
+### 1.1. Adversarial Critics Review Protocol & Workflow Optimization
 When a **Coder** completes a feature implementation or code change:
 1. **Parallel Dispatch**: The Orchestrator automatically extracts the code diff / output and dispatches it concurrently to all 3 adversarial critics (`Security Reviewer`, `Performance Reviewer`, `Requirement Reviewer`) in parallel via `asyncio.gather`.
 2. **Specialized Scrutiny**: Each critic focuses exclusively on its domain of expertise without overlapping biases.
 3. **Feedback Aggregation**: The Orchestrator aggregates all critic evaluations into an `AggregatedCriticReview`.
 4. **Coder / Patcher Remediation**: If defects or vulnerabilities are detected (e.g., SQL injection or quadratic loops), the aggregated feedback is routed directly back to the Coder / Patcher for remediation.
+5. **Loop Truncation & Escalation**:
+   - **Maximum Rejection Cycles**: 3 iterations.
+   - If critics or test gates reject the submission for 3 consecutive cycles, the loop truncates immediately and escalates to the human user with diagnostic traces.
+
+```mermaid
+graph TD
+    User["User Request"] --> Orchestrator["Central Orchestrator"]
+    Orchestrator -->|1. Blueprint| SubSpec[".ai/plans/subtasks/YYYY-MM-DD/"]
+    Orchestrator -->|2. Provision| Worktree["herdr worktree create --branch agent/<task_id>"]
+    Orchestrator -->|3. Execute| Coder["herdr agent start worker_<task_id> (Coder + Unit Test)<br/>Reports: 100% Pytest Baseline Pass"]
+    Coder -->|4. Read-Only Parallel Evaluation| EvalGate["Evaluation Gate (No extra worktrees needed)"]
+    EvalGate --> Tester["Tester Agent (Stress & Integration tests on branch)"]
+    EvalGate --> Security["Security Critic (Reads git diff)"]
+    EvalGate --> Performance["Performance Critic (Reads git diff)"]
+    EvalGate --> Requirement["Requirement Critic (Compares diff with sub-spec)"]
+
+    EvalGate -->|FAILED: Loops < 3| Aggregate["Aggregate feedback & Re-prompt Coder"]
+    Aggregate --> Coder
+    EvalGate -->|FAILED: Loops >= 3| Escalate["Escalate to User (Break infinite loops)"]
+    EvalGate -->|PASSED| Merge["Merge branch into main & herdr worktree remove"]
+```
 
 ---
 
