@@ -6,7 +6,10 @@ import json
 import re
 import shutil
 import subprocess
-from typing import Optional, Tuple
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 
 class HerdrDispatcher:
@@ -40,6 +43,7 @@ class HerdrDispatcher:
         task_id: str,
         base_ref: Optional[str] = None,
         executable: str = "herdr",
+        repo_root: Optional[Path] = None,
     ) -> Tuple[bool, str, Optional[str]]:
         """Run 'herdr worktree create --branch agent/<task_id>' and extract root pane_id.
 
@@ -47,6 +51,7 @@ class HerdrDispatcher:
             task_id: Task identifier for the worktree branch.
             base_ref: Optional base git reference to branch from.
             executable: Herdr executable binary name or path.
+            repo_root: Optional repository root path.
 
         Returns:
             Tuple[bool, str, Optional[str]]: (success, message_or_path, pane_id)
@@ -113,6 +118,20 @@ class HerdrDispatcher:
 
         if not path:
             path = stdout
+
+        if path:
+            candidate_paths = [Path(path)]
+            clean_task_id = task_id.replace("agent/", "").replace("worker_", "")
+            candidate_paths.append(Path(".worktrees") / "agent" / clean_task_id)
+            if repo_root:
+                candidate_paths.append(repo_root / ".worktrees" / "agent" / clean_task_id)
+                if not Path(path).is_absolute():
+                    candidate_paths.append(repo_root / path)
+
+            for cp in candidate_paths:
+                if cp.exists() and cp.is_dir():
+                    cls.setup_worktree_env(cp, repo_root=repo_root)
+                    break
 
         return True, path, pane_id
 
@@ -209,3 +228,404 @@ class HerdrDispatcher:
             return False, err
 
         return True, proc.stdout.strip()
+
+    @classmethod
+    def wait_for_task(
+        cls,
+        task_id: str,
+        timeout_seconds: int = 600,
+        poll_interval: float = 2.0,
+        status_dir: Optional[Path] = None,
+        executable: str = "herdr",
+    ) -> Tuple[bool, str]:
+        """Block locally in Python until completion flag file appears or timeout expires.
+
+        Args:
+            task_id: Task identifier.
+            timeout_seconds: Maximum seconds to wait.
+            poll_interval: Seconds between poll checks.
+            status_dir: Optional path to status directory. Defaults to .ai/status.
+            executable: Herdr executable binary name or path.
+
+        Returns:
+            Tuple[bool, str]: (success, message_or_content)
+        """
+        sdir = status_dir or Path(".ai/status")
+        clean_task_id = task_id.replace("agent/", "").replace("worker_", "")
+        flag_candidates = [
+            sdir / f"{task_id}.complete",
+            sdir / f"{clean_task_id}.complete",
+        ]
+
+        start_time = time.time()
+        while True:
+            for flag in flag_candidates:
+                if flag.is_file():
+                    try:
+                        content = flag.read_text(encoding="utf-8").strip()
+                        return True, content or "[WORKER_COMPLETED]"
+                    except Exception:
+                        pass
+
+            elapsed = time.time() - start_time
+            if elapsed >= timeout_seconds:
+                return False, f"Task {task_id} timed out after {timeout_seconds}s"
+
+            sleep_time = min(poll_interval, max(0.01, timeout_seconds - elapsed))
+            time.sleep(sleep_time)
+
+    @classmethod
+    def create_feature_branch(
+        cls,
+        feature_name: str,
+        base_branch: str = "main",
+        repo_root: Optional[Path] = None,
+    ) -> Tuple[bool, str]:
+        """Create and checkout a new feature branch from base_branch.
+
+        Args:
+            feature_name: Feature name (prefixed with feat/ if not already).
+            base_branch: Base branch name (default: main).
+            repo_root: Optional repository root path.
+
+        Returns:
+            Tuple[bool, str]: (success, message)
+        """
+        try:
+            status_proc = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(repo_root) if repo_root else None,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except Exception as exc:
+            return False, str(exc)
+
+        if status_proc.returncode != 0:
+            err = status_proc.stderr.strip() or status_proc.stdout.strip()
+            return False, f"Failed to check git status: {err}"
+
+        if status_proc.stdout.strip():
+            return (
+                False,
+                "Working tree is dirty. Stash or commit changes before creating feature branch.",
+            )
+
+        branch_name = feature_name if feature_name.startswith("feat/") else f"feat/{feature_name}"
+        try:
+            checkout_proc = subprocess.run(
+                ["git", "checkout", "-b", branch_name, base_branch],
+                cwd=str(repo_root) if repo_root else None,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except Exception as exc:
+            return False, str(exc)
+
+        if checkout_proc.returncode != 0:
+            err = checkout_proc.stderr.strip() or checkout_proc.stdout.strip()
+            return False, f"Failed to create feature branch {branch_name}: {err}"
+
+        return True, f"Created and checked out branch '{branch_name}' from '{base_branch}'"
+
+    @classmethod
+    def setup_worktree_env(
+        cls,
+        worktree_path: Path,
+        repo_root: Optional[Path] = None,
+    ) -> List[str]:
+        """Copy environment and configuration files from repo root into worktree.
+
+        Args:
+            worktree_path: Target worktree directory path.
+            repo_root: Optional repository root path. Defaults to cwd.
+
+        Returns:
+            List[str]: Names of copied files.
+        """
+        root = repo_root or Path.cwd()
+        worktree_path = Path(worktree_path)
+        worktree_path.mkdir(parents=True, exist_ok=True)
+        env_files = [".env", ".env.test", ".env.local", ".env.example", ".flake8"]
+        copied: List[str] = []
+        for filename in env_files:
+            src = root / filename
+            if src.is_file():
+                dest = worktree_path / filename
+                if src.resolve() != dest.resolve():
+                    shutil.copy2(src, dest)
+                    copied.append(filename)
+        return copied
+
+    @classmethod
+    def stop_agent(
+        cls,
+        task_id: str,
+        executable: str = "herdr",
+    ) -> Tuple[bool, str]:
+        """Stop worker agent in Herdr pane.
+
+        Args:
+            task_id: Task identifier.
+            executable: Herdr executable binary name or path.
+
+        Returns:
+            Tuple[bool, str]: (success, message)
+        """
+        worker_name = cls.get_worker_name(task_id)
+        cmd = [executable, "agent", "stop", worker_name]
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError:
+            return False, f"Executable '{executable}' not found"
+        except Exception as exc:
+            return False, str(exc)
+
+        if proc.returncode != 0:
+            err = (
+                proc.stderr.strip()
+                or proc.stdout.strip()
+                or f"Process exited with code {proc.returncode}"
+            )
+            return False, err
+
+        return True, proc.stdout.strip() or f"Agent '{worker_name}' stopped successfully"
+
+    @classmethod
+    def cleanup_worktree(
+        cls,
+        task_id: str,
+        worktree_path: Optional[str] = None,
+        force: bool = True,
+        repo_root: Optional[Path] = None,
+        executable: str = "herdr",
+    ) -> Tuple[bool, str]:
+        """Stop worker agent, wait 1s, and remove git worktree.
+
+        Args:
+            task_id: Task identifier.
+            worktree_path: Optional explicit worktree path.
+            force: Force removal if True.
+            repo_root: Optional repository root path.
+            executable: Herdr executable binary name or path.
+
+        Returns:
+            Tuple[bool, str]: (success, message)
+        """
+        cls.stop_agent(task_id, executable=executable)
+        time.sleep(1.0)
+
+        clean_task_id = task_id.replace("agent/", "").replace("worker_", "")
+        if worktree_path:
+            target = worktree_path
+        else:
+            wt_rel = Path(".worktrees") / "agent" / clean_task_id
+            target = str((repo_root / wt_rel) if repo_root else wt_rel)
+
+        cmd = ["git", "worktree", "remove"]
+        if force:
+            cmd.append("--force")
+        cmd.append(target)
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(repo_root) if repo_root else None,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except Exception as exc:
+            return False, str(exc)
+
+        if proc.returncode != 0:
+            err = (
+                proc.stderr.strip()
+                or proc.stdout.strip()
+                or f"git worktree remove exited with {proc.returncode}"
+            )
+            return False, err
+
+        return True, f"Cleaned up worktree for task {task_id}"
+
+    @classmethod
+    def merge_worktree_to_feature(
+        cls,
+        task_id: str,
+        target_branch: str,
+        no_ff: bool = True,
+        repo_root: Optional[Path] = None,
+        executable: str = "herdr",
+    ) -> Tuple[bool, str]:
+        """Stop worker agent, switch to target_branch, merge subtask branch, and cleanup.
+
+        Args:
+            task_id: Task identifier.
+            target_branch: Feature branch to merge into.
+            no_ff: Use --no-ff flag if True.
+            repo_root: Optional repository root path.
+            executable: Herdr executable binary name or path.
+
+        Returns:
+            Tuple[bool, str]: (success, message)
+        """
+        cls.stop_agent(task_id, executable=executable)
+
+        branch_name = cls.get_branch_name(task_id)
+        clean_task_id = task_id.replace("agent/", "").replace("worker_", "")
+
+        try:
+            checkout_proc = subprocess.run(
+                ["git", "checkout", target_branch],
+                cwd=str(repo_root) if repo_root else None,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except Exception as exc:
+            return False, str(exc)
+
+        if checkout_proc.returncode != 0:
+            err = checkout_proc.stderr.strip() or checkout_proc.stdout.strip()
+            return False, f"Failed to checkout {target_branch}: {err}"
+
+        commit_msg = f"feat({clean_task_id}): integrate subtask into {target_branch}"
+        merge_cmd = ["git", "merge"]
+        if no_ff:
+            merge_cmd.append("--no-ff")
+        merge_cmd.extend([branch_name, "-m", commit_msg])
+
+        try:
+            merge_proc = subprocess.run(
+                merge_cmd,
+                cwd=str(repo_root) if repo_root else None,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except Exception as exc:
+            return False, str(exc)
+
+        if merge_proc.returncode != 0:
+            err = merge_proc.stderr.strip() or merge_proc.stdout.strip()
+            return False, f"Failed to merge {branch_name} into {target_branch}: {err}"
+
+        cls.cleanup_worktree(task_id, repo_root=repo_root, executable=executable)
+
+        del_proc = subprocess.run(
+            ["git", "branch", "-d", branch_name],
+            cwd=str(repo_root) if repo_root else None,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if del_proc.returncode != 0:
+            subprocess.run(
+                ["git", "branch", "-D", branch_name],
+                cwd=str(repo_root) if repo_root else None,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        return (
+            True,
+            f"Successfully merged {branch_name} into {target_branch} and cleaned up worktree",
+        )
+
+    @classmethod
+    def abort_task(
+        cls,
+        task_id: str,
+        reason: str = "",
+        repo_root: Optional[Path] = None,
+        executable: str = "herdr",
+    ) -> Tuple[bool, str]:
+        """Abort subtask, archive failure diagnostic diff, stop agent, and remove worktree.
+
+        Args:
+            task_id: Task identifier.
+            reason: Explanation for task abort.
+            repo_root: Optional repository root path.
+            executable: Herdr executable binary name or path.
+
+        Returns:
+            Tuple[bool, str]: (success, message)
+        """
+        root = repo_root or Path.cwd()
+        failures_dir = root / ".ai" / "failures"
+        failures_dir.mkdir(parents=True, exist_ok=True)
+        clean_task_id = task_id.replace("agent/", "").replace("worker_", "")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = failures_dir / f"{clean_task_id}_{timestamp}.log"
+
+        branch_name = cls.get_branch_name(task_id)
+        wt_path = root / ".worktrees" / "agent" / clean_task_id
+        diff_cwd = wt_path if wt_path.exists() else root
+
+        diff_text = ""
+        try:
+            diff_proc = subprocess.run(
+                ["git", "diff", "HEAD"],
+                cwd=str(diff_cwd),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if diff_proc.returncode == 0:
+                diff_text = diff_proc.stdout.strip()
+        except Exception:
+            diff_text = ""
+
+        log_content = (
+            f"Task ID: {task_id}\n"
+            f"Timestamp: {timestamp}\n"
+            f"Reason: {reason or 'Aborted by user/orchestrator'}\n\n"
+            f"--- GIT DIFF HEAD ---\n"
+            f"{diff_text}\n"
+        )
+        try:
+            log_file.write_text(log_content, encoding="utf-8")
+        except Exception as exc:
+            return False, f"Failed to archive failure log: {exc}"
+
+        cls.stop_agent(task_id, executable=executable)
+        cls.cleanup_worktree(task_id, repo_root=repo_root, executable=executable)
+
+        subprocess.run(
+            ["git", "branch", "-D", branch_name],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        return True, f"Task {task_id} aborted. Failure log archived to {log_file}"
+
+
+# Module-level aliases
+wait_for_task = HerdrDispatcher.wait_for_task
+create_feature_branch = HerdrDispatcher.create_feature_branch
+merge_worktree_to_feature = HerdrDispatcher.merge_worktree_to_feature
+stop_agent = HerdrDispatcher.stop_agent
+cleanup_worktree = HerdrDispatcher.cleanup_worktree
+setup_worktree_env = HerdrDispatcher.setup_worktree_env
+abort_task = HerdrDispatcher.abort_task
+
+__all__ = [
+    "HerdrDispatcher",
+    "abort_task",
+    "cleanup_worktree",
+    "create_feature_branch",
+    "merge_worktree_to_feature",
+    "setup_worktree_env",
+    "stop_agent",
+    "wait_for_task",
+]

@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from harness_agent.core.dispatch import HerdrDispatcher
+from harness_agent.core.dispatch import (
+    HerdrDispatcher,
+    abort_task,
+    cleanup_worktree,
+    create_feature_branch,
+    merge_worktree_to_feature,
+    setup_worktree_env,
+    stop_agent,
+    wait_for_task,
+)
 from harness_agent.core.harness import AgentHarness
 from harness_agent.core.models import (
     AgentRole,
@@ -52,6 +61,13 @@ __all__ = [
     "EvalReport",
     "FunctionSpec",
     "HerdrDispatcher",
+    "abort_task",
+    "cleanup_worktree",
+    "create_feature_branch",
+    "merge_worktree_to_feature",
+    "setup_worktree_env",
+    "stop_agent",
+    "wait_for_task",
     "OrchestrationPlan",
     "OrchestrationResult",
     "PRContext",
