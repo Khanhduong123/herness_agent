@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from harness_agent.models import (
+from harness_agent.core.models import (
     AgentRole,
     AgyConfig,
     OrchestrationPlan,
@@ -12,7 +12,7 @@ from harness_agent.models import (
     SubTask,
     TaskStatus,
 )
-from harness_agent.orchestrator import AgentOrchestrator
+from harness_agent.core.orchestrator import AgentOrchestrator
 
 
 def test_resolve_execution_order_dag():
@@ -78,7 +78,7 @@ async def test_run_plan_success(monkeypatch):
     orchestrator = AgentOrchestrator(base_config=AgyConfig())
     # Monkeypatch execute_subtask or AgyRunner execute_task
     monkeypatch.setattr(
-        "harness_agent.orchestrator.AgyRunner.execute_task", mock_runner.execute_task
+        "harness_agent.core.orchestrator.AgyRunner.execute_task", mock_runner.execute_task
     )
 
     result = await orchestrator.run_plan(plan)
@@ -119,7 +119,7 @@ async def test_run_plan_dependency_failure_blocks_downstream(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "harness_agent.orchestrator.AgyRunner.execute_task", mock_runner.execute_task
+        "harness_agent.core.orchestrator.AgyRunner.execute_task", mock_runner.execute_task
     )
 
     orchestrator = AgentOrchestrator()

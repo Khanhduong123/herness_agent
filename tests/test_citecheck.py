@@ -6,14 +6,14 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from harness_agent.citecheck import (
+from harness_agent.cli import main
+from harness_agent.research.citecheck import (
     check_report_file,
     parse_numbered_citation_ids,
     parse_sources_section,
     split_sentences,
 )
-from harness_agent.claims import triage_citation
-from harness_agent.cli import main
+from harness_agent.research.claims import triage_citation
 
 
 def test_split_sentences_preserves_abbreviations() -> None:

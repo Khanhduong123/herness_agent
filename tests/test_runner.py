@@ -1,7 +1,7 @@
 """Unit tests for AgyRunner."""
 
-from harness_agent.models import AgyConfig, Task
-from harness_agent.runner import AgyRunner
+from harness_agent.core.models import AgyConfig, Task
+from harness_agent.core.runner import AgyRunner
 
 
 def test_build_command():

@@ -6,7 +6,7 @@ import pytest
 from click.testing import CliRunner
 
 from harness_agent.cli import main
-from harness_agent.models import (
+from harness_agent.core.models import (
     AgentRole,
     AgyConfig,
     OrchestrationPlan,
@@ -14,8 +14,8 @@ from harness_agent.models import (
     SubTask,
     TaskStatus,
 )
-from harness_agent.orchestrator import AgentOrchestrator
-from harness_agent.state import DAGStateStore
+from harness_agent.core.orchestrator import AgentOrchestrator
+from harness_agent.core.state import DAGStateStore
 
 
 @pytest.fixture
@@ -77,7 +77,7 @@ async def test_simulate_shutdown_and_resume(temp_db, monkeypatch):
             raise SystemExit("Simulated process crash while Task 2 is RUNNING")
 
     monkeypatch.setattr(
-        "harness_agent.orchestrator.AgyRunner.execute_task",
+        "harness_agent.core.orchestrator.AgyRunner.execute_task",
         mock_execute_phase1,
     )
 
@@ -105,7 +105,7 @@ async def test_simulate_shutdown_and_resume(temp_db, monkeypatch):
         )
 
     monkeypatch.setattr(
-        "harness_agent.orchestrator.AgyRunner.execute_task",
+        "harness_agent.core.orchestrator.AgyRunner.execute_task",
         mock_execute_phase2,
     )
 
@@ -159,7 +159,7 @@ async def test_continuous_serialization_lifecycle(temp_db, monkeypatch):
         duration_seconds=0.2,
     )
     monkeypatch.setattr(
-        "harness_agent.orchestrator.AgyRunner.execute_task",
+        "harness_agent.core.orchestrator.AgyRunner.execute_task",
         mock_runner.execute_task,
     )
 
@@ -251,7 +251,7 @@ tasks:
         output_text="Step 1 success",
     )
     monkeypatch.setattr(
-        "harness_agent.orchestrator.AgyRunner.execute_task",
+        "harness_agent.core.orchestrator.AgyRunner.execute_task",
         mock_runner.execute_task,
     )
 

@@ -11,10 +11,10 @@ from typing import List, Optional, Set
 
 import click
 
-from harness_agent.harness import AgentHarness
-from harness_agent.models import AgyConfig, OrchestrationResult, Task, TaskStatus
-from harness_agent.orchestrator import AgentOrchestrator
-from harness_agent.runner import AgyRunner
+from harness_agent.core.harness import AgentHarness
+from harness_agent.core.models import AgyConfig, OrchestrationResult, Task, TaskStatus
+from harness_agent.core.orchestrator import AgentOrchestrator
+from harness_agent.core.runner import AgyRunner
 
 if sys.platform == "win32":
     if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -560,7 +560,7 @@ def sync_cmd(target_dir: Optional[str], sync_all: bool, link: bool) -> None:
 @click.option("--json-output", "--json", "is_json", is_flag=True, help="Output as JSON array")
 def scholar_search_cmd(query: str, limit: int, provider: str, is_json: bool) -> None:
     """Search AI & machine learning papers across arXiv and OpenAlex."""
-    from harness_agent.scholar import search_ai_papers
+    from harness_agent.research.scholar import search_ai_papers
 
     providers = None if provider == "all" else [provider]
     result = search_ai_papers(query=query, limit=limit, providers=providers)
@@ -688,7 +688,7 @@ def web_search_cmd(query: str, limit: int, is_json: bool) -> None:
 @click.option("--json-output", "--json", "is_json", is_flag=True, help="Output as JSON")
 def cite_check_cmd(report_file: str, sources_dir: Optional[str], is_json: bool) -> None:
     """Audit report citations and verify claims against source documents."""
-    from harness_agent.citecheck import check_report_file
+    from harness_agent.research.citecheck import check_report_file
 
     try:
         report = check_report_file(report_path=report_file, sources_dir=sources_dir)

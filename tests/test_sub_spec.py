@@ -1,6 +1,6 @@
 """Unit tests for SDLC Sub-Spec model and prompt rendering."""
 
-from harness_agent.models import (
+from harness_agent.core.models import (
     AgentRole,
     AgyConfig,
     CriticalityLevel,
@@ -13,7 +13,7 @@ from harness_agent.models import (
     TestCaseSpec,
     WorkerAgentConfig,
 )
-from harness_agent.orchestrator import AgentOrchestrator
+from harness_agent.core.orchestrator import AgentOrchestrator
 
 
 def test_sub_spec_model_creation():
@@ -79,7 +79,7 @@ def test_sub_spec_prompt_rendering():
     spec = SubSpec(
         criticality=CriticalityLevel.HIGH,
         risk_level=RiskLevel.HIGH,
-        blast_radius="src/harness_agent/runner.py",
+        blast_radius="src/harness_agent/core/runner.py",
         risk_mitigation="Wrap json.loads in try/except",
         functions=[fn],
         test_cases=[tc],
@@ -116,7 +116,7 @@ def test_sub_spec_prompt_rendering():
     assert "## Technical Sub-Specification (SDLC Contract):" in prompt
     assert "Criticality: HIGH" in prompt
     assert "Risk Level: HIGH" in prompt
-    assert "Blast Radius: src/harness_agent/runner.py" in prompt
+    assert "Blast Radius: src/harness_agent/core/runner.py" in prompt
     assert "Risk Mitigation: Wrap json.loads in try/except" in prompt
     assert "def parse_event(raw: str) -> Dict[str, Any]:" in prompt
     assert "[TC-02] Handle invalid JSON safely" in prompt

@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from harness_agent.models import AgentRole, OrchestrationPlan, RunResult, SubTask
-from harness_agent.orchestrator import AgentOrchestrator
+from harness_agent.core.models import AgentRole, OrchestrationPlan, RunResult, SubTask
+from harness_agent.core.orchestrator import AgentOrchestrator
 
 
 def test_prompt_contains_only_assigned_subtask():
@@ -353,7 +353,7 @@ async def test_dispatch_subtask_executes_with_lazy_context(tmp_path, monkeypatch
         duration_seconds=0.5,
     )
     monkeypatch.setattr(
-        "harness_agent.orchestrator.AgyRunner.execute_task", mock_runner.execute_task
+        "harness_agent.core.orchestrator.AgyRunner.execute_task", mock_runner.execute_task
     )
 
     orchestrator = AgentOrchestrator()

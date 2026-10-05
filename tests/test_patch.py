@@ -4,8 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from harness_agent.evaluator import PatchOnlyEvaluator
-from harness_agent.models import (
+from harness_agent.core.models import (
     AgentRole,
     OrchestrationPlan,
     RunResult,
@@ -13,8 +12,9 @@ from harness_agent.models import (
     TaskCheck,
     ToolCallRecord,
 )
-from harness_agent.orchestrator import AgentOrchestrator
-from harness_agent.patch import (
+from harness_agent.core.orchestrator import AgentOrchestrator
+from harness_agent.evaluation.evaluator import PatchOnlyEvaluator
+from harness_agent.evaluation.patch import (
     DisallowedFullFileOverwriteError,
     apply_patch,
     multi_replace_file_content,
@@ -294,7 +294,7 @@ async def test_orchestrator_subtask_tool_locking_rejection(tmp_path, monkeypatch
     )
 
     monkeypatch.setattr(
-        "harness_agent.orchestrator.AgyRunner.execute_task",
+        "harness_agent.core.orchestrator.AgyRunner.execute_task",
         AsyncMock(return_value=mock_run_result),
     )
     result = await orchestrator.run_plan(plan)
@@ -308,7 +308,7 @@ def test_orchestrator_role_lock_blocks_code_modification(tmp_path):
     # Orchestrator attempting to modify source code in src/
     valid, msg = validate_tool_call(
         tool_name="replace_file_content",
-        args={"target_file": "src/harness_agent/runner.py"},
+        args={"target_file": "src/harness_agent/core/runner.py"},
         workspace_dir=str(tmp_path),
         role="orchestrator",
     )

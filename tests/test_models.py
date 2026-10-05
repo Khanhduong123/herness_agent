@@ -1,6 +1,6 @@
 """Unit tests for models."""
 
-from harness_agent.models import AgyConfig, EvalReport, RunResult, Task, TaskCheck
+from harness_agent.core.models import AgyConfig, EvalReport, RunResult, Task, TaskCheck
 
 
 def test_task_creation():
