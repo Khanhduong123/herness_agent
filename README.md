@@ -69,7 +69,6 @@ graph TD
 ```
 herness_agent/
 ├── AGENTS.md                    # Unified system rule file & architecture guidelines
-├── Agent.md                     # Compatibility rule alias
 ├── install.ps1 / install.sh     # Project scaffolding scripts (Windows / Linux)
 ├── sync.ps1 / sync.sh           # Rule & SDLC skill synchronization scripts
 ├── pyproject.toml               # Build configuration, CLI entry points & deps
@@ -77,6 +76,7 @@ herness_agent/
 ├── .pre-commit-config.yaml      # Branch protection & linters (black, isort, flake8)
 ├── .agents/
 │   ├── hooks.json               # Agent lifecycle hook triggers
+│   ├── hooks/                   # Lifecycle hooks script implementation
 │   └── skills/                  # Specialized SDLC skills (pre-task, clean code, TDD, audit)
 ├── .ai/                         # 3-tier planning architecture
 │   ├── plans/
@@ -163,10 +163,10 @@ conda run -n pytorch harness-agent check
 Bootstrap new or existing repositories with complete Harness Agent governance, SDLC skills, lifecycle hooks, and the 3-tier planning architecture.
 
 ### What Scaffolding Injects:
-- `AGENTS.md` & `Agent.md`: Unified system rules and Central Orchestrator architecture guidelines.
+- `AGENTS.md`: Unified system rules and Central Orchestrator architecture guidelines.
 - `.pre-commit-config.yaml`: Branch protection (`no-commit-to-branch` for `main`, `master`, `dev`, `develop`) and linters.
 - `.agents/skills/`: Complete suite of specialized SDLC skills (pre-task checklist, clean code, TDD, security audit, conventional commit).
-- `.agents/hooks.json` & `src/harness_agent/hooks/`: Lifecycle hook triggers for orchestrators and workers.
+- `.agents/hooks.json` & `.agents/hooks/`: Lifecycle hook triggers for orchestrators and workers.
 - `.ai/` directory structure: Planning tiers (`.ai/plans/main/`, `.ai/plans/subtasks/`, `.ai/decisions/`, `.ai/context/`).
 - `examples/orchestrator_plan.yaml`: Sample multi-agent Task DAG template.
 - `.gitignore`: AI orchestrator exclusions and project hygiene.

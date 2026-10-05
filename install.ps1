@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Harness Agent Scaffolding Script for Windows PowerShell.
-    Copies Agent.md, AGENTS.md, SDLC skills, and workflow templates to a target repository.
+    Copies AGENTS.md, SDLC skills, and workflow templates to a target repository.
 
 .EXAMPLE
     .\install.ps1
@@ -90,10 +90,10 @@ if (Test-Path $AgentsMd) {
     Copy-Item -Path $AgentsMd -Destination (Join-Path $ResolvedTarget "AGENTS.md") -Force
     Write-Host "  [+] Created AGENTS.md" -ForegroundColor Green
 }
-$AgentMd = Join-Path $ScriptDir "Agent.md"
-if (Test-Path $AgentMd) {
-    Copy-Item -Path $AgentMd -Destination (Join-Path $ResolvedTarget "Agent.md") -Force
-    Write-Host "  [+] Created Agent.md" -ForegroundColor Green
+# Clean up legacy duplicate Agent.md if present
+$LegacyAgentMd = Join-Path $ResolvedTarget "Agent.md"
+if (Test-Path $LegacyAgentMd) {
+    Remove-Item -Path $LegacyAgentMd -Force -ErrorAction SilentlyContinue
 }
 
 # 2. Copy or update pre-commit config (ensuring branch protection hooks)
@@ -145,17 +145,37 @@ if (Test-Path $SourceHooks) {
     Write-Host "  [+] Created .agents\hooks.json (Lifecycle Hooks config)" -ForegroundColor Green
 }
 
-# 4b. Copy Orchestrator Hooks Script
-$SourceHooksDir = Join-Path $ScriptDir "src\harness_agent\hooks"
+# 4b. Copy Orchestrator Hooks Script to .agents\hooks\
+$SourceHooksDir = Join-Path $ScriptDir ".agents\hooks"
+if (-not (Test-Path $SourceHooksDir)) {
+    $SourceHooksDir = Join-Path $ScriptDir "src\harness_agent\hooks"
+}
 if (Test-Path $SourceHooksDir) {
-    $TargetHooksDir = Join-Path $ResolvedTarget "src\harness_agent\hooks"
+    $TargetHooksDir = Join-Path $ResolvedTarget ".agents\hooks"
     if (-not (Test-Path $TargetHooksDir)) {
         New-Item -ItemType Directory -Path $TargetHooksDir -Force | Out-Null
     }
     Get-ChildItem -Path $SourceHooksDir | ForEach-Object {
         Copy-Item -Path $_.FullName -Destination $TargetHooksDir -Recurse -Force
     }
-    Write-Host "  [+] Copied Orchestrator hook script to src\harness_agent\hooks\" -ForegroundColor Green
+    Write-Host "  [+] Copied Orchestrator hook script to .agents\hooks\" -ForegroundColor Green
+}
+
+# Clean up legacy src\harness_agent if exists
+$LegacyPkg = Join-Path $ResolvedTarget "src\harness_agent"
+if (Test-Path $LegacyPkg) {
+    $LegacyHooks = Join-Path $LegacyPkg "hooks"
+    if (Test-Path $LegacyHooks) {
+        Remove-Item -Path $LegacyHooks -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    $Remaining = Get-ChildItem -Path $LegacyPkg -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "__pycache__" }
+    if (-not $Remaining -or $Remaining.Count -eq 0) {
+        Remove-Item -Path $LegacyPkg -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+$TargetSrc = Join-Path $ResolvedTarget "src"
+if ((Test-Path $TargetSrc) -and (-not (Get-ChildItem -Path $TargetSrc -Force -ErrorAction SilentlyContinue))) {
+    Remove-Item -Path $TargetSrc -Force -ErrorAction SilentlyContinue
 }
 
 # 4c. Copy GitHub Templates

@@ -17,6 +17,7 @@ def test_init_creates_files(tmp_path):
     result = runner.invoke(main, ["init", "--target-dir", str(target), "--force"])
     assert result.exit_code == 0
     assert (target / "AGENTS.md").exists()
+    assert not (target / "Agent.md").exists()
     assert (target / ".pre-commit-config.yaml").exists()
     assert (target / ".ai" / "plans" / "main").is_dir()
     assert (target / ".ai" / "plans" / "subtasks").is_dir()
@@ -24,7 +25,8 @@ def test_init_creates_files(tmp_path):
     assert (target / ".agents" / "skills" / "sdlc-pretask-checklist" / "SKILL.md").exists()
     assert (target / ".agents" / "skills" / "sdlc-posttask-quality-gate" / "SKILL.md").exists()
     assert (target / ".agents" / "hooks.json").exists()
-    assert (target / "src" / "harness_agent" / "hooks" / "enforce_orchestrator.py").exists()
+    assert (target / ".agents" / "hooks" / "enforce_orchestrator.py").exists()
+    assert not (target / "src" / "harness_agent").exists()
 
     pre_commit_content = (target / ".pre-commit-config.yaml").read_text(encoding="utf-8")
     assert "no-commit-to-branch" in pre_commit_content
@@ -97,6 +99,9 @@ def test_install_ps1_scaffolding(tmp_path: Path) -> None:
     assert (
         result.returncode == 0
     ), f"install.ps1 failed: stdout={result.stdout}, stderr={result.stderr}"
+    assert (target / "AGENTS.md").exists()
+    assert not (target / "Agent.md").exists()
     assert (target / ".agents" / "hooks.json").exists()
     assert not (target / ".agents" / ".agents").exists()
-    assert (target / "src" / "harness_agent" / "hooks" / "enforce_orchestrator.py").exists()
+    assert (target / ".agents" / "hooks" / "enforce_orchestrator.py").exists()
+    assert not (target / "src" / "harness_agent").exists()

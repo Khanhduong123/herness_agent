@@ -122,14 +122,16 @@ def test_hooks_json_registration() -> None:
 
     handler = role_hook["PreInvocation"][0]
     assert handler.get("type") == "command"
-    expected_cmd = "python src/harness_agent/hooks/enforce_orchestrator.py"
+    expected_cmd = "python .agents/hooks/enforce_orchestrator.py"
     assert handler.get("command") == expected_cmd
 
 
 def test_subprocess_hook_execution() -> None:
     """Test executing the hook script directly via Python subprocess."""
     repo_root = Path(__file__).resolve().parent.parent
-    script_path = repo_root / "src" / "harness_agent" / "hooks" / "enforce_orchestrator.py"
+    script_path = repo_root / ".agents" / "hooks" / "enforce_orchestrator.py"
+    if not script_path.exists():
+        script_path = repo_root / "src" / "harness_agent" / "hooks" / "enforce_orchestrator.py"
 
     assert script_path.exists(), f"Hook script does not exist at {script_path}"
 
