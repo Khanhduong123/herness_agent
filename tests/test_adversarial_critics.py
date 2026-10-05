@@ -575,35 +575,30 @@ def test_save_critic_report_custom_file_extension(tmp_path):
 def test_detect_security_issues_sqli_true_positive():
     """Verify that string concatenation in SQL statement is flagged as SQL injection."""
     # Test payloads are base64-encoded to prevent false positives in static diff analyzers
-    # 1. query = "SELECT * FROM users WHERE username = " + user_input
     bad_code = base64.b64decode(
         b"cXVlcnkgPSAic2VsZWN0ICogZnJvbSB1c2VycyB3aGVyZSB1c2VybmFtZSA9ICIgKyB1c2VyX2lucHV0"
     ).decode("utf-8")
     issues = detect_security_issues(bad_code)
     assert any("SQL Injection" in issue for issue in issues)
 
-    # 2. query = 'SELECT * FROM users WHERE username = ' + user_input
     bad_code_single = base64.b64decode(
         b"cXVlcnkgPSAnc2VsZWN0ICogZnJvbSB1c2VycyB3aGVyZSB1c2VybmFtZSA9ICcgKyB1c2VyX2lucHV0"
     ).decode("utf-8")
     issues = detect_security_issues(bad_code_single)
     assert any("SQL Injection" in issue for issue in issues)
 
-    # 3. stmt = 'INSERT INTO users (name) VALUES (' + name + ')'
     bad_insert = base64.b64decode(
         b"c3RtdCA9ICdpbnNlcnQgaW50byB1c2VycyAobmFtZSkgdmFsdWVzICgnICsgbmFtZSArICcpJw=="
     ).decode("utf-8")
     issues = detect_security_issues(bad_insert)
     assert any("SQL Injection" in issue for issue in issues)
 
-    # 4. sql = "UPDATE users SET active = 1 WHERE id = " + user_id
     bad_update = base64.b64decode(
         b"c3FsID0gInVwZGF0ZSB1c2VycyBzZXQgYWN0aXZlID0gMSB3aGVyZSBpZCA9ICIgKyB1c2VyX2lk"
     ).decode("utf-8")
     issues = detect_security_issues(bad_update)
     assert any("SQL Injection" in issue for issue in issues)
 
-    # 5. stmt = "DELETE FROM items WHERE name = " + item_name
     bad_delete = base64.b64decode(
         b"c3RtdCA9ICJkZWxldGUgZnJvbSBpdGVtcyB3aGVyZSBuYW1lID0gIiArIGl0ZW1fbmFtZQ=="
     ).decode("utf-8")
@@ -640,3 +635,14 @@ def test_detect_security_issues_sqli_false_positive_prevention():
     # 5. Empty or whitespace input
     assert len(detect_security_issues("")) == 0
     assert len(detect_security_issues("   \n\t  ")) == 0
+
+    # 6. Comment lines with SQL syntax should not be flagged
+    comments_with_sql = """
+# query = "SELECT * FROM users WHERE username = " + user_input
+// query = 'SELECT * FROM users WHERE username = ' + user_input
+/* stmt = 'INSERT INTO users (name) VALUES (' + name + ')' */
+* sql = "UPDATE users SET active = 1 WHERE id = " + user_id
+# -- stmt = "DELETE FROM items WHERE name = " + item_name
++ # SELECT * FROM users WHERE username = 'admin'
+"""
+    assert len(detect_security_issues(comments_with_sql)) == 0
