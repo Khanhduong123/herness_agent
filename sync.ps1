@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Synchronize Agent.md, AGENTS.md, and SDLC skills from harness_agent to working repositories.
+    Synchronize Agent.md, AGENTS.md, SDLC skills, and lifecycle hooks from harness_agent to working repositories.
     Enforces that updates are ONLY applied on the 'main' branch of working projects.
 
 .EXAMPLE
@@ -60,7 +60,7 @@ if ($All) {
 } elseif ($TargetDir) {
     $ArgsList += $TargetDir
 } else {
-    Write-Host "=== DONG BO QUY CHUAN HARNESS AGENT & SDLC SKILLS ===" -ForegroundColor Cyan
+    Write-Host "=== DONG BO QUY CHUAN HARNESS AGENT, SDLC SKILLS & LIFECYCLE HOOKS ===" -ForegroundColor Cyan
     Write-Host "Chon che do dong bo:"
     Write-Host "  [1] Dong bo tat ca cac du an da dang ky (--all)" -ForegroundColor Green
     Write-Host "  [2] Nhap duong dan du an cu the" -ForegroundColor Yellow

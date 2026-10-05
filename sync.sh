@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Synchronize Agent.md, AGENTS.md, and SDLC skills to working repositories.
+# Synchronize Agent.md, AGENTS.md, SDLC skills, and lifecycle hooks to working repositories.
 # Enforces that updates are ONLY applied on the 'main' branch of working projects.
 #
 # Usage:

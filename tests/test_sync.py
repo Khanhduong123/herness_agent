@@ -18,6 +18,8 @@ def test_sync_single_project(tmp_path):
     assert (target / "custom_app.py").exists()
     assert (target / "AGENTS.md").exists()
     assert (target / ".agents" / "skills" / "sdlc-clean-code-standards" / "SKILL.md").exists()
+    assert (target / ".agents" / "hooks.json").exists()
+    assert (target / "src" / "harness_agent" / "hooks" / "enforce_orchestrator.py").exists()
     assert (target / ".pre-commit-config.yaml").exists()
 
     pre_commit_content = (target / ".pre-commit-config.yaml").read_text(encoding="utf-8")
@@ -28,6 +30,19 @@ def test_sync_single_project(tmp_path):
     agents_content = (target / "AGENTS.md").read_text(encoding="utf-8")
     assert "RULE 0: ZERO-TOLERANCE CODE-WRITING LOCK" in agents_content
     assert "NO AUTOMATED MERGING" in agents_content
+
+
+def test_sync_link_mode(tmp_path):
+    runner = CliRunner()
+    target = tmp_path / "sync_link_project"
+    target.mkdir()
+
+    result = runner.invoke(main, ["sync", str(target), "--link"])
+    assert result.exit_code == 0
+    assert (target / "AGENTS.md").exists()
+    assert (target / ".agents" / "hooks.json").is_file()
+    assert (target / "src" / "harness_agent" / "hooks" / "enforce_orchestrator.py").is_file()
+    assert (target / ".agents" / "skills").exists()
 
 
 def test_sync_all_projects(tmp_path):
