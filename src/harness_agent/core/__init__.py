@@ -28,6 +28,7 @@ from harness_agent.core.models import (
     WorkerAgentConfig,
 )
 from harness_agent.core.orchestrator import AgentOrchestrator
+from harness_agent.core.pr import PRContext, PRGenerator, PRResult
 from harness_agent.core.runner import AgyRunner
 from harness_agent.core.security import (
     UNTRUSTED_SOURCE_INSTRUCTION,
@@ -53,6 +54,9 @@ __all__ = [
     "HerdrDispatcher",
     "OrchestrationPlan",
     "OrchestrationResult",
+    "PRContext",
+    "PRGenerator",
+    "PRResult",
     "RiskLevel",
     "RunResult",
     "SpecStatus",
