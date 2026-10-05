@@ -181,6 +181,66 @@ class TestHerdrDispatcher:
                 check=False,
             )
 
+    def test_start_agent_effort_none_and_medium(self) -> None:
+        """Test start_agent command with effort='none' and effort='medium'."""
+        mock_proc = MagicMock(returncode=0, stdout="agent ready", stderr="")
+        with patch("subprocess.run", return_value=mock_proc) as mock_run:
+            ok, out = HerdrDispatcher.start_agent(
+                task_id="t_none",
+                pane_id="w1:p1",
+                kind="agy",
+                dangerously_skip_permissions=True,
+                effort="none",
+            )
+            assert ok is True
+            mock_run.assert_called_with(
+                [
+                    "herdr",
+                    "agent",
+                    "start",
+                    "worker_t_none",
+                    "--kind",
+                    "agy",
+                    "--pane",
+                    "w1:p1",
+                    "--",
+                    "--dangerously-skip-permissions",
+                    "--effort",
+                    "none",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        with patch("subprocess.run", return_value=mock_proc) as mock_run2:
+            ok2, out2 = HerdrDispatcher.start_agent(
+                task_id="t_med",
+                pane_id="w2:p1",
+                kind="agy",
+                dangerously_skip_permissions=False,
+                effort="medium",
+            )
+            assert ok2 is True
+            mock_run2.assert_called_with(
+                [
+                    "herdr",
+                    "agent",
+                    "start",
+                    "worker_t_med",
+                    "--kind",
+                    "agy",
+                    "--pane",
+                    "w2:p1",
+                    "--",
+                    "--effort",
+                    "medium",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
     def test_start_agent_failure(self) -> None:
         """Test start_agent error handling on non-zero exit."""
         mock_proc = MagicMock(returncode=1, stdout="", stderr="agent_not_ready")
@@ -472,6 +532,22 @@ class TestHerdrDispatcherLifecycle:
 
         ok, msg = HerdrDispatcher.wait_for_task(
             "agent/my_subtask", timeout_seconds=2, poll_interval=0.01, status_dir=status_dir
+        )
+        assert ok is True
+        assert msg == "[WORKER_COMPLETED]"
+
+    def test_wait_for_task_checks_worktree_status(self, tmp_path: Path) -> None:
+        """wait_for_task successfully detects completion flag inside worktree .ai/status."""
+        wt_status = tmp_path / ".worktrees" / "agent" / "subtask_wt" / ".ai" / "status"
+        wt_status.mkdir(parents=True, exist_ok=True)
+        flag = wt_status / "subtask_wt.complete"
+        flag.write_text("[WORKER_COMPLETED]", encoding="utf-8")
+
+        ok, msg = HerdrDispatcher.wait_for_task(
+            "subtask_wt",
+            timeout_seconds=2,
+            poll_interval=0.01,
+            repo_root=tmp_path,
         )
         assert ok is True
         assert msg == "[WORKER_COMPLETED]"

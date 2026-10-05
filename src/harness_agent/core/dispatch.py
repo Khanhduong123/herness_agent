@@ -440,36 +440,49 @@ class HerdrDispatcher:
         timeout_seconds: int = 600,
         poll_interval: float = 2.0,
         status_dir: Optional[Path] = None,
+        repo_root: Optional[Path] = None,
         executable: str = "herdr",
     ) -> Tuple[bool, str]:
         """Block locally in Python until completion flag file appears or timeout expires.
+
+        Checks status directory, worktree status directory (.worktrees/agent/<task_id>/.ai/status),
+        and root status directory (.ai/status).
 
         Args:
             task_id: Task identifier.
             timeout_seconds: Maximum seconds to wait.
             poll_interval: Seconds between poll checks.
             status_dir: Optional path to status directory. Defaults to .ai/status.
+            repo_root: Optional repository root path. Defaults to cwd.
             executable: Herdr executable binary name or path.
 
         Returns:
             Tuple[bool, str]: (success, message_or_content)
         """
-        sdir = status_dir or Path(".ai/status")
+        root = repo_root or Path.cwd()
+        sdir = status_dir or (root / ".ai" / "status")
         clean_task_id = task_id.replace("agent/", "").replace("worker_", "")
-        flag_candidates = [
-            sdir / f"{task_id}.complete",
-            sdir / f"{clean_task_id}.complete",
-        ]
+
+        # Candidate status directories: explicit/root sdir, and worktree .ai/status
+        status_dirs: List[Path] = [Path(sdir)]
+        wt_dir = root / ".worktrees" / "agent" / clean_task_id / ".ai" / "status"
+        if wt_dir not in status_dirs:
+            status_dirs.append(wt_dir)
 
         start_time = time.time()
         while True:
-            for flag in flag_candidates:
-                if flag.is_file():
-                    try:
-                        content = flag.read_text(encoding="utf-8").strip()
-                        return True, content or "[WORKER_COMPLETED]"
-                    except Exception:
-                        pass
+            for d in status_dirs:
+                flag_candidates = [
+                    d / f"{task_id}.complete",
+                    d / f"{clean_task_id}.complete",
+                ]
+                for flag in flag_candidates:
+                    if flag.is_file():
+                        try:
+                            content = flag.read_text(encoding="utf-8").strip()
+                            return True, content or "[WORKER_COMPLETED]"
+                        except Exception:
+                            pass
 
             elapsed = time.time() - start_time
             if elapsed >= timeout_seconds:
