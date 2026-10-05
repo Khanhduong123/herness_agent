@@ -88,3 +88,61 @@ if ($Link) {
 
 Write-Host "Dang thuc hien dong bo (Kiem tra an toan nhanh 'main')..." -ForegroundColor Cyan
 & conda @ArgsList
+
+# Auto-trust project and .worktrees in agy-cli settings.json
+try {
+    $AgySettingsDir = Join-Path $env:USERPROFILE ".gemini\antigravity-cli"
+    if (-not (Test-Path $AgySettingsDir)) {
+        New-Item -ItemType Directory -Path $AgySettingsDir -Force | Out-Null
+    }
+    $AgySettingsFile = Join-Path $AgySettingsDir "settings.json"
+    $SettingsData = @{}
+    if (Test-Path $AgySettingsFile) {
+        $rawSettings = Get-Content $AgySettingsFile -Raw -ErrorAction SilentlyContinue
+        if ($rawSettings) {
+            $parsed = ConvertFrom-Json $rawSettings -AsHashtable -ErrorAction SilentlyContinue
+            if ($parsed) {
+                $SettingsData = $parsed
+            }
+        }
+    }
+    if (-not $SettingsData.ContainsKey("trustedWorkspaces") -or -not ($SettingsData["trustedWorkspaces"] -is [System.Collections.IEnumerable])) {
+        $SettingsData["trustedWorkspaces"] = @()
+    }
+    $TrustedList = [System.Collections.ArrayList]@($SettingsData["trustedWorkspaces"])
+
+    # Determine projects to trust
+    $TargetProjects = @()
+    if ($TargetDir) {
+        $resolved = (Resolve-Path $TargetDir -ErrorAction SilentlyContinue)
+        if ($resolved) { $TargetProjects += $resolved.Path }
+    } elseif ($CustomPath) {
+        $resolved = (Resolve-Path $CustomPath -ErrorAction SilentlyContinue)
+        if ($resolved) { $TargetProjects += $resolved.Path }
+    } else {
+        # Check projects registered in ~/.harness/projects.json
+        $HarnessRegistry = Join-Path $env:USERPROFILE ".harness\projects.json"
+        if (Test-Path $HarnessRegistry) {
+            $rawProj = Get-Content $HarnessRegistry -Raw -ErrorAction SilentlyContinue
+            if ($rawProj) {
+                $TargetProjects += @(ConvertFrom-Json $rawProj)
+            }
+        }
+    }
+
+    foreach ($proj in $TargetProjects) {
+        $wtDir = Join-Path $proj ".worktrees"
+        $wtAgentDir = Join-Path $proj ".worktrees\agent"
+        foreach ($p in @($proj, $wtDir, $wtAgentDir)) {
+            if (-not ($TrustedList -contains $p)) {
+                $TrustedList.Add($p) | Out-Null
+            }
+        }
+    }
+
+    $SettingsData["trustedWorkspaces"] = $TrustedList
+    $SettingsData | ConvertTo-Json -Depth 10 | Set-Content $AgySettingsFile -Encoding utf8
+    Write-Host "  [+] Auto-trusted project and .worktrees in agy-cli settings.json" -ForegroundColor Green
+} catch {
+    # Non-critical trust registration
+}

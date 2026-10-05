@@ -184,6 +184,44 @@ if len(sys.argv) > 1 and sys.argv[1]:
         json.dump(sorted(list(projects)), f, indent=2)
 " "$TARGET_DIR" 2>/dev/null || true
 
+# 7b. Auto-trust target project and .worktrees in agy-cli settings.json
+python3 -c "
+import json, os, sys
+if len(sys.argv) > 1 and sys.argv[1]:
+    target = os.path.abspath(sys.argv[1])
+    settings_dir = os.path.expanduser('~/.gemini/antigravity-cli')
+    os.makedirs(settings_dir, exist_ok=True)
+    settings_file = os.path.join(settings_dir, 'settings.json')
+    data = {}
+    if os.path.exists(settings_file):
+        try:
+            with open(settings_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+    if not isinstance(data, dict):
+        data = {}
+    trusted = data.get('trustedWorkspaces')
+    if not isinstance(trusted, list):
+        trusted = []
+    candidates = [
+        target,
+        os.path.join(target, '.worktrees'),
+        os.path.join(target, '.worktrees', 'agent')
+    ]
+    for c in candidates:
+        norm_c = os.path.abspath(c)
+        if not any(os.path.abspath(existing) == norm_c for existing in trusted if isinstance(existing, str)):
+            trusted.append(norm_c)
+    data['trustedWorkspaces'] = trusted
+    try:
+        with open(settings_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+        print('  [✓] Auto-trusted project and .worktrees in agy-cli settings.json')
+    except Exception:
+        pass
+" "$TARGET_DIR" 2>/dev/null || true
+
 # 8. Install Git Pre-commit Hooks in target if it is a Git repo
 if [ -d "$TARGET_DIR/.git" ] && command -v pre-commit >/dev/null 2>&1; then
     (cd "$TARGET_DIR" && pre-commit install >/dev/null 2>&1 || true)

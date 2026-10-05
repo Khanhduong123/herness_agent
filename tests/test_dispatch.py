@@ -806,3 +806,44 @@ class TestLifecycleCliCommands:
             result = runner.invoke(main, ["abort", "t1", "--reason", "Timeout"])
             assert result.exit_code == 0
             assert "Task t1 aborted" in result.output
+
+    def test_trust_workspace_creates_file_and_adds_paths(self, tmp_path: Path) -> None:
+        """Test trust_workspace when settings.json does not exist yet."""
+        settings_file = tmp_path / "settings.json"
+        wt_path = tmp_path / "my_project" / ".worktrees" / "agent" / "subtask_01"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        res = HerdrDispatcher.trust_workspace(wt_path, settings_file=settings_file)
+        assert res is True
+        assert settings_file.is_file()
+
+        with open(settings_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        assert "trustedWorkspaces" in data
+        trusted = data["trustedWorkspaces"]
+        assert str(wt_path.resolve()) in trusted
+        # Parent .worktrees should also be added
+        parent_wt = str((tmp_path / "my_project" / ".worktrees").resolve())
+        assert parent_wt in trusted
+
+    def test_trust_workspace_idempotent(self, tmp_path: Path) -> None:
+        """Test trust_workspace does not duplicate existing paths."""
+        settings_file = tmp_path / "settings.json"
+        wt_path = tmp_path / "repo" / "custom"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        # Prepopulate settings
+        settings_file.write_text(
+            json.dumps({"trustedWorkspaces": [str(wt_path.resolve())]}),
+            encoding="utf-8",
+        )
+
+        res = HerdrDispatcher.trust_workspace(wt_path, settings_file=settings_file)
+        assert res is True
+
+        with open(settings_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        assert len(data["trustedWorkspaces"]) == 1
+        assert data["trustedWorkspaces"][0] == str(wt_path.resolve())
