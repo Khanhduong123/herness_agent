@@ -77,9 +77,11 @@
   1. Merge subtask branch back into the feature branch: `git merge --no-ff agent/<task_id>`
   2. Clean up the isolated workspace: Stop/kill the active Herdr worker pane FIRST, then remove worktree: `git worktree remove --force .worktrees/agent/<task_id>`, and delete the local branch `git branch -d agent/<task_id>`.
   3. Run full regression test suite (`conda run -n pytorch pytest tests/`) on the feature branch.
-  4. Push feature branch to remote: `git push -u origin feat/<feature_name>`
-  5. Create Pull Request using CLI tool: `conda run -n pytorch harness-agent pr create --base main`
-  6. Provide the PR link directly to the User in chat for manual review and merge authorization.
+  4. Run automated Adversarial Critics Gate: `conda run -n pytorch harness-agent review --base main`
+  5. Verify 100% pytest pass rate + 3 Critics PASS before PR creation.
+  6. Push feature branch to remote: `git push -u origin feat/<feature_name>`
+  7. Create Pull Request using CLI tool: `conda run -n pytorch harness-agent pr create --base main`
+  8. Provide the PR link directly to the User in chat for manual review and merge authorization.
 
 ---
 
@@ -134,6 +136,8 @@ When a **Coder** completes a feature implementation or code change:
    - If critics or test gates reject the submission for 3 consecutive cycles, the loop truncates immediately and escalates to the human user with diagnostic traces.
 6. **Critics Diff Guardrails (Diff Size & Binary Filtering)**:
    - If the git diff exceeds 500 lines or contains generated/binary files, the Orchestrator MUST filter out generated/binary files or require splitting the diff before dispatching to the 3 Critics to prevent LLM context overflow.
+7. **Automated Enforcement in PR Creation**:
+   - `conda run -n pytorch harness-agent pr create` automatically executes the Adversarial Critics Gate (`harness-agent review --base main`) before opening any PR, and strictly blocks PR creation if any critic rejects the changes.
 
 ```mermaid
 graph TD
@@ -205,7 +209,9 @@ All agents must strictly adhere to the following environment rules:
   5. Remove the temporary worktree and branch (stop worker pane first, then `git worktree remove --force .worktrees/agent/<task_id>` and `git branch -d agent/<task_id>`).
   6. Run 100% full regression tests on the feature branch:
      `conda run -n pytorch pytest tests/`
-  7. Push feature branch to remote and create Pull Request to `main`:
+  7. Run automated Adversarial Critics Gate:
+     `conda run -n pytorch harness-agent review --base main`
+  8. Push feature branch to remote and create Pull Request to `main`:
      `git push -u origin feat/<feature_name>`
      `conda run -n pytorch harness-agent pr create --base main`
 - **Conventional Commits & Pre-Commit Hook Recovery**:
@@ -284,8 +290,8 @@ herdr agent wait worker_<task_id> --timeout 120000
 # Or inspect output:
 herdr agent read worker_<task_id>
 
-# 7. Dispatch parallel Adversarial Critics (diff size <= 500 lines, filter binary/generated)
-# Critics inspect git diff feat/<feature_name>...agent/<task_id> without modifying files
+# 7. Execute automated Adversarial Critics Gate
+conda run -n pytorch harness-agent review --base main
 
 # 8. Success Flow: Merge Back, Cleanup, Full Regression & PR
 # Merge subtask branch back into feature branch:
@@ -296,6 +302,8 @@ git worktree remove --force .worktrees/agent/<task_id>
 git branch -d agent/<task_id>
 # Run full regression tests on feature branch:
 conda run -n pytorch pytest tests/
+# Run automated Adversarial Critics Gate (also auto-verified by pr create):
+conda run -n pytorch harness-agent review --base main
 # Push feature branch and create Pull Request to main:
 git push -u origin feat/<feature_name>
 conda run -n pytorch harness-agent pr create --base main

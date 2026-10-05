@@ -367,25 +367,23 @@ class AgentOrchestrator:
                                 name_slug = re.sub(r"[^a-z0-9]+", "_", subtask.name.lower()).strip(
                                     "_"
                                 )
+                                stop_words = {"and", "the", "for", "with", "from", "into"}
                                 slug_words = [
                                     w
                                     for w in name_slug.split("_")
-                                    if len(w) >= 2
-                                    and w not in ("and", "the", "for", "with", "from", "into")
+                                    if len(w) >= 2 and w not in stop_words
                                 ]
                                 if slug_words:
                                     for cand_entry in candidates:
-                                        cand_stem = (
-                                            cand_entry[:-3].lower()
-                                            if cand_entry.endswith(".md")
-                                            else cand_entry.lower()
+                                        cand_stem = os.path.splitext(cand_entry)[0]
+                                        cand_tokens = set(
+                                            re.sub(r"[^a-z0-9]+", "_", cand_stem.lower()).split("_")
                                         )
-                                        cand_words = set(cand_stem.split("_"))
-                                        if all(w in cand_words for w in slug_words):
+                                        if all(w in cand_tokens for w in slug_words):
                                             return os.path.abspath(
                                                 os.path.join(dirpath, cand_entry)
                                             )
-                                        score = sum(1 for w in slug_words if w in cand_words)
+                                        score = sum(1 for w in slug_words if w in cand_tokens)
                                         if score > best_score:
                                             best_score = score
                                             best_fallback = os.path.abspath(
