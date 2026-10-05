@@ -257,7 +257,7 @@ def init_cmd(
     target_dir: Optional[str],
     force: bool,
 ) -> None:
-    """Initialize harness agent rules, Agent.md, and workflow templates in a target directory."""
+    """Initialize harness agent rules, AGENTS.md, and workflow templates in a target directory."""
     if not project_name and not target_dir:
         project_name = click.prompt("Nhập tên dự án của bạn", type=str)
 
@@ -270,7 +270,7 @@ def init_cmd(
         click.secho(f"\n[CẢNH BÁO] Thư mục '{target_path}' ĐÃ TỒN TẠI trên máy!", fg="yellow")
         if not force:
             confirmed = click.confirm(
-                "Bạn có muốn cập nhật/bổ sung quy chuẩn (Agent.md, skills) vào dự án hiện có?",
+                "Bạn có muốn cập nhật/bổ sung quy chuẩn (AGENTS.md, skills) vào dự án hiện có?",
                 default=True,
             )
             if not confirmed:
@@ -287,15 +287,14 @@ def init_cmd(
     (target_path / ".ai" / "context").mkdir(parents=True, exist_ok=True)
 
     _ensure_gitignore(target_path)
+    _cleanup_legacy_artifacts(target_path)
     repo_root = Path(__file__).resolve().parent.parent.parent
-    files_to_copy = ["AGENTS.md", "Agent.md", ".pre-commit-config.yaml"]
+    files_to_copy = ["AGENTS.md", ".pre-commit-config.yaml"]
     click.echo(f"Đang thiết lập Harness Agent & SDLC rules tại: {target_path}")
 
     copied = 0
     for filename in files_to_copy:
         src = repo_root / filename
-        if not src.exists() and filename == "Agent.md":
-            src = repo_root / "AGENTS.md"
         dest = target_path / filename
         if src.exists():
             shutil.copy2(src, dest)
@@ -319,12 +318,16 @@ def init_cmd(
             click.secho("  [✓] Created .agents/hooks.json (Lifecycle Hooks config)", fg="green")
         copied += 1
 
-    hooks_src = repo_root / "src" / "harness_agent" / "hooks"
+    hooks_src = repo_root / ".agents" / "hooks"
+    if not hooks_src.exists():
+        hooks_src = repo_root / "src" / "harness_agent" / "hooks"
     if hooks_src.exists():
-        target_hooks = target_path / "src" / "harness_agent" / "hooks"
+        target_hooks = target_path / ".agents" / "hooks"
         shutil.copytree(hooks_src, target_hooks, dirs_exist_ok=True)
-        click.secho("  [✓] Created src/harness_agent/hooks/ (Lifecycle Hooks)", fg="green")
+        click.secho("  [✓] Created .agents/hooks/ (Lifecycle Hooks)", fg="green")
         copied += 1
+
+    _cleanup_legacy_artifacts(target_path)
 
     _register_project(repo_root, target_path)
     click.secho(f"\n✓ Successfully initialized {copied} items in {target_path}", fg="cyan")
@@ -362,6 +365,37 @@ def _get_registered_projects(repo_root: Path) -> List[str]:
         except Exception:
             return []
     return []
+
+
+def _cleanup_legacy_artifacts(target_path: Path) -> None:
+    """Clean up legacy duplicate Agent.md and src/harness_agent directories in target."""
+    legacy_agent = target_path / "Agent.md"
+    if legacy_agent.exists():
+        try:
+            legacy_agent.unlink()
+        except OSError:
+            pass
+
+    legacy_pkg = target_path / "src" / "harness_agent"
+    if legacy_pkg.exists():
+        legacy_hooks = legacy_pkg / "hooks"
+        if legacy_hooks.exists():
+            shutil.rmtree(legacy_hooks, ignore_errors=True)
+        try:
+            remaining = [p for p in legacy_pkg.iterdir() if p.name != "__pycache__"]
+            if not remaining:
+                shutil.rmtree(legacy_pkg, ignore_errors=True)
+        except OSError:
+            pass
+
+    legacy_src = target_path / "src"
+    if legacy_src.exists():
+        try:
+            src_remaining = [p for p in legacy_src.iterdir() if p.name != "__pycache__"]
+            if not src_remaining:
+                shutil.rmtree(legacy_src, ignore_errors=True)
+        except OSError:
+            pass
 
 
 def _ensure_gitignore(target_path: Path) -> None:
@@ -454,13 +488,12 @@ def _ensure_gitignore(target_path: Path) -> None:
 def _sync_single_project(repo_root: Path, target_path: Path, link: bool = False) -> int:
     target_path.mkdir(parents=True, exist_ok=True)
     _ensure_gitignore(target_path)
-    files_to_copy = ["AGENTS.md", "Agent.md", ".pre-commit-config.yaml"]
+    _cleanup_legacy_artifacts(target_path)
+    files_to_copy = ["AGENTS.md", ".pre-commit-config.yaml"]
     copied = 0
 
     for filename in files_to_copy:
         src = repo_root / filename
-        if not src.exists() and filename == "Agent.md":
-            src = repo_root / "AGENTS.md"
         dest = target_path / filename
         if src.exists():
             shutil.copy2(src, dest)
@@ -504,13 +537,16 @@ def _sync_single_project(repo_root: Path, target_path: Path, link: bool = False)
             click.secho("  [+] Synced .agents/hooks.json (Lifecycle Hooks config)", fg="green")
             copied += 1
 
-    hooks_src = repo_root / "src" / "harness_agent" / "hooks"
+    hooks_src = repo_root / ".agents" / "hooks"
+    if not hooks_src.exists():
+        hooks_src = repo_root / "src" / "harness_agent" / "hooks"
     if hooks_src.exists():
-        target_hooks = target_path / "src" / "harness_agent" / "hooks"
+        target_hooks = target_path / ".agents" / "hooks"
         shutil.copytree(hooks_src, target_hooks, dirs_exist_ok=True)
-        click.secho("  [+] Synced src/harness_agent/hooks/ (Lifecycle Hooks)", fg="green")
+        click.secho("  [+] Synced .agents/hooks/ (Lifecycle Hooks)", fg="green")
         copied += 1
 
+    _cleanup_legacy_artifacts(target_path)
     _register_project(repo_root, target_path)
     return copied
 
@@ -520,7 +556,7 @@ def _sync_single_project(repo_root: Path, target_path: Path, link: bool = False)
 @click.option("--all", "sync_all", is_flag=True, help="Sync all registered working projects")
 @click.option("--link", is_flag=True, help="Create live symlink/junction for SDLC skills")
 def sync_cmd(target_dir: Optional[str], sync_all: bool, link: bool) -> None:
-    """Synchronize Agent.md, AGENTS.md, SDLC skills, and lifecycle hooks to working projects."""
+    """Synchronize AGENTS.md, SDLC skills, and lifecycle hooks to working projects."""
     repo_root = Path(__file__).resolve().parent.parent.parent
     targets: List[Path] = []
 

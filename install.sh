@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Harness Agent Scaffolding Script
-# Copies Agent.md, AGENTS.md, SDLC skills, and workflow templates to a target repository.
+# Copies AGENTS.md, SDLC skills, and workflow templates to a target repository.
 #
 # Usage:
 #   ./install.sh
@@ -67,9 +67,8 @@ if [ -f "$SCRIPT_DIR/AGENTS.md" ]; then
     cp "$SCRIPT_DIR/AGENTS.md" "$TARGET_DIR/AGENTS.md"
     echo "  [✓] Created AGENTS.md"
 fi
-if [ -f "$SCRIPT_DIR/Agent.md" ]; then
-    cp "$SCRIPT_DIR/Agent.md" "$TARGET_DIR/Agent.md"
-    echo "  [✓] Created Agent.md"
+if [ -f "$TARGET_DIR/Agent.md" ]; then
+    rm -f "$TARGET_DIR/Agent.md"
 fi
 
 # 2. Copy or update pre-commit config (ensuring branch protection hooks)
@@ -104,11 +103,26 @@ if [ -f "$SCRIPT_DIR/.agents/hooks.json" ]; then
     echo "  [✓] Created .agents/hooks.json (Lifecycle Hooks config)"
 fi
 
-# 4b. Copy Orchestrator Hooks Script
-if [ -d "$SCRIPT_DIR/src/harness_agent/hooks" ]; then
-    mkdir -p "$TARGET_DIR/src/harness_agent/hooks"
-    cp -r "$SCRIPT_DIR/src/harness_agent/hooks"/* "$TARGET_DIR/src/harness_agent/hooks/"
-    echo "  [✓] Copied Orchestrator hook script to src/harness_agent/hooks/"
+# 4b. Copy Orchestrator Hooks Script to .agents/hooks/
+SOURCE_HOOKS_DIR="$SCRIPT_DIR/.agents/hooks"
+if [ ! -d "$SOURCE_HOOKS_DIR" ]; then
+    SOURCE_HOOKS_DIR="$SCRIPT_DIR/src/harness_agent/hooks"
+fi
+if [ -d "$SOURCE_HOOKS_DIR" ]; then
+    mkdir -p "$TARGET_DIR/.agents/hooks"
+    cp -r "$SOURCE_HOOKS_DIR"/* "$TARGET_DIR/.agents/hooks/"
+    echo "  [✓] Copied Orchestrator hook script to .agents/hooks/"
+fi
+
+# Clean up legacy src/harness_agent if exists
+if [ -d "$TARGET_DIR/src/harness_agent" ]; then
+    rm -rf "$TARGET_DIR/src/harness_agent/hooks"
+    if [ -z "$(ls -A "$TARGET_DIR/src/harness_agent" 2>/dev/null)" ]; then
+        rm -rf "$TARGET_DIR/src/harness_agent"
+    fi
+fi
+if [ -d "$TARGET_DIR/src" ] && [ -z "$(ls -A "$TARGET_DIR/src" 2>/dev/null)" ]; then
+    rmdir "$TARGET_DIR/src" 2>/dev/null || true
 fi
 
 # 4c. Copy GitHub Templates

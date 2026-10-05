@@ -3,7 +3,7 @@
     "PreInvocation": [
       {
         "type": "command",
-        "command": "python src/harness_agent/hooks/enforce_orchestrator.py"
+        "command": "python .agents/hooks/enforce_orchestrator.py"
       }
     ]
   }

@@ -10,16 +10,22 @@ def test_sync_single_project(tmp_path):
     target = tmp_path / "sync_project"
     target.mkdir()
 
-    # Pre-populate a custom user file
+    # Pre-populate custom user file and legacy artifacts to verify cleanup
     (target / "custom_app.py").write_text("print('user code')", encoding="utf-8")
+    (target / "Agent.md").write_text("# Legacy Agent", encoding="utf-8")
+    legacy_hooks = target / "src" / "harness_agent" / "hooks"
+    legacy_hooks.mkdir(parents=True, exist_ok=True)
+    (legacy_hooks / "old_hook.py").write_text("# old hook", encoding="utf-8")
 
     result = runner.invoke(main, ["sync", str(target)])
     assert result.exit_code == 0
     assert (target / "custom_app.py").exists()
     assert (target / "AGENTS.md").exists()
+    assert not (target / "Agent.md").exists()
     assert (target / ".agents" / "skills" / "sdlc-clean-code-standards" / "SKILL.md").exists()
     assert (target / ".agents" / "hooks.json").exists()
-    assert (target / "src" / "harness_agent" / "hooks" / "enforce_orchestrator.py").exists()
+    assert (target / ".agents" / "hooks" / "enforce_orchestrator.py").exists()
+    assert not (target / "src" / "harness_agent").exists()
     assert (target / ".pre-commit-config.yaml").exists()
 
     pre_commit_content = (target / ".pre-commit-config.yaml").read_text(encoding="utf-8")
@@ -40,8 +46,10 @@ def test_sync_link_mode(tmp_path):
     result = runner.invoke(main, ["sync", str(target), "--link"])
     assert result.exit_code == 0
     assert (target / "AGENTS.md").exists()
+    assert not (target / "Agent.md").exists()
     assert (target / ".agents" / "hooks.json").is_file()
-    assert (target / "src" / "harness_agent" / "hooks" / "enforce_orchestrator.py").is_file()
+    assert (target / ".agents" / "hooks" / "enforce_orchestrator.py").is_file()
+    assert not (target / "src" / "harness_agent").exists()
     assert (target / ".agents" / "skills").exists()
 
 
