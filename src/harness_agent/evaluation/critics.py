@@ -158,6 +158,13 @@ def detect_security_issues(diff_or_code: str) -> List[str]:
     issues: List[str] = []
 
     # 1. SQL Injection patterns:
+    code_lines = [
+        line
+        for line in diff_or_code.splitlines()
+        if not line.lstrip(" +-").startswith(("#", "//", "/*", "*", "--"))
+    ]
+    code_to_check = "\n".join(code_lines)
+
     sql_patterns = [
         (
             r"""(?i)(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+.*"""
@@ -183,7 +190,7 @@ def detect_security_issues(diff_or_code: str) -> List[str]:
     ]
 
     for pattern, description in sql_patterns:
-        if re.search(pattern, diff_or_code):
+        if re.search(pattern, code_to_check):
             issues.append(description)
             break
 
