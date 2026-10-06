@@ -63,3 +63,4 @@ This skill defines the mandatory protocol every AI agent must execute **BEFORE**
   3. Update or write unit tests.
   4. Run validation checks.
 - [ ] **Risk Assessment**: Identify potential breaking changes or edge cases.
+- [ ] **Edge Cases & Boundary Conditions**: Ensure at least 3-5 concrete edge cases are documented with handling logic and test assertions in the plan/sub-spec.

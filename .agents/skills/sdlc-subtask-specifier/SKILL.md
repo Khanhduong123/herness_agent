@@ -15,7 +15,7 @@ The Sub-Spec serves as a strict technical contract between the Orchestrator and 
 
 ## 1. Mandatory Sub-Spec Components
 
-Every Sub-Spec must be populated with all 6 core SDLC dimensions:
+Every Sub-Spec must be populated with all 7 core SDLC dimensions:
 
 ```text
 +------------------------------------------------------------------------+
@@ -25,8 +25,9 @@ Every Sub-Spec must be populated with all 6 core SDLC dimensions:
 | 2. CRITICALITY LEVEL (CRITICAL | HIGH | MEDIUM | LOW)                  |
 | 3. RISK ASSESSMENT (Risk Level, Failure Points, Blast Radius, Plan)    |
 | 4. FUNCTION & INTERFACE SPECS (Signatures, Parameters, Return Types)   |
-| 5. TEST CASE SPECIFICATIONS (Happy Path, Edge Cases, Exception Paths)  |
-| 6. SDLC ACCEPTANCE GATES (Black 100 cols, isort, flake8, 100% pytest)  |
+| 5. EDGE CASES & BOUNDARY CONDITIONS (Scenarios, Handling, Assertions)  |
+| 6. TEST CASE SPECIFICATIONS (Happy Path, Boundary, Exception Paths)    |
+| 7. SDLC ACCEPTANCE GATES (Black 100 cols, isort, flake8, 100% pytest)  |
 +------------------------------------------------------------------------+
 ```
 
@@ -75,14 +76,21 @@ def function_name(param_1: str, param_2: Optional[int] = None) -> ReturnType:
 ```
 - **Rule**: Never use untyped parameters or uncontrolled `Any`. 100% parameter and return types must be explicitly typed.
 
-### 2.5. Test Case Specifications (`TestCaseSpec`)
+### 2.5. Edge Cases & Boundary Conditions
+Every Sub-Spec MUST detail at least 3-5 concrete edge cases and boundary conditions. Each entry must clearly state:
+1. **Failure Scenario**: Specific abnormal or edge condition (e.g., missing file/path, empty strings, None/null inputs, Windows `\` vs POSIX `/` separators, CRLF vs LF line endings, subprocess timeouts, permission errors, concurrent task access).
+2. **Handling Logic**: Expected defensive programming pattern (graceful fallback, default value assignment, specific custom exception raising, path normalization via `Path`).
+3. **Verification Method / Test Assertion**: Specific test check (e.g. `pytest.raises(FileNotFoundError)`, assert normalized path, mock timeout).
+
+### 2.6. Test Case Specifications (`TestCaseSpec`)
 Concrete test scenarios must be defined before code implementation:
 1. **TC-01 (Happy Path):** Valid inputs returning exact expected outputs.
 2. **TC-02 (Boundary & Edge Cases):** Empty collections, null/None, empty strings, zero values, max thresholds.
 3. **TC-03 (Exception & Error Paths):** Invalid arguments raising expected exceptions (`pytest.raises`).
 4. **TC-04 (Regression Guard):** Validating that existing module features remain functional.
 
-### 2.6. SDLC Quality Gate Criteria
+### 2.7. SDLC Quality Gate Criteria
+- [ ] Explicit `## Edge Cases & Boundary Conditions` section includes at least 3-5 concrete scenarios.
 - [ ] Black line length = **100 characters** max.
 - [ ] Imports ordered by `isort` (`profile = "black"`).
 - [ ] Zero `flake8` lint errors (`E501`, `F401`, `F821`).
@@ -90,8 +98,7 @@ Concrete test scenarios must be defined before code implementation:
 - [ ] No unhandled exceptions or silent error swallowing.
 - [ ] Strictly follow "Patch, never regenerate" rule (use diff hunks, no full-file rewrites).
 
-
-### 2.7. Storage & Approval Workflow
+### 2.8. Storage & Approval Workflow
 - **Storage**: The Orchestrator MUST save every generated `sub-spec` locally as a Markdown file in the project's dedicated plan directory: `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[feature].md` using 2-digit zero-padded numbers (`01`, `02`, ..., `10`). This isolates tasks per plan, prevents filename collisions across concurrent or sequential plans, and guarantees strictly numeric sorting.
 - **User Approval**: After saving the file, the Orchestrator MUST ask the User for approval (e.g., *"Please review the sub-spec at `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[feature].md`"*).
 - **Execution**: The Orchestrator MUST NOT spawn the Sub-Agent until the User explicitly approves the Sub-Spec.
@@ -128,14 +135,28 @@ Concrete test scenarios must be defined before code implementation:
 - **Purpose:** Constructs command-line arguments for agy CLI invocation.
 - **Raises:** `ValueError` if prompt is empty.
 
-## 5. Test Case Specifications (QA Acceptance)
+## 5. Edge Cases & Boundary Conditions
+1. **Missing or Non-Existent File/Directory**:
+   - **Handling Logic:** Check path existence using `Path.exists()`; raise `FileNotFoundError` with clear diagnostic message instead of failing silently.
+   - **Verification:** Unit test asserts `pytest.raises(FileNotFoundError)`.
+2. **Empty or Null Input Prompt**:
+   - **Handling Logic:** Validate `prompt.strip()`; raise `ValueError("Prompt cannot be empty")`.
+   - **Verification:** TC-02 verifies exception raised.
+3. **Cross-Platform Path Separator Inconsistency (`\` vs `/`)**:
+   - **Handling Logic:** Always normalize file paths using `Path(p).as_posix()` or `pathlib.Path`.
+   - **Verification:** Assert normalized output path contains expected separator on both Windows and Linux.
+4. **Subprocess Timeout on Long-Running Commands**:
+   - **Handling Logic:** Wrap subprocess with `asyncio.wait_for(timeout=60.0)` and catch `asyncio.TimeoutError`.
+   - **Verification:** Mock subprocess delay and assert handled timeout error status.
+
+## 6. Test Case Specifications (QA Acceptance)
 | Test ID | Scenario | Input | Expected Output |
 | :--- | :--- | :--- | :--- |
 | **TC-01** | Happy path command building | `prompt="hello"` | `['agy', '--print', 'hello', ...]` |
 | **TC-02** | Empty prompt validation | `prompt=""` | Raises `ValueError` |
 | **TC-03** | Sandbox flag injection | `extra_flags=['--sandbox']` | Command contains `'--sandbox'` |
 
-## 6. SDLC Quality Gate Checklist
+## 7. SDLC Quality Gate Checklist
 - [ ] Complete type annotations adhering to Python 3.10+.
 - [ ] 100% pass rate in `conda run -n pytorch pytest`.
 - [ ] No unused imports or dead code.
