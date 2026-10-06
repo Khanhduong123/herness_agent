@@ -1,5 +1,5 @@
 {
   "name": "figma",
   "version": "1.0.0",
-  "description": "Local Figma integration plugin with stdio MCP server for layout extraction, token export, and node image rendering."
+  "description": "Local Figma integration plugin with stdio MCP server for layout extraction, token export, node image rendering, and live CDP read/write canvas interaction via figma-use."
 }
