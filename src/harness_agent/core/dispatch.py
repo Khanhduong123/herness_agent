@@ -215,6 +215,8 @@ class HerdrDispatcher:
         kind: str = "agy",
         dangerously_skip_permissions: bool = True,
         effort: str = "low",
+        system_prompt_file: Optional[str] = None,
+        thinking_level: Optional[str] = None,
         executable: str = "herdr",
     ) -> Tuple[bool, str]:
         """Run 'herdr agent start worker_<task_id> --kind <kind> --pane <pane_id>'.
@@ -225,13 +227,25 @@ class HerdrDispatcher:
             kind: Agent kind (default: 'agy').
             dangerously_skip_permissions: Auto-approve permissions if True.
             effort: Model reasoning effort (default: 'low').
+            system_prompt_file: Optional path to system prompt / skill file.
+            thinking_level: Optional model thinking level (e.g. 'low', 'medium', 'high').
             executable: Herdr executable binary name or path.
 
         Returns:
             Tuple[bool, str]: (success, output_or_error_message)
         """
+        if system_prompt_file:
+            spf = Path(system_prompt_file)
+            if not spf.exists():
+                return False, f"System prompt file not found: {system_prompt_file}"
+
         worker_name = cls.get_worker_name(task_id)
         cmd = [executable, "agent", "start", worker_name, "--kind", kind, "--pane", pane_id]
+        if system_prompt_file:
+            cmd.extend(["--system-prompt-file", Path(system_prompt_file).as_posix()])
+        if thinking_level:
+            cmd.extend(["--thinking-level", str(thinking_level)])
+
         agy_flags: List[str] = []
         if dangerously_skip_permissions:
             agy_flags.append("--dangerously-skip-permissions")
@@ -262,6 +276,46 @@ class HerdrDispatcher:
             return False, err
 
         return True, proc.stdout.strip()
+
+    @classmethod
+    def format_dispatch_payload(
+        cls,
+        role: str,
+        spec_path: str,
+        prohibitions: Optional[List[str]] = None,
+        target: Optional[str] = None,
+    ) -> str:
+        """Construct strict multi-line payload template for worker dispatch.
+
+        Args:
+            role: Worker role identifier (e.g. 'Leaf Coder Worker').
+            spec_path: Path to the subtask spec markdown file.
+            prohibitions: Optional list of prohibited actions/tools.
+            target: Optional target description / deliverables.
+
+        Returns:
+            str: Multi-line formatted dispatch payload string.
+        """
+        clean_role = role.strip()
+        clean_spec = Path(spec_path.strip()).as_posix() if spec_path else ""
+
+        if prohibitions is not None:
+            prohibitions_str = ", ".join(p.strip() for p in prohibitions if p.strip())
+        else:
+            prohibitions_str = "No ManageTask, no background loops, no full-file overwrite."
+
+        if target is not None:
+            target_str = target.strip()
+        else:
+            target_str = "100% pytest pass -> write status .complete -> output [WORKER_COMPLETED]."
+
+        lines = [
+            f"[ROLE: {clean_role}]",
+            f"Spec: {clean_spec}",
+            f"Prohibitions: {prohibitions_str}",
+            f"Target: {target_str}",
+        ]
+        return "\n".join(lines)
 
     @classmethod
     def prompt_agent(
@@ -909,6 +963,7 @@ cleanup_worktree = HerdrDispatcher.cleanup_worktree
 setup_worktree_env = HerdrDispatcher.setup_worktree_env
 abort_task = HerdrDispatcher.abort_task
 dispatch_interactive_critics = HerdrDispatcher.dispatch_interactive_critics
+format_dispatch_payload = HerdrDispatcher.format_dispatch_payload
 
 __all__ = [
     "HerdrDispatcher",
@@ -916,6 +971,7 @@ __all__ = [
     "cleanup_worktree",
     "create_feature_branch",
     "dispatch_interactive_critics",
+    "format_dispatch_payload",
     "merge_worktree_to_feature",
     "setup_worktree_env",
     "stop_agent",
