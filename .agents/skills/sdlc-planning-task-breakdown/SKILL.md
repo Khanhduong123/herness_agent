@@ -75,7 +75,18 @@ Task 3: User can create a task (task schema + API + UI for creation)
 
 Each vertical slice delivers working, testable functionality.
 
-### Step 4: Write Task Breakdown (Before Generating Sub-Specs)
+### Step 4: Edge Cases & Boundary Conditions Formulation
+
+Before writing individual task breakdowns or Sub-Specs, formulate at least 3-5 concrete edge cases and boundary conditions for the overall feature or architecture:
+- Missing files, uninitialized configurations, or empty inputs.
+- Cross-platform differences (Windows `\` vs POSIX `/`, line endings CRLF vs LF).
+- Null, empty string, zero values, or out-of-bound threshold inputs.
+- Race conditions, concurrent access, or subprocess timeout failures.
+- Permission errors or read-only/unwritable workspaces.
+
+For each edge case, document the failure scenario, expected defensive handling logic, and corresponding test assertion.
+
+### Step 5: Write Task Breakdown (Before Generating Sub-Specs)
 
 Each task defined in the plan should follow this structure. Later, each task will be formally expanded using the `sdlc-subtask-specifier` skill into its own `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[id].md` file.
 
@@ -101,7 +112,25 @@ Each task defined in the plan should follow this structure. Later, each task wil
 **Estimated scope:** [Small: 1-2 files | Medium: 3-5 files | Large: 5+ files]
 ```
 
-### Step 5: Order and Checkpoint
+### Step 6: Master Plan Output Structure & Edge Cases Section
+
+The master plan document saved to `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` must include an explicit section detailing edge cases:
+
+```markdown
+## Edge Cases & Boundary Conditions
+
+1. **[Edge Case Name / Failure Scenario]**:
+   - **Handling Logic:** [Defensive guards, fallback defaults, explicit validation errors]
+   - **Verification / Test Assertion:** [Test assertion verifying safe behavior or raised exception]
+2. **[Edge Case Name / Failure Scenario]**:
+   - **Handling Logic:** ...
+   - **Verification / Test Assertion:** ...
+3. **[Edge Case Name / Failure Scenario]**:
+   - **Handling Logic:** ...
+   - **Verification / Test Assertion:** ...
+```
+
+### Step 7: Order and Checkpoint
 
 Arrange tasks so that:
 
@@ -142,6 +171,7 @@ If a task is L or larger, it should be broken into smaller tasks.
 
 Before finishing the planning phase, confirm:
 - [ ] Task dependencies are identified and ordered correctly (DAG).
+- [ ] Explicit '## Edge Cases & Boundary Conditions' section includes at least 3-5 concrete edge cases with handling logic and test assertions.
 - [ ] No task touches more than ~5 files (M size max).
 - [ ] Tasks are sliced vertically (delivering complete features).
 - [ ] The human has reviewed and approved the plan in `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md`.
