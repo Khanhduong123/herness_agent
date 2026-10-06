@@ -900,3 +900,119 @@ class TestLifecycleCliCommands:
         with patch("pathlib.Path.mkdir", side_effect=PermissionError("Mocked write failure")):
             res = HerdrDispatcher.trust_workspace(wt_path, settings_file=bad_settings)
             assert res is False
+
+    def test_start_agent_with_system_prompt_and_thinking_level(self, tmp_path: Path) -> None:
+        """Test start_agent includes --system-prompt-file and --thinking-level flags."""
+        prompt_file = tmp_path / "coder_worker.md"
+        prompt_file.write_text("# Coder Worker System Prompt", encoding="utf-8")
+
+        mock_proc = MagicMock(returncode=0, stdout="agent ready", stderr="")
+        with patch("subprocess.run", return_value=mock_proc) as mock_run:
+            ok, out = HerdrDispatcher.start_agent(
+                task_id="subtask_02",
+                pane_id="w1:p1",
+                kind="agy",
+                dangerously_skip_permissions=True,
+                effort="low",
+                system_prompt_file=str(prompt_file),
+                thinking_level="low",
+            )
+            assert ok is True
+            assert out == "agent ready"
+            mock_run.assert_called_once_with(
+                [
+                    "herdr",
+                    "agent",
+                    "start",
+                    "worker_subtask_02",
+                    "--kind",
+                    "agy",
+                    "--pane",
+                    "w1:p1",
+                    "--system-prompt-file",
+                    prompt_file.as_posix(),
+                    "--thinking-level",
+                    "low",
+                    "--",
+                    "--dangerously-skip-permissions",
+                    "--effort",
+                    "low",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+    def test_start_agent_nonexistent_system_prompt_file(self, tmp_path: Path) -> None:
+        """Test start_agent returns failure tuple when system_prompt_file does not exist."""
+        nonexistent_path = tmp_path / "does_not_exist.md"
+        ok, msg = HerdrDispatcher.start_agent(
+            task_id="subtask_02",
+            pane_id="w1:p1",
+            system_prompt_file=str(nonexistent_path),
+        )
+        assert ok is False
+        assert "System prompt file not found" in msg
+
+    def test_start_agent_empty_and_none_parameters(self) -> None:
+        """Test start_agent cleanly omits flags when parameters are None."""
+        mock_proc = MagicMock(returncode=0, stdout="agent ready", stderr="")
+        with patch("subprocess.run", return_value=mock_proc) as mock_run:
+            ok, out = HerdrDispatcher.start_agent(
+                task_id="subtask_02",
+                pane_id="w1:p1",
+                system_prompt_file=None,
+                thinking_level=None,
+            )
+            assert ok is True
+            mock_run.assert_called_once_with(
+                [
+                    "herdr",
+                    "agent",
+                    "start",
+                    "worker_subtask_02",
+                    "--kind",
+                    "agy",
+                    "--pane",
+                    "w1:p1",
+                    "--",
+                    "--dangerously-skip-permissions",
+                    "--effort",
+                    "low",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+    def test_format_dispatch_payload_default(self) -> None:
+        """Test format_dispatch_payload with default prohibitions and target."""
+        spec_path = "D:/herness_agent/.ai/plans/subtasks/2026-10-06/plan_01/subtask_01.md"
+        payload = HerdrDispatcher.format_dispatch_payload(
+            role="Leaf Coder Worker",
+            spec_path=spec_path,
+        )
+        expected = (
+            "[ROLE: Leaf Coder Worker]\n"
+            f"Spec: {Path(spec_path).as_posix()}\n"
+            "Prohibitions: No ManageTask, no background loops, no full-file overwrite.\n"
+            "Target: 100% pytest pass -> write status .complete -> output [WORKER_COMPLETED]."
+        )
+        assert payload == expected
+
+    def test_format_dispatch_payload_custom(self) -> None:
+        """Test format_dispatch_payload with custom prohibitions and target."""
+        spec_path = ".ai/plans/subtask_02.md"
+        payload = HerdrDispatcher.format_dispatch_payload(
+            role="Tester Agent",
+            spec_path=spec_path,
+            prohibitions=["No editing src/", "No subprocess git"],
+            target="Write unit tests with 100% pass rate -> output [WORKER_COMPLETED]",
+        )
+        expected = (
+            "[ROLE: Tester Agent]\n"
+            f"Spec: {Path(spec_path).as_posix()}\n"
+            "Prohibitions: No editing src/, No subprocess git\n"
+            "Target: Write unit tests with 100% pass rate -> output [WORKER_COMPLETED]"
+        )
+        assert payload == expected
