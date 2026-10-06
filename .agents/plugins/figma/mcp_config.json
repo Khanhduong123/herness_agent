@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "figma": {
+      "command": "conda",
+      "args": [
+        "run",
+        "-n",
+        "pytorch",
+        "python",
+        "-m",
+        "harness_agent.figma.server"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}

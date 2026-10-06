@@ -1,5 +1,7 @@
 """Figma domain models and schemas."""
 
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -34,3 +36,30 @@ class FigmaAssetExport(BaseModel):
     local_path: str
     format: str
     file_size_bytes: int
+
+
+class FigmaNodeLayout(BaseModel):
+    """Normalized auto-layout and geometry representation for a Figma node."""
+
+    id: str
+    name: str
+    type: str
+    layout_mode: Optional[str] = None  # HORIZONTAL, VERTICAL, NONE
+    primary_axis_align: Optional[str] = None
+    counter_axis_align: Optional[str] = None
+    padding: Dict[str, float] = Field(default_factory=dict)
+    item_spacing: float = 0.0
+    width: Optional[float] = None
+    height: Optional[float] = None
+    layout_grow: float = 0.0
+    layout_align: Optional[str] = None
+    children: List["FigmaNodeLayout"] = Field(default_factory=list)
+
+
+class FigmaDesignTokens(BaseModel):
+    """Extracted design tokens from a Figma node tree."""
+
+    colors: List[Dict[str, Any]] = Field(default_factory=list)
+    typography: List[Dict[str, Any]] = Field(default_factory=list)
+    radius: List[Dict[str, Any]] = Field(default_factory=list)
+    shadows: List[Dict[str, Any]] = Field(default_factory=list)
