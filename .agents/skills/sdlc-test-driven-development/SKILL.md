@@ -12,11 +12,30 @@ This skill defines the testing procedures required for every code change.
 ---
 
 ## 1. Test Organization
-- All test files reside under `tests/` with the prefix `test_*.py`.
-- Group tests logically by unit or scenario:
-  - `test_models.py`: Schema validation, serialization, edge cases.
-  - `test_runner.py`: Process spawning, timeout handling, CLI arg building.
-  - `test_orchestrator.py`: DAG resolution, cycle detection, failure isolation.
+
+All test files MUST reside under subdirectories within `tests/` with the prefix `test_*.py`. Test files must NEVER be placed directly in the root of `tests/`.
+
+### 1.1 Directory Structure
+- **`tests/unit/`**: Testing single units, pure functions, Pydantic models, schema validation, fast in-memory operations, and fully mocked dependencies.
+  - Examples: `test_models.py` (schemas, validation), `test_diff_parser.py` (pure string parsing).
+- **`tests/integration/`**: Multi-module orchestration, CLI commands, process spawning, Herdr socket interactions, filesystem operations, and end-to-end workflows.
+  - Examples: `test_runner.py` (process spawning, timeouts), `test_orchestrator.py` (DAG resolution, cycle detection, task dispatch).
+
+### 1.2 Test Category Decision Matrix
+| Characteristic | Unit Test (`tests/unit/`) | Integration Test (`tests/integration/`) |
+| :--- | :--- | :--- |
+| **Scope** | Single class, function, or data model | Multiple interacting modules, subsystem flows |
+| **Dependencies** | 100% mocked or pure in-memory | Real or mocked external processes, sockets, CLI |
+| **Speed** | Milliseconds (< 100ms per test) | Seconds (< 5s per test) |
+| **External I/O** | None (no subprocesses, no network sockets) | Subprocesses, file trees, multiplexer sockets |
+
+### 1.3 Tie-Breaking Rule for Hybrid Tests
+If a test contains both unit logic and multi-component or CLI interactions:
+- Classify the test as an **Integration Test** (`tests/integration/`).
+- Decouple isolated unit assertions into `tests/unit/` where feasible.
+
+### 1.4 Mandatory Test Category Declaration
+Every sub-agent and developer writing or modifying tests MUST explicitly declare the test category (`Unit Test` or `Integration Test`) and target directory (`tests/unit/` or `tests/integration/`) in their task reports and specifications.
 
 ---
 

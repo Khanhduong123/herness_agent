@@ -72,7 +72,7 @@ def test_install_ps1_scaffolding(tmp_path: Path) -> None:
     if not ps_executable:
         pytest.skip("PowerShell executable not found")
 
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
     install_script = repo_root / "install.ps1"
     assert install_script.exists()
 
