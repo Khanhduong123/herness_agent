@@ -90,14 +90,20 @@ Every Sub-Spec MUST detail at least 3-5 concrete edge cases and boundary conditi
 3. **Verification Method / Test Assertion**: Specific test check (e.g. `pytest.raises(FileNotFoundError)`, assert normalized path, mock timeout).
 
 ### 2.7. Test Case Specifications (`TestCaseSpec`)
-Concrete test scenarios must be defined before code implementation:
+Concrete test scenarios must be defined before code implementation. Every test case MUST specify:
+- **Test ID**: Unique identifier (e.g. `TC-01`).
+- **Test Category**: `Unit Test` | `Integration Test` (mandatory classification).
+- **Target Directory**: `tests/unit/` | `tests/integration/` (under no circumstances may test files be placed in the root of `tests/`).
+- **Scenario & Input/Output**: Scenario, input parameters, expected return values or exceptions.
+
+Test scenario types:
 1. **TC-01 (Happy Path):** Valid inputs returning exact expected outputs.
 2. **TC-02 (Boundary & Edge Cases):** Empty collections, null/None, empty strings, zero values, max thresholds.
 3. **TC-03 (Exception & Error Paths):** Invalid arguments raising expected exceptions (`pytest.raises`).
 4. **TC-04 (Regression Guard):** Validating that existing module features remain functional.
 
 ### 2.8. Exact Pytest & CLI Commands
-Every Sub-Spec MUST provide exact, copy-pasteable commands for the worker to run locally (e.g., `conda run -n pytorch pytest tests/test_foo.py`).
+Every Sub-Spec MUST provide exact, copy-pasteable commands targeting the specific test directory for the worker to run locally (e.g., `conda run -n pytorch pytest tests/unit/test_<name>.py` or `conda run -n pytorch pytest tests/integration/test_<name>.py`).
 
 ### 2.9. Verification & Failure Rollback
 - Maximum **3 iteration cycles** between Coder and Critics/Pytest.
@@ -178,16 +184,17 @@ Detailed bulleted breakdown of requirements and expected functional changes.
 ---
 
 ## 5. Test Case Specifications (QA Acceptance)
-| Test ID | Scenario | Input | Expected Output |
-| :--- | :--- | :--- | :--- |
-| **TC-01** | Happy path execution | `param="valid"` | Expected result |
-| **TC-02** | Empty input validation | `param=""` | Raises `ValueError` |
-| **TC-03** | Boundary condition handling | `param="edge"` | Handled cleanly |
+| Test ID | Category | Target Directory | Scenario | Input | Expected Output |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **TC-01** | Unit Test | `tests/unit/` | Happy path execution | `param="valid"` | Expected result |
+| **TC-02** | Unit Test | `tests/unit/` | Empty input validation | `param=""` | Raises `ValueError` |
+| **TC-03** | Integration Test | `tests/integration/` | Boundary condition handling | `param="edge"` | Handled cleanly |
 
 ---
 
 ## 6. Exact Pytest & CLI Commands
-- `conda run -n pytorch pytest tests/test_module.py`
+- `conda run -n pytorch pytest tests/unit/test_<module>.py`
+- `conda run -n pytorch pytest tests/integration/test_<flow>.py`
 - `conda run -n pytorch pytest tests/`
 
 ---
