@@ -106,7 +106,7 @@ def test_main_with_malformed_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_hooks_json_registration() -> None:
     """Verify that .agents/hooks.json exists and registers the hook."""
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
     hooks_file = repo_root / ".agents" / "hooks.json"
 
     assert hooks_file.exists(), f"Missing hooks config at {hooks_file}"
@@ -128,7 +128,7 @@ def test_hooks_json_registration() -> None:
 
 def test_subprocess_hook_execution() -> None:
     """Test executing the hook script directly via Python subprocess."""
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
     script_path = repo_root / ".agents" / "hooks" / "enforce_orchestrator.py"
     if not script_path.exists():
         script_path = repo_root / "src" / "harness_agent" / "hooks" / "enforce_orchestrator.py"
