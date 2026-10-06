@@ -292,10 +292,14 @@ To achieve fully autonomous and domain-specialized sub-agents across all SDLC ph
 
 #### 6.4.1. Skill & Domain Allocation Matrix
 
-The system strictly separates generic agent execution boundaries (**Role Anchors**) from domain knowledge (**Domain Skills**):
+The system strictly separates generic agent execution boundaries (**Role Anchors**) from domain knowledge (**Domain Skills**). To prevent context dilution, do not inject more than 2-3 domain skills per sub-agent:
 
 | SDLC Phase | Sub-Agent Role | Target Scope & Domain | Base Identity Anchor (`--system-prompt-file`) | Injected Domain Skills (`--skill-file` in `.agents/skills/`) |
 | :--- | :--- | :--- | :--- | :--- |
+| **Phase 0: Agile / Ceremony** | **Scrum Master / Agile Facilitator** | Sprint planning, backlog refinement, story slicing, impediment removal | `.agents/skills/researcher_worker.md` | `sdlc-scrum-master`<br/>`sdlc-planning-task-breakdown` |
+| **Phase 0: Agile / Ceremony** | **Daily Standup & Blocker Coordinator** | Standup updates, blockers resolution, timeline triage, daily priorities | `.agents/skills/researcher_worker.md` | `sdlc-daily-standup-planner` |
+| **Phase 0: Research & Spike** | **AI Paper & Scientific Researcher** | ML/AI research exploration, paper synthesis, citation retrieval, blueprints | `.agents/skills/researcher_worker.md` | `sdlc-ai-paper-researcher`<br/>`sdlc-research-to-subagent-plan` |
+| **Phase 0: Research & Spike** | **PoC & Spike Feasibility Evaluator** | Feasibility spikes, PoC decision gating, risk exploration vs production | `.agents/skills/researcher_worker.md` | `sdlc-proof-of-concept-criteria` |
 | **Phase 1: Planning** | **Architecture Planner** | System-wide blueprints, Task DAG construction, module decoupling | `.agents/skills/researcher_worker.md` | `sdlc-architecture-planner`<br/>`sdlc-planning-task-breakdown` |
 | **Phase 1: Planning** | **Contract Specifier** | Granular sub-specs, Pydantic v2 schemas, REST route definitions | `.agents/skills/researcher_worker.md` | `sdlc-subtask-specifier`<br/>`sdlc-api-interface-design` |
 | **Phase 2: Execution** | **Backend Coder** | FastAPI routes, database models/migrations, async logic, services | `.agents/skills/coder_worker.md` | `sdlc-api-interface-design`<br/>`sdlc-clean-code-standards`<br/>`sdlc-backend-engineering` *(when added)* |
@@ -304,30 +308,47 @@ The system strictly separates generic agent execution boundaries (**Role Anchors
 | **Phase 3: Quality Gate** | **Security Critic** | Secret leak scanning, injection vulnerabilities (SQLi, XSS), unsafe deserialization | `.agents/skills/critic_agent.md` | `sdlc-security-audit` |
 | **Phase 3: Quality Gate** | **Requirement Critic** | Verification of Git diff against original API contracts and acceptance criteria | `.agents/skills/critic_agent.md` | `sdlc-subtask-specifier`<br/>`sdlc-api-interface-design` |
 
-#### 6.4.2. Automated Skill Routing Protocol
+#### 6.4.2. Two-Tier Automated Skill Routing Protocol
 
-The Central Orchestrator MUST automatically bind domain skills based on the active task stage and target file paths:
+The Central Orchestrator MUST automatically bind domain skills using a deterministic two-tier resolution process:
 
-1. **PLANNING & SPECIFICATION:**
-   - **System/Architecture Design:** Bind `sdlc-architecture-planner` + `sdlc-planning-task-breakdown`.
-   - **API / Interface Contract Design:** Bind `sdlc-subtask-specifier` + `sdlc-api-interface-design`.
+1. **TIER 1: INTENT & LIFECYCLE CEREMONY MATCHING (Zero Workspace Mutation)**:
+   - Match user goal keywords directly to domain skill files before provisioning workspaces or inspecting paths:
+     - **Scrum / Sprint Planning / Backlog Refinement** (`scrum`, `sprint`, `backlog`, `ceremony`):
+       `->` Launch Agile Facilitator (`researcher_worker.md`) with `sdlc-scrum-master` + `sdlc-planning-task-breakdown`.
+     - **Daily Standup / Blocker Coordination** (`standup`, `daily`, `blocker`, `triage`):
+       `->` Launch Blocker Coordinator (`researcher_worker.md`) with `sdlc-daily-standup-planner`.
+     - **AI Paper & Scientific Research** (`paper`, `research paper`, `arxiv`, `scientific`, `literature`):
+       `->` Launch Paper Researcher (`researcher_worker.md`) with `sdlc-ai-paper-researcher` + `sdlc-research-to-subagent-plan`.
+     - **PoC & Spike Feasibility** (`poc`, `spike`, `proof of concept`, `feasibility`):
+       `->` Launch Spike Evaluator (`researcher_worker.md`) with `sdlc-proof-of-concept-criteria`.
+     - **System Architecture / DAG Design** (`architecture`, `system design`, `dag`, `decompose`):
+       `->` Launch Architecture Planner (`researcher_worker.md`) with `sdlc-architecture-planner` + `sdlc-planning-task-breakdown`.
+     - **API Interface Contract Spec** (`api design`, `contract`, `interface`, `sub-spec`):
+       `->` Launch Contract Specifier (`researcher_worker.md`) with `sdlc-subtask-specifier` + `sdlc-api-interface-design`.
 
-2. **EXECUTION (Target Path Detection):**
-   - **Path matches `src/api/`, `src/services/`, `src/models/`, `alembic/`:**
-     `->` Launch Coder with `coder_worker.md` + `sdlc-api-interface-design` + `sdlc-clean-code-standards`.
-   - **Path matches `src/ui/`, `components/`, `static/`:**
-     `->` Launch Coder with `coder_worker.md` + `sdlc-frontend-ui-engineering` + `sdlc-clean-code-standards`.
-   - **Path matches `tests/`:**
-     `->` Launch Tester with `tester_worker.md` + `sdlc-test-driven-development` + `sdlc-clean-code-standards`.
+2. **TIER 2: TARGET PATH MATCHING (Fallback for Implementation Tasks)**:
+   - When the user goal requests implementation, code editing, or testing in specific repository directories:
+     - **Path matches `src/api/`, `src/services/`, `src/models/`, `alembic/`:**
+       `->` Launch Backend Coder (`coder_worker.md` in isolated worktree) with `sdlc-api-interface-design` + `sdlc-clean-code-standards`.
+     - **Path matches `src/ui/`, `components/`, `static/`:**
+       `->` Launch Frontend Coder (`coder_worker.md` in isolated worktree) with `sdlc-frontend-ui-engineering` + `sdlc-clean-code-standards`.
+     - **Path matches `tests/`:**
+       `->` Launch QA Tester (`tester_worker.md` in isolated worktree) with `sdlc-test-driven-development` + `sdlc-clean-code-standards`.
 
-3. **ADVERSARIAL CRITIC GATE:**
+3. **AMBIGUOUS INTENT RESOLUTION RULE**:
+   - If a task request contains both ceremony/research keywords and code paths (e.g., *"implement scrum feature in src/api"*):
+     - **Primary Action Dictates the Tier:** Code-writing / modification commands execute under **Tier 2** (Coder Worker in Git worktree), whereas facilitation, planning, or evaluation execute under **Tier 1** (Researcher Worker, no code mutation in `src/`).
+
+4. **ADVERSARIAL CRITIC GATE**:
    - **Security:** Bind `sdlc-security-audit`.
    - **Contract & Requirements:** Bind `sdlc-api-interface-design` + `sdlc-subtask-specifier`.
 
 #### 6.4.3. Key Principles of Dynamic Injection
 
 - **Zero Prompt Drift:** By feeding the skill files at the CLI startup level (`--skill-file`), the sub-agent inherits domain rules (such as idempotency keys, error formatting, and discriminated unions) without relying on long, error-prone user prompts.
-- **Deterministic Dispatch:** The Orchestrator resolves task types based on repository paths, fully automating the choice between backend, frontend, and QA agents.
+- **Deterministic Dispatch:** The Orchestrator resolves task types based on user intent and repository paths, fully automating the choice between backend, frontend, research, and QA agents.
+- **Context Hygiene (Skill Cap):** Limit injected skills to at most 2–3 per sub-agent to prevent context saturation and conflicting instructions. Every `--skill-file` path MUST point to a valid file ending in `SKILL.md` (e.g. `.agents/skills/<skill-name>/SKILL.md`).
 
 ---
 
@@ -362,6 +383,36 @@ herdr agent start worker_<task_id> --kind agy --pane p_worker --cwd .worktrees/a
   --skill-file .agents/skills/sdlc-clean-code-standards/SKILL.md `
   --thinking-level low `
   --dangerously-skip-permissions
+
+# --- Case C: Dispatching a Scrum Planning / Agile Facilitator Sub-Agent ---
+herdr agent start scrum_planner_01 --kind agy --pane p_scrum --cwd . -- `
+  --system-prompt-file .agents/skills/researcher_worker.md `
+  --skill-file .agents/skills/sdlc-scrum-master/SKILL.md `
+  --skill-file .agents/skills/sdlc-planning-task-breakdown/SKILL.md `
+  --thinking-level low `
+  --dangerously-skip-permissions
+
+herdr agent prompt scrum_planner_01 @"
+[ROLE: Scrum Master / Agile Planner]
+Goal: Facilitate sprint planning and story breakdown for the upcoming sprint.
+Prohibitions: No direct code mutation in src/, no background loops, no ManageTask.
+Target: Formulate backlog stories with acceptance criteria -> output [WORKER_COMPLETED].
+"@
+
+# --- Case D: Dispatching an AI Paper & Scientific Researcher Sub-Agent ---
+herdr agent start researcher_paper_01 --kind agy --pane p_research --cwd . -- `
+  --system-prompt-file .agents/skills/researcher_worker.md `
+  --skill-file .agents/skills/sdlc-ai-paper-researcher/SKILL.md `
+  --skill-file .agents/skills/sdlc-research-to-subagent-plan/SKILL.md `
+  --thinking-level low `
+  --dangerously-skip-permissions
+
+herdr agent prompt researcher_paper_01 @"
+[ROLE: AI Paper Researcher]
+Goal: Investigate target literature, synthesize methodology, and produce an engineering blueprint.
+Prohibitions: No direct code mutation in src/, no background loops, no ManageTask.
+Target: Write methodology blueprint in .ai/blueprints/ -> output [WORKER_COMPLETED].
+"@
 
 # 5. Prompt Worker Agent with explicit Role Anchoring + sub-spec contract (PowerShell here-string)
 herdr agent prompt worker_<task_id> @"
