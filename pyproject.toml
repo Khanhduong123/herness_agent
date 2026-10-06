@@ -76,6 +76,10 @@ addopts = "-ra -q --import-mode=importlib"
 testpaths = [
     "tests",
 ]
+markers = [
+    "unit: Isolated unit tests",
+    "integration: Multi-component integration tests",
+]
 asyncio_mode = "auto"
 pythonpath = ["src"]
 
