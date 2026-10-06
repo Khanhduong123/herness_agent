@@ -1016,3 +1016,161 @@ class TestLifecycleCliCommands:
             "Target: Write unit tests with 100% pass rate -> output [WORKER_COMPLETED]"
         )
         assert payload == expected
+
+    def test_start_agent_with_skill_files(self, tmp_path: Path) -> None:
+        """Test start_agent appends multiple --skill-file flags after --."""
+        s1 = tmp_path / "skill1.md"
+        s2 = tmp_path / "skill2.md"
+        s1.write_text("# Skill 1", encoding="utf-8")
+        s2.write_text("# Skill 2", encoding="utf-8")
+
+        mock_proc = MagicMock(returncode=0, stdout="agent ready", stderr="")
+        with patch("subprocess.run", return_value=mock_proc) as mock_run:
+            ok, out = HerdrDispatcher.start_agent(
+                task_id="subtask_02",
+                pane_id="w1:p1",
+                kind="agy",
+                dangerously_skip_permissions=True,
+                effort="low",
+                skill_files=[str(s1), str(s2)],
+            )
+            assert ok is True
+            assert out == "agent ready"
+            mock_run.assert_called_once_with(
+                [
+                    "herdr",
+                    "agent",
+                    "start",
+                    "worker_subtask_02",
+                    "--kind",
+                    "agy",
+                    "--pane",
+                    "w1:p1",
+                    "--",
+                    "--dangerously-skip-permissions",
+                    "--effort",
+                    "low",
+                    "--skill-file",
+                    s1.as_posix(),
+                    "--skill-file",
+                    s2.as_posix(),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+    def test_start_agent_nonexistent_skill_file(self, tmp_path: Path) -> None:
+        """Test start_agent fast-fails when any skill_file does not exist."""
+        s1 = tmp_path / "skill1.md"
+        s1.write_text("# Skill 1", encoding="utf-8")
+        nonexistent = tmp_path / "missing_skill.md"
+
+        with patch("subprocess.run") as mock_run:
+            ok, msg = HerdrDispatcher.start_agent(
+                task_id="subtask_02",
+                pane_id="w1:p1",
+                skill_files=[str(s1), str(nonexistent)],
+            )
+            assert ok is False
+            assert f"Skill file not found: {nonexistent}" in msg
+            mock_run.assert_not_called()
+
+    def test_resolve_domain_skills_scrum_intent(self) -> None:
+        """resolve_domain_skills returns Scrum Master and Planning Breakdown skills."""
+        resolved = HerdrDispatcher.resolve_domain_skills("Plan sprint backlog for next iteration")
+        assert resolved == [
+            ".agents/skills/sdlc-scrum-master/SKILL.md",
+            ".agents/skills/sdlc-planning-task-breakdown/SKILL.md",
+        ]
+
+    def test_resolve_domain_skills_standup_intent(self) -> None:
+        """resolve_domain_skills returns Daily Standup Planner for standup/daily intent."""
+        resolved = HerdrDispatcher.resolve_domain_skills("Conduct daily standup checkin")
+        assert resolved == [
+            ".agents/skills/sdlc-daily-standup-planner/SKILL.md",
+        ]
+
+    def test_resolve_domain_skills_paper_research_intent(self) -> None:
+        """resolve_domain_skills returns AI Paper Researcher and Research-to-Plan skills."""
+        resolved = HerdrDispatcher.resolve_domain_skills("Research academic paper on diffusion")
+        assert resolved == [
+            ".agents/skills/sdlc-ai-paper-researcher/SKILL.md",
+            ".agents/skills/sdlc-research-to-subagent-plan/SKILL.md",
+        ]
+
+    def test_resolve_domain_skills_poc_and_spike_intent(self) -> None:
+        """resolve_domain_skills returns Proof of Concept criteria for poc or spike intent."""
+        resolved = HerdrDispatcher.resolve_domain_skills("Build a quick PoC spike")
+        assert resolved == [
+            ".agents/skills/sdlc-proof-of-concept-criteria/SKILL.md",
+        ]
+
+    def test_resolve_domain_skills_architecture_and_spec_intent(self) -> None:
+        """resolve_domain_skills returns architecture and task breakdown skills."""
+        resolved_arch = HerdrDispatcher.resolve_domain_skills("Design system architecture")
+        assert resolved_arch == [
+            ".agents/skills/sdlc-architecture-planner/SKILL.md",
+            ".agents/skills/sdlc-planning-task-breakdown/SKILL.md",
+        ]
+
+        resolved_spec = HerdrDispatcher.resolve_domain_skills("Define subtask contract spec")
+        assert resolved_spec == [
+            ".agents/skills/sdlc-subtask-specifier/SKILL.md",
+            ".agents/skills/sdlc-api-interface-design/SKILL.md",
+        ]
+
+    def test_resolve_domain_skills_target_paths(self) -> None:
+        """resolve_domain_skills matches API, UI, and test suite target paths."""
+        resolved_api = HerdrDispatcher.resolve_domain_skills(
+            "Implement endpoints",
+            target_paths=["src/api/routes.py", "src/models/user.py"],
+        )
+        assert resolved_api == [
+            ".agents/skills/sdlc-api-interface-design/SKILL.md",
+            ".agents/skills/sdlc-clean-code-standards/SKILL.md",
+        ]
+
+    def test_resolve_domain_skills_ui_paths(self) -> None:
+        """resolve_domain_skills matches UI target paths."""
+        resolved_ui = HerdrDispatcher.resolve_domain_skills(
+            "Build UI buttons",
+            target_paths=["src/ui/Button.jsx", "components/Header.jsx"],
+        )
+        assert resolved_ui == [
+            ".agents/skills/sdlc-frontend-ui-engineering/SKILL.md",
+            ".agents/skills/sdlc-clean-code-standards/SKILL.md",
+        ]
+
+    def test_resolve_domain_skills_test_paths(self) -> None:
+        """resolve_domain_skills matches test suite target paths."""
+        resolved_tests = HerdrDispatcher.resolve_domain_skills(
+            "Write pytest suite",
+            target_paths=["tests/test_api.py"],
+        )
+        assert resolved_tests == [
+            ".agents/skills/sdlc-test-driven-development/SKILL.md",
+            ".agents/skills/sdlc-clean-code-standards/SKILL.md",
+        ]
+
+    def test_resolve_domain_skills_empty_and_none_inputs(self) -> None:
+        """resolve_domain_skills handles empty strings and None safely without errors."""
+        assert HerdrDispatcher.resolve_domain_skills("") == []
+        assert HerdrDispatcher.resolve_domain_skills(None) == []  # type: ignore[arg-type]
+        assert HerdrDispatcher.resolve_domain_skills("general query", target_paths=None) == []
+
+    def test_resolve_domain_skills_deduplication_and_ordering(self) -> None:
+        """resolve_domain_skills preserves priority ordering and deduplicates repeated skills."""
+        # Combines architecture ceremony (Tier 1) and test target path (Tier 2)
+        resolved = HerdrDispatcher.resolve_domain_skills(
+            intent_or_task="Architecture system design and testing",
+            target_paths=["tests/test_core.py", "src/models/schema.py"],
+        )
+        expected = [
+            ".agents/skills/sdlc-architecture-planner/SKILL.md",
+            ".agents/skills/sdlc-planning-task-breakdown/SKILL.md",
+            ".agents/skills/sdlc-test-driven-development/SKILL.md",
+            ".agents/skills/sdlc-clean-code-standards/SKILL.md",
+            ".agents/skills/sdlc-api-interface-design/SKILL.md",
+        ]
+        assert resolved == expected
