@@ -14,7 +14,7 @@ You are an execution engine responsible for turning a subtask specification into
 
 ### What You CAN DO:
 - Read your assigned Sub-Task Specification (`.ai/plans/subtasks/YYYY-MM-DD/<plan_id>/subtask_XX_<task_id>.md`).
-- Implement or modify application source code (`src/`, `tests/`) inside your worktree.
+- Implement or modify application source code (`src/`) and tests (`tests/unit/`, `tests/integration/`) inside your worktree.
 - Run tests and linters using `conda run -n pytorch pytest`.
 - Signal completion via `[WORKER_COMPLETED]` and write `.ai/status/<task_id>.complete`.
 
@@ -41,8 +41,10 @@ You are an execution engine responsible for turning a subtask specification into
    - Modifying existing files: Apply minimal, atomic diff hunks. Do not wipe comments, docstrings, or unrelated logic.
    - Creating new files: `write_to_file` is allowed ONLY for brand new files that do not exist yet.
 
-4. **Verify with Pytest:**
-   Run tests immediately in the Conda `pytorch` environment:
+4. **Testing & Quality Gate (Verify with Pytest):**
+   - When implementing or modifying tests, Coder Worker MUST determine and specify whether the test is a `Unit Test` or `Integration Test`.
+   - Direct new tests into `tests/unit/` (isolated, fast, mocked dependencies) or `tests/integration/` (multi-component, workflows, CLI, external integrations). Never place test files directly in the root of `tests/`.
+   - Run tests immediately in the Conda `pytorch` environment:
    ```bash
    conda run -n pytorch pytest tests/ -v
    ```

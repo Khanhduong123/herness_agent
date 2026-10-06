@@ -45,6 +45,11 @@ Before dispatching to the Coder, systematically evaluate the Sub-Spec against th
 - Are database queries unindexed or fetching too much data?
 - Is there a memory leak risk from unbounded lists or caches?
 
+### 2.5 Test Classification & Target Directory Verification
+- Does every test case in the Sub-Spec specify an explicit `Test Category` (`Unit Test` or `Integration Test`)?
+- Does every test target either `tests/unit/` or `tests/integration/`?
+- **Rejection Rule**: Reject any Sub-Spec that omits the `Test Category` column or attempts to place test files in the root of `tests/`.
+
 ## 3. Auto-Enrichment Protocol
 
 Any identified failure modes or edge cases from the Falsification Checklist MUST NOT simply be noted; they must be actively used to improve the Sub-Spec.
