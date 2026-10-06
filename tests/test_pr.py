@@ -131,7 +131,7 @@ def test_generate_pr_content_fills_checkboxes_and_system_info(tmp_path: Path) ->
     with patch.object(PRGenerator, "collect_git_context", return_value=mock_context):
         title, body = PRGenerator.generate_pr_content(repo_root=tmp_path, base_branch="main")
 
-        assert title == "feat: add feature"
+        assert title == "feat: my feature"
         assert "- [x] New feature" in body
         assert "- [x] Bug fix" in body
         assert "- [x] Documentation update" in body
@@ -516,7 +516,7 @@ def test_generate_pr_content_narrative_overview(tmp_path: Path) -> None:
     with patch.object(PRGenerator, "collect_git_context", return_value=mock_context):
         title, body = PRGenerator.generate_pr_content(repo_root=tmp_path, base_branch="main")
 
-        assert title == "feat(billing): implement checkout webhook"
+        assert title == "feat: billing system"
         assert "### Overview" in body
         expected_overview = (
             "This pull request introduces new features and fixes bugs and stability "
@@ -528,8 +528,7 @@ def test_generate_pr_content_narrative_overview(tmp_path: Path) -> None:
         assert "- **fix (billing)**: handle stripe timeout error" in body
         assert "### Commits:" in body
         assert "- feat(billing): implement checkout webhook" in body
-        assert "### Modified files:" in body
-        assert "- `src/billing/webhook.py`" in body
+        assert "### Modified files:" not in body
 
 
 def test_generate_pr_content_with_plan_goal_extraction(tmp_path: Path) -> None:

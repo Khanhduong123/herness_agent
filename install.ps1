@@ -106,8 +106,20 @@ if (Test-Path $SourcePreCommit) {
     } else {
         $content = Get-Content $TargetPreCommit -Raw -ErrorAction SilentlyContinue
         if ($content -notmatch "no-commit-to-branch") {
-            Copy-Item -Path $SourcePreCommit -Destination $TargetPreCommit -Force
-            Write-Host "  [+] Updated .pre-commit-config.yaml with no-commit-to-branch protection" -ForegroundColor Green
+            $HookSnippet = @"
+
+
+  # Harness Agent Branch Protection Hook
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: no-commit-to-branch
+        args: [--branch, main, --branch, master, --branch, dev, --branch, develop]
+"@
+            Add-Content -Path $TargetPreCommit -Value $HookSnippet -Encoding utf8
+            Write-Host "  [+] Appended no-commit-to-branch hook to existing .pre-commit-config.yaml" -ForegroundColor Green
+        } else {
+            Write-Host "  [+] Existing .pre-commit-config.yaml preserved" -ForegroundColor Green
         }
     }
 }
@@ -207,24 +219,19 @@ foreach ($dir in $PlanDirs) {
 }
 Write-Host "  [+] Initialized planning directories (.runs/, .ai/plans/main/, .ai/plans/subtasks/, .ai/decisions/, .ai/context/)" -ForegroundColor Green
 
-# 6. Ensure .gitignore has critical AI orchestrator entries
+# 6. Ensure .gitignore has critical Harness Agent entries
 $TargetGitignore = Join-Path $ResolvedTarget ".gitignore"
 $GitignoreEntries = @(
-    "# AI Orchestrator & Plans",
+    "# Harness Agent & AI Orchestration",
     ".agents/",
     ".runs/",
     ".ai/",
+    ".worktrees/",
     "AGENTS.md"
 )
 if (-not (Test-Path $TargetGitignore)) {
-    $SourceGitignore = Join-Path $ScriptDir ".gitignore"
-    if (Test-Path $SourceGitignore) {
-        Copy-Item -Path $SourceGitignore -Destination $TargetGitignore -Force
-        Write-Host "  [+] Created .gitignore from template" -ForegroundColor Green
-    } else {
-        Set-Content -Path $TargetGitignore -Value ($GitignoreEntries -join "`n") -Encoding utf8
-        Write-Host "  [+] Created .gitignore" -ForegroundColor Green
-    }
+    Set-Content -Path $TargetGitignore -Value ($GitignoreEntries -join "`n") -Encoding utf8
+    Write-Host "  [+] Created .gitignore" -ForegroundColor Green
 } else {
     $currentGitignore = Get-Content $TargetGitignore -Raw -ErrorAction SilentlyContinue
     $toAppend = @()

@@ -77,8 +77,19 @@ if [ -f "$SCRIPT_DIR/.pre-commit-config.yaml" ]; then
         cp "$SCRIPT_DIR/.pre-commit-config.yaml" "$TARGET_DIR/.pre-commit-config.yaml"
         echo "  [✓] Created .pre-commit-config.yaml (Branch protection active)"
     elif ! grep -q "no-commit-to-branch" "$TARGET_DIR/.pre-commit-config.yaml" 2>/dev/null; then
-        cp "$SCRIPT_DIR/.pre-commit-config.yaml" "$TARGET_DIR/.pre-commit-config.yaml"
-        echo "  [✓] Updated .pre-commit-config.yaml with branch protection hook"
+        cat << 'EOF' >> "$TARGET_DIR/.pre-commit-config.yaml"
+
+
+  # Harness Agent Branch Protection Hook
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: no-commit-to-branch
+        args: [--branch, main, --branch, master, --branch, dev, --branch, develop]
+EOF
+        echo "  [✓] Appended no-commit-to-branch hook to existing .pre-commit-config.yaml"
+    else
+        echo "  [✓] Existing .pre-commit-config.yaml preserved"
     fi
 fi
 
@@ -143,21 +154,17 @@ echo "  [✓] Initialized planning directories (.runs/, .ai/plans/main/, .ai/pla
 # 6. Ensure .gitignore
 GITIGNORE_FILE="$TARGET_DIR/.gitignore"
 if [ ! -f "$GITIGNORE_FILE" ]; then
-    if [ -f "$SCRIPT_DIR/.gitignore" ]; then
-        cp "$SCRIPT_DIR/.gitignore" "$GITIGNORE_FILE"
-        echo "  [✓] Created .gitignore from template"
-    else
-        cat << 'EOF' > "$GITIGNORE_FILE"
-# AI Orchestrator & Plans
+    cat << 'EOF' > "$GITIGNORE_FILE"
+# Harness Agent & AI Orchestration
 .agents/
 .runs/
 .ai/
+.worktrees/
 AGENTS.md
 EOF
-        echo "  [✓] Created .gitignore"
-    fi
+    echo "  [✓] Created .gitignore"
 else
-    for entry in ".agents/" ".runs/" ".ai/" "AGENTS.md"; do
+    for entry in ".agents/" ".runs/" ".ai/" ".worktrees/" "AGENTS.md"; do
         if ! grep -qxF "$entry" "$GITIGNORE_FILE"; then
             echo "$entry" >> "$GITIGNORE_FILE"
         fi
