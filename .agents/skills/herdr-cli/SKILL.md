@@ -68,18 +68,31 @@ herdr pane close <pane_id>
 ## 3. Agent Lifecycle Management (`herdr agent`)
 
 ### 3.1. Start an Interactive Agent
-Launch an agent in a designated pane. Arguments after `--` are passed directly to the agent binary:
+Launch an agent in a designated pane. Use `--system-prompt-file` to preload the worker role skill/prompt file directly, and `--thinking-level low` for leaf workers. Arguments after `--` are passed directly to the agent binary:
 ```powershell
-herdr agent start worker_<task_id> --kind agy --pane <pane_id> --cwd .worktrees/agent/<task_id> -- --dangerously-skip-permissions
+herdr agent start worker_<task_id> `
+  --kind agy `
+  --pane <pane_id> `
+  --cwd .worktrees/agent/<task_id> `
+  --system-prompt-file .agents/skills/coder_worker.md `
+  --thinking-level low `
+  --dangerously-skip-permissions
 ```
+- `--system-prompt-file <path>`: Preloads system prompt file into the worker at launch.
 - Available kinds: `agy`, `codex`, `claude`, `gemini` (run `herdr agent` to check installed kinds).
 - Returns when the agent is detected and ready for input (settled `idle`).
 
 ### 3.2. Prompt the Agent
-Submit a task with Role Anchoring:
+Submit a task using the mandatory multi-line PowerShell here-string dispatch contract:
 ```powershell
-herdr agent prompt worker_<task_id> "[SYSTEM CONTEXT: You are a leaf implementation worker. You CANNOT plan or dispatch other agents. Only write code and run tests in your worktree.] Read .ai/plans/subtasks/YYYY-MM-DD/<plan_id>/subtask_01_<task_id>.md and implement with 100% pytest pass rate."
+herdr agent prompt worker_<task_id> @"
+[ROLE: Leaf Coder Worker]
+Spec: .ai/plans/subtasks/YYYY-MM-DD/<plan_id>/subtask_01_<task_id>.md
+Prohibitions: No ManageTask, no background loops, no full-file overwrite.
+Target: 100% pytest pass -> write .ai/status/<task_id>.complete -> output [WORKER_COMPLETED].
+"@
 ```
+*(Note: In PowerShell, the closing `"@` must be at column 0 without leading whitespace).*
 
 #### Synchronous / Waiting Prompt:
 ```powershell
@@ -151,10 +164,22 @@ git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<feature_nam
 Copy-Item -Path ".env*" -Destination ".worktrees/agent/<task_id>/" -ErrorAction SilentlyContinue
 
 # 3. Launch interactive Coder worker in the pane:
-herdr agent start worker_<task_id> --kind agy --pane <pane_id> --cwd .worktrees/agent/<task_id> -- --dangerously-skip-permissions
+herdr agent start worker_<task_id> `
+  --kind agy `
+  --pane <pane_id> `
+  --cwd .worktrees/agent/<task_id> `
+  --system-prompt-file .agents/skills/coder_worker.md `
+  --thinking-level low `
+  --dangerously-skip-permissions
 
-# 4. Dispatch task with Role Anchor:
-herdr agent prompt worker_<task_id> "[SYSTEM CONTEXT: You are a leaf implementation worker. You CANNOT plan or dispatch other agents. Only write code and run tests in your worktree.] Read .ai/plans/subtasks/YYYY-MM-DD/<plan_id>/subtask_01_<task_id>.md and implement with 100% pytest pass rate."
+# 4. Dispatch task with mandatory multi-line dispatch contract:
+herdr agent prompt worker_<task_id> @"
+[ROLE: Leaf Coder Worker]
+Spec: .ai/plans/subtasks/YYYY-MM-DD/<plan_id>/subtask_01_<task_id>.md
+Prohibitions: No ManageTask, no background loops, no full-file overwrite.
+Target: 100% pytest pass -> write .ai/status/<task_id>.complete -> output [WORKER_COMPLETED].
+"@
+# (Note: In PowerShell, the closing "@ must be at column 0 without leading whitespace)
 
 # 5. Monitor progress (active query, no stream-of-consciousness waiting):
 herdr agent wait worker_<task_id> --timeout 120000

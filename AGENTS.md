@@ -15,7 +15,7 @@
 >    - **Decompose & Plan**: Formulate a Task DAG with mandatory `plan_id` in `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` and Sub-Specs in `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[task_id].md`.
 >    - **Wait for User Approval**: Present the plan to the user before any workspace setup or worker launch.
 >    - **Setup Workspace**: Create an isolated git worktree (`git worktree add -b agent/<task_id> .worktrees/agent/<task_id>`).
->    - **Dispatch to Worker**: Launch a specialized Coder Agent interactively (`herdr agent start worker_[task_id] --kind agy --pane <pane> -- --dangerously-skip-permissions`) and prompt via `herdr agent prompt worker_[task_id] "..."`.
+>    - **Dispatch to Worker**: Launch a specialized Coder Agent interactively (`herdr agent start worker_[task_id] --kind agy --pane <pane> --cwd .worktrees/agent/<task_id> --system-prompt-file .agents/skills/coder_worker.md --thinking-level low --dangerously-skip-permissions`) and prompt via the multi-line dispatch contract template (`herdr agent prompt worker_[task_id] @"..."@`).
 >    - **Quality Gate & Critics**: Dispatch diffs in parallel to the 3 Adversarial Critics and verify 100% pytest pass rate.
 
 ---
@@ -43,18 +43,35 @@
 - **Mandatory Git Worktree Isolation:** Every subtask modifying code MUST run in an isolated Git Worktree managed via native `git worktree`, branching from the active feature branch:
   `git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<feature_name>`
 - **Worktree Environment Setup:** Environment configuration files (`.env`, `.env.test`, `.env.local`, `.env.example` if present) MUST be copied from the repository root into newly created git worktrees before workers run tests.
-- **Multiplexer Workspace Protocol:** All workers must be launched in explicit Herdr panes with low effort:
-  `herdr agent start worker_<task_id> --kind agy --pane <pane_id> --cwd .worktrees/agent/<task_id> -- --dangerously-skip-permissions --effort low`
-- **Socket/Prompt Communication:** Orchestrator communicates with workers strictly via Herdr socket and explicit prompts (`herdr agent prompt worker_<task_id> "..."`).
+- **Multiplexer Workspace Protocol:** All workers must be launched in explicit Herdr panes with low effort and preloaded system prompt:
+  ```bash
+  herdr agent start worker_<task_id> \
+    --kind agy \
+    --pane <pane_id> \
+    --cwd .worktrees/agent/<task_id> \
+    --system-prompt-file .agents/skills/coder_worker.md \
+    --thinking-level low \
+    --dangerously-skip-permissions
+  ```
+- **Socket/Prompt Communication & Dispatch Contract:** Orchestrator communicates with workers strictly via Herdr socket using the mandatory multi-line prompt payload template:
+  ```powershell
+  herdr agent prompt worker_<task_id> @"
+  [ROLE: Leaf Coder Worker]
+  Spec: .ai/plans/subtasks/<date>/<plan_id>/subtask_<id>.md
+  Prohibitions: No ManageTask, no background loops, no full-file overwrite.
+  Target: 100% pytest pass -> write .ai/status/<task_id>.complete -> output [WORKER_COMPLETED].
+  "@
+  ```
+  *(Note: In PowerShell here-strings, the closing `\"@` must be at the beginning of the line without leading whitespace).*
 - **Worker Background Task Lockout:** Spawning background tasks (`ManageTask`) or setting scheduling loops (`schedule`) is strictly forbidden for leaf workers. All execution must be synchronous with blocking wait.
 
 ### Tier 2: Role Isolation & Anti-Role-Drift
-- **Dedicated Role Prompts:** Never share the Orchestrator's `AGENTS.md` with Worker Agents. Every sub-agent role has its dedicated prompt/skill file:
+- **Dedicated Role Prompts:** Never share the Orchestrator's `AGENTS.md` with Worker Agents. Every sub-agent role has its dedicated prompt/skill file preloaded at startup via `--system-prompt-file`:
   - Coder Worker: `.agents/skills/coder_worker.md`
   - Adversarial Critic: `.agents/skills/critic_agent.md`
   - Tester Agent: `.agents/skills/tester_worker.md`
-- **Role Anchoring (Mandatory First Prompt Context):** Every prompt dispatched to a worker MUST begin with an explicit role anchor:
-  - Coder: `"[SYSTEM CONTEXT: You are a leaf implementation worker. You CANNOT plan or dispatch other agents. Only write code and run tests in your worktree. DO NOT use background tasks, ManageTask, or schedule polling. Execute all commands synchronously in blocking mode.]"`
+- **Role Anchoring & Dispatch Contract:** Every prompt dispatched to a worker MUST begin with an explicit role anchor and adhere to the multi-line dispatch contract:
+  - Coder: `[ROLE: Leaf Coder Worker]` or `"[SYSTEM CONTEXT: You are a leaf implementation worker. You CANNOT plan or dispatch other agents. Only write code and run tests in your worktree. DO NOT use background tasks, ManageTask, or schedule polling. Execute all commands synchronously in blocking mode.]"`
   - Critic: `"[SYSTEM CONTEXT: You are an Adversarial Critic Agent operating strictly in READ-ONLY mode. You CANNOT modify code or dispatch agents. You only evaluate git diffs and code against specifications.]"`
   - Tester: `"[SYSTEM CONTEXT: You are a QA & Tester Worker Agent. You CANNOT orchestrate or modify core application logic. You write unit/integration tests and verify test coverage in your worktree.]"`
 - **Strict Leaf Worker Boundaries:** Leaf workers are strictly execution engines; they cannot orchestrate, design architectures, or spawn sub-agents.
@@ -118,7 +135,7 @@ graph TD
 
 | Role | Identifier | Key Responsibilities |
 | :--- | :--- | :--- |
-| **Orchestrator** | `orchestrator` | • Receives the goal from the User.<br/>• Decomposes the goal into a Task DAG.<br/>• **CRITICAL RULE:** NEVER write or edit code files directly. Wait for approval, and create an isolated git worktree via native git (`git worktree add -b agent/<task_id> .worktrees/agent/<task_id>`).<br/>• **CRITICAL RULE (Mandatory Plan ID & Local Storage):** DO NOT create UI Artifacts. MUST explicitly write all plans directly to `.ai/plans/main/YYYY-MM-DD/` and `.ai/plans/subtasks/YYYY-MM-DD/` using standard file paths. Every plan MUST declare a unique `plan_id` (e.g., `plan_[feature_name]`). Master Task DAGs MUST be stored as `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` with YAML frontmatter containing `plan_id`. Individual Sub-Specs MUST be stored in dedicated plan folders with 2-digit zero-padded numbers: `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[task_id].md` referencing both `Plan ID: [plan_id]` and `Task ID: [task_id]`. This prevents file overwriting across multiple plans and guarantees clean numerical ordering.<br/>• **CRITICAL RULE (Mandatory Edge Cases & Boundary Conditions):** Every Master Plan and Sub-Spec MUST include an explicit **`## Edge Cases & Boundary Conditions`** section detailing at least 3-5 concrete edge cases (missing files, null/empty inputs, path separator differences, race conditions, permission errors) with handling logic and test assertions.<br/>• **CRITICAL RULE (Sub-Agent Domain Expertise):** Every sub-agent MUST be a dedicated domain expert focused exclusively on that 1 assigned task and MUST strictly adhere to system rules.<br/>• **CRITICAL RULE (FORBIDDEN TOOLS - No Hidden Background Subagents):** Calling `invoke_subagent` or `define_subagent` is strictly forbidden (spawns hidden background agents / 'agents ngầm'). All worker agents MUST be dispatched interactively via dedicated Herdr terminal panes.<br/>• **DO NOT run `agy` in the background**. Launch interactively (`herdr agent start worker_[task_id] --kind agy --pane <pane_id> -- --dangerously-skip-permissions --effort low`) and send prompts via `herdr agent prompt worker_[task_id] "..."`.<br/>• **MANDATORY Completion Contract & Timeout:** Must monitor worker execution. Worker signals completion by outputting `[WORKER_COMPLETED]` or writing `.ai/status/<task_id>.complete`. Orchestrator enforces a strict timeout ceiling (10–15 minutes max) to prevent deadlocks if the worker hangs or prompts for input. |
+| **Orchestrator** | `orchestrator` | • Receives the goal from the User.<br/>• Decomposes the goal into a Task DAG.<br/>• **CRITICAL RULE:** NEVER write or edit code files directly. Wait for approval, and create an isolated git worktree via native git (`git worktree add -b agent/<task_id> .worktrees/agent/<task_id>`).<br/>• **CRITICAL RULE (Mandatory Plan ID & Local Storage):** DO NOT create UI Artifacts. MUST explicitly write all plans directly to `.ai/plans/main/YYYY-MM-DD/` and `.ai/plans/subtasks/YYYY-MM-DD/` using standard file paths. Every plan MUST declare a unique `plan_id` (e.g., `plan_[feature_name]`). Master Task DAGs MUST be stored as `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` with YAML frontmatter containing `plan_id`. Individual Sub-Specs MUST be stored in dedicated plan folders with 2-digit zero-padded numbers: `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[task_id].md` referencing both `Plan ID: [plan_id]` and `Task ID: [task_id]`. This prevents file overwriting across multiple plans and guarantees clean numerical ordering.<br/>• **CRITICAL RULE (Mandatory Edge Cases & Boundary Conditions):** Every Master Plan and Sub-Spec MUST include an explicit **`## Edge Cases & Boundary Conditions`** section detailing at least 3-5 concrete edge cases (missing files, null/empty inputs, path separator differences, race conditions, permission errors) with handling logic and test assertions.<br/>• **CRITICAL RULE (Sub-Agent Domain Expertise):** Every sub-agent MUST be a dedicated domain expert focused exclusively on that 1 assigned task and MUST strictly adhere to system rules.<br/>• **CRITICAL RULE (FORBIDDEN TOOLS - No Hidden Background Subagents):** Calling `invoke_subagent` or `define_subagent` is strictly forbidden (spawns hidden background agents / 'agents ngầm'). All worker agents MUST be dispatched interactively via dedicated Herdr terminal panes.<br/>• **DO NOT run `agy` in the background**. Launch interactively (`herdr agent start worker_[task_id] --kind agy --pane <pane_id> --cwd .worktrees/agent/<task_id> --system-prompt-file .agents/skills/coder_worker.md --thinking-level low --dangerously-skip-permissions`) and send prompts via `herdr agent prompt worker_[task_id] @"..."@`.<br/>• **MANDATORY Completion Contract & Timeout:** Must monitor worker execution. Worker signals completion by outputting `[WORKER_COMPLETED]` or writing `.ai/status/<task_id>.complete`. Orchestrator enforces a strict timeout ceiling (10–15 minutes max) to prevent deadlocks if the worker hangs or prompts for input. |
 | **Researcher** | `researcher` | • Explores the codebase, dependencies, and available libraries.<br/>• Designs architectural blueprints before implementation begins. |
 | **Coder** | `coder`, `agent-backend`, etc. | • Implements feature code, strictly adhering to PEP 8, typing, and the provided spec.<br/>• **CRITICAL RULE ("Patch, Never Regenerate"):** For existing files, MUST NEVER rewrite or overwrite the entire file; MUST ONLY apply minimal diff hunks using patch tools (`apply_patch`, `replace_file_content`, `multi_replace_file_content`). Full-file overwrites on existing files are strictly tool-locked. For newly created files (new modules or tests), `write_to_file` is explicitly permitted.<br/>• **Domain Expert Rule:** The Orchestrator configures this sub-agent as a specialized domain expert (e.g., `agent-backend` for APIs) strictly dedicated to its 1 assigned subtask and compliant with all quality gates. |
 | **Tester** | `tester` | • Writes unit and integration tests using `pytest` and `pytest-asyncio`.<br/>• Validates a 100% pass rate before hand-off. |
@@ -282,10 +299,22 @@ git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<feature_nam
 Copy-Item -Path ".env*" -Destination ".worktrees/agent/<task_id>/" -ErrorAction SilentlyContinue
 
 # 4. Launch an interactive Coder Agent in a dedicated Herdr pane inside the worktree
-herdr agent start worker_<task_id> --kind agy --pane <pane_id> --cwd .worktrees/agent/<task_id> -- --dangerously-skip-permissions
+herdr agent start worker_<task_id> `
+  --kind agy `
+  --pane <pane_id> `
+  --cwd .worktrees/agent/<task_id> `
+  --system-prompt-file .agents/skills/coder_worker.md `
+  --thinking-level low `
+  --dangerously-skip-permissions
 
-# 5. Prompt Coder Agent with explicit Role Anchoring + sub-spec contract
-herdr agent prompt worker_<task_id> "[SYSTEM CONTEXT: You are a leaf implementation worker. You CANNOT plan or dispatch other agents. Only write code and run tests in your worktree.] Read .ai/plans/subtasks/YYYY-MM-DD/<plan_id>/subtask_01_<task_id>.md and implement with 100% pytest pass rate."
+# 5. Prompt Coder Agent with explicit Role Anchoring + sub-spec contract (PowerShell here-string)
+herdr agent prompt worker_<task_id> @"
+[ROLE: Leaf Coder Worker]
+Spec: .ai/plans/subtasks/<date>/<plan_id>/subtask_<id>.md
+Prohibitions: No ManageTask, no background loops, no full-file overwrite.
+Target: 100% pytest pass -> write .ai/status/<task_id>.complete -> output [WORKER_COMPLETED].
+"@
+# (Note: In PowerShell, the closing "@ must be at column 0 without leading whitespace)
 
 # 6. Active status polling or wait (anti-monologue: no commentary while waiting)
 herdr agent wait worker_<task_id> --timeout 120000
@@ -329,3 +358,4 @@ git branch -D agent/<task_id>
 - **Code, Docs, & Plans**: All generated plans, specs, code, and docs MUST be written in **English**.
 - **Chat**: Agents should communicate with the user in the user's preferred language (e.g., Vietnamese) when responding in the chat UI.
 - **ASCII Status Formatting vs. Markdown**: Use human-friendly emojis only in user-facing Markdown documentation; use token-efficient plain ASCII indicators (`[OK]`, `[ERROR]`, `[PASSED]`, `[FAILED]`, `[TASK_DONE]`) in code, logs, and CLI output.
+- **Exhaustive Context Invariance Rule**: The Orchestrator must provide the identical granular constraints, role anchors, and acceptance gates regardless of input language. Never summarize instructions into single-line prompts due to English brevity bias.
