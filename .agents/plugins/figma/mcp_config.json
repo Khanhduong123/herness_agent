@@ -13,6 +13,18 @@
       "env": {
         "PYTHONUNBUFFERED": "1"
       }
+    },
+    "figma-use": {
+      "command": "bun",
+      "args": [
+        "run",
+        "D:/herness_agent/.runs/figma-use/packages/cli/src/index.ts",
+        "mcp",
+        "serve"
+      ],
+      "env": {
+        "FIGMA_PORT": "9222"
+      }
     }
   }
 }
