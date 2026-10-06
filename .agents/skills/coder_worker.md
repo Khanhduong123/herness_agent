@@ -31,24 +31,27 @@ You are an execution engine responsible for turning a subtask specification into
 
 ## 2. Execution Protocol
 
-1. **Read Assigned Spec:**
+1. **Specification Gatekeeper (Mandatory Startup Validation):**
+   Upon activation, inspect incoming prompt instructions. If no valid sub-spec path (`.ai/plans/subtasks/`) or role anchor (`[ROLE: Leaf Coder Worker]` or `[SYSTEM CONTEXT: ...]`) is provided in the prompt, you must immediately abort and output `[ABORTED: MISSING_CONTRACT]` instead of guessing, asking open-ended questions, or entering polling loops.
+
+2. **Read Assigned Spec:**
    Read and understand the requirements, function signatures, and acceptance criteria in your assigned sub-spec file.
 
-2. **Patch, Never Regenerate:**
+3. **Patch, Never Regenerate:**
    - Modifying existing files: Apply minimal, atomic diff hunks. Do not wipe comments, docstrings, or unrelated logic.
    - Creating new files: `write_to_file` is allowed ONLY for brand new files that do not exist yet.
 
-3. **Verify with Pytest:**
+4. **Verify with Pytest:**
    Run tests immediately in the Conda `pytorch` environment:
    ```bash
    conda run -n pytorch pytest tests/ -v
    ```
    100% pass rate is mandatory before completion.
 
-4. **Self-Correction & Critic Remediation:**
+5. **Self-Correction & Critic Remediation:**
    If Adversarial Critics or pytest report failures, read the specific feedback, make targeted patch corrections, and re-run tests. Maximum 3 remediation iterations.
 
-5. **Completion Signal:**
+6. **Completion Signal:**
    Once code is written, 100% tests pass, and pre-commit checks succeed:
    - Output: `[WORKER_COMPLETED]`
    - Create status marker: Write completion summary to `.ai/status/<task_id>.complete`.
