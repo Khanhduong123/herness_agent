@@ -68,17 +68,35 @@ herdr pane close <pane_id>
 ## 3. Agent Lifecycle Management (`herdr agent`)
 
 ### 3.1. Start an Interactive Agent
-Launch an agent in a designated pane. Use `--system-prompt-file` to preload the worker role skill/prompt file directly, and `--thinking-level low` for leaf workers. Arguments after `--` are passed directly to the agent binary:
+Launch an agent in a designated pane. Use `--system-prompt-file` to preload the worker role skill/prompt file directly, `--thinking-level low` for leaf workers, and pass dynamic domain skills via one or multiple `--skill-file` flags after `--`:
 ```powershell
+# Starting a Coder Worker with injected domain skills:
 herdr agent start worker_<task_id> `
   --kind agy `
   --pane <pane_id> `
-  --cwd .worktrees/agent/<task_id> `
+  --cwd .worktrees/agent/<task_id> -- `
   --system-prompt-file .agents/skills/coder_worker.md `
+  --skill-file .agents/skills/sdlc-api-interface-design/SKILL.md `
+  --skill-file .agents/skills/sdlc-clean-code-standards/SKILL.md `
+  --thinking-level low `
+  --dangerously-skip-permissions
+
+# Starting a Ceremony / Research Sub-Agent (Scrum Master, Standup, AI Paper Researcher):
+herdr agent start scrum_planner_01 `
+  --kind agy `
+  --pane <pane_id> `
+  --cwd . -- `
+  --system-prompt-file .agents/skills/researcher_worker.md `
+  --skill-file .agents/skills/sdlc-scrum-master/SKILL.md `
+  --skill-file .agents/skills/sdlc-planning-task-breakdown/SKILL.md `
   --thinking-level low `
   --dangerously-skip-permissions
 ```
 - `--system-prompt-file <path>`: Preloads system prompt file into the worker at launch.
+- `--skill-file <path>`: Injects domain skills into the worker context at launch. Can be passed multiple times (max 2–3 skills to avoid context dilution). Paths must be valid relative/absolute paths ending in `SKILL.md`.
+- **Two-Tier Skill Routing**:
+  - **Tier 1 (Intent & Ceremony Matching)**: Ceremony and research tasks (`scrum`, `standup`, `paper research`, `poc`) route to `researcher_worker.md` with ceremony skills (e.g. `sdlc-scrum-master`, `sdlc-daily-standup-planner`, `sdlc-ai-paper-researcher`).
+  - **Tier 2 (Target Path Matching)**: Code implementation tasks route to `coder_worker.md` or `tester_worker.md` with implementation skills based on directory paths (`src/api/`, `src/ui/`, `tests/`).
 - Available kinds: `agy`, `codex`, `claude`, `gemini` (run `herdr agent` to check installed kinds).
 - Returns when the agent is detected and ready for input (settled `idle`).
 
@@ -163,14 +181,24 @@ git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<feature_nam
 # 2. Worktree Environment Setup (copy .env files if present):
 Copy-Item -Path ".env*" -Destination ".worktrees/agent/<task_id>/" -ErrorAction SilentlyContinue
 
-# 3. Launch interactive Coder worker in the pane:
+# 3. Launch interactive Coder worker in the pane with injected domain skills:
 herdr agent start worker_<task_id> `
   --kind agy `
   --pane <pane_id> `
-  --cwd .worktrees/agent/<task_id> `
+  --cwd .worktrees/agent/<task_id> -- `
   --system-prompt-file .agents/skills/coder_worker.md `
+  --skill-file .agents/skills/sdlc-api-interface-design/SKILL.md `
+  --skill-file .agents/skills/sdlc-clean-code-standards/SKILL.md `
   --thinking-level low `
   --dangerously-skip-permissions
+
+# (Optional: Dispatching a Ceremony / Research worker e.g. Scrum Master, AI Paper Researcher):
+# herdr agent start scrum_planner_01 --kind agy --pane <pane_id> --cwd . -- `
+#   --system-prompt-file .agents/skills/researcher_worker.md `
+#   --skill-file .agents/skills/sdlc-scrum-master/SKILL.md `
+#   --skill-file .agents/skills/sdlc-planning-task-breakdown/SKILL.md `
+#   --thinking-level low `
+#   --dangerously-skip-permissions
 
 # 4. Dispatch task with mandatory multi-line dispatch contract:
 herdr agent prompt worker_<task_id> @"

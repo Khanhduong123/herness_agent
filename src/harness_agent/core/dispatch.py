@@ -217,6 +217,7 @@ class HerdrDispatcher:
         effort: str = "low",
         system_prompt_file: Optional[str] = None,
         thinking_level: Optional[str] = None,
+        skill_files: Optional[List[str]] = None,
         executable: str = "herdr",
     ) -> Tuple[bool, str]:
         """Run 'herdr agent start worker_<task_id> --kind <kind> --pane <pane_id>'.
@@ -229,6 +230,7 @@ class HerdrDispatcher:
             effort: Model reasoning effort (default: 'low').
             system_prompt_file: Optional path to system prompt / skill file.
             thinking_level: Optional model thinking level (e.g. 'low', 'medium', 'high').
+            skill_files: Optional list of skill file paths to inject.
             executable: Herdr executable binary name or path.
 
         Returns:
@@ -238,6 +240,11 @@ class HerdrDispatcher:
             spf = Path(system_prompt_file)
             if not spf.exists():
                 return False, f"System prompt file not found: {system_prompt_file}"
+
+        if skill_files:
+            for sf in skill_files:
+                if not Path(sf).exists():
+                    return False, f"Skill file not found: {sf}"
 
         worker_name = cls.get_worker_name(task_id)
         cmd = [executable, "agent", "start", worker_name, "--kind", kind, "--pane", pane_id]
@@ -251,6 +258,9 @@ class HerdrDispatcher:
             agy_flags.append("--dangerously-skip-permissions")
         if effort:
             agy_flags.extend(["--effort", effort])
+        if skill_files:
+            for sf in skill_files:
+                agy_flags.extend(["--skill-file", Path(sf).as_posix()])
         if agy_flags:
             cmd.append("--")
             cmd.extend(agy_flags)
@@ -276,6 +286,102 @@ class HerdrDispatcher:
             return False, err
 
         return True, proc.stdout.strip()
+
+    @classmethod
+    def resolve_domain_skills(
+        cls,
+        intent_or_task: str,
+        target_paths: Optional[List[str]] = None,
+        repo_root: Optional[Path] = None,
+    ) -> List[str]:
+        """Resolve relevant domain skill files based on intent and target file paths.
+
+        Tier 1 (Intent & Ceremony Matching):
+          - scrum, sprint, backlog -> sdlc-scrum-master, sdlc-planning-task-breakdown
+          - standup, daily -> sdlc-daily-standup-planner
+          - paper, research -> sdlc-ai-paper-researcher, sdlc-research-to-subagent-plan
+          - poc, spike -> sdlc-proof-of-concept-criteria
+          - architecture, system design -> sdlc-architecture-planner, sdlc-planning-task-breakdown
+          - spec, contract -> sdlc-subtask-specifier, sdlc-api-interface-design
+
+        Tier 2 (Target Path Matching):
+          - src/api, src/services, src/models ->
+            sdlc-api-interface-design, sdlc-clean-code-standards
+          - src/ui, components, static -> sdlc-frontend-ui-engineering, sdlc-clean-code-standards
+          - tests/ -> sdlc-test-driven-development, sdlc-clean-code-standards
+
+        Args:
+            intent_or_task: Natural language intent or task description.
+            target_paths: Optional list of affected or target paths.
+            repo_root: Optional repository root path.
+
+        Returns:
+            List[str]: Deduplicated list of relative paths under .agents/skills/ in priority order.
+        """
+        skills_prefix = Path(".agents") / "skills"
+        resolved: List[str] = []
+
+        intent_lower = (intent_or_task or "").lower()
+
+        # Tier 1: Intent & Ceremony Matching
+        if any(kw in intent_lower for kw in ["scrum", "sprint", "backlog"]):
+            resolved.append((skills_prefix / "sdlc-scrum-master" / "SKILL.md").as_posix())
+            resolved.append(
+                (skills_prefix / "sdlc-planning-task-breakdown" / "SKILL.md").as_posix()
+            )
+
+        if any(kw in intent_lower for kw in ["standup", "daily"]):
+            resolved.append((skills_prefix / "sdlc-daily-standup-planner" / "SKILL.md").as_posix())
+
+        if any(kw in intent_lower for kw in ["paper", "research"]):
+            resolved.append((skills_prefix / "sdlc-ai-paper-researcher" / "SKILL.md").as_posix())
+            resolved.append(
+                (skills_prefix / "sdlc-research-to-subagent-plan" / "SKILL.md").as_posix()
+            )
+
+        if any(kw in intent_lower for kw in ["poc", "spike"]):
+            resolved.append(
+                (skills_prefix / "sdlc-proof-of-concept-criteria" / "SKILL.md").as_posix()
+            )
+
+        if any(kw in intent_lower for kw in ["architecture", "system design"]):
+            resolved.append((skills_prefix / "sdlc-architecture-planner" / "SKILL.md").as_posix())
+            resolved.append(
+                (skills_prefix / "sdlc-planning-task-breakdown" / "SKILL.md").as_posix()
+            )
+
+        if any(kw in intent_lower for kw in ["spec", "contract"]):
+            resolved.append((skills_prefix / "sdlc-subtask-specifier" / "SKILL.md").as_posix())
+            resolved.append((skills_prefix / "sdlc-api-interface-design" / "SKILL.md").as_posix())
+
+        # Tier 2: Target Path Matching
+        if target_paths:
+            for p in target_paths:
+                p_norm = Path(p).as_posix().lower()
+                if any(api_kw in p_norm for api_kw in ["src/api", "src/services", "src/models"]):
+                    resolved.append(
+                        (skills_prefix / "sdlc-api-interface-design" / "SKILL.md").as_posix()
+                    )
+                    resolved.append(
+                        (skills_prefix / "sdlc-clean-code-standards" / "SKILL.md").as_posix()
+                    )
+                if any(ui_kw in p_norm for ui_kw in ["src/ui", "components", "static"]):
+                    resolved.append(
+                        (skills_prefix / "sdlc-frontend-ui-engineering" / "SKILL.md").as_posix()
+                    )
+                    resolved.append(
+                        (skills_prefix / "sdlc-clean-code-standards" / "SKILL.md").as_posix()
+                    )
+                if "tests/" in p_norm or p_norm.startswith("tests") or "/tests" in p_norm:
+                    resolved.append(
+                        (skills_prefix / "sdlc-test-driven-development" / "SKILL.md").as_posix()
+                    )
+                    resolved.append(
+                        (skills_prefix / "sdlc-clean-code-standards" / "SKILL.md").as_posix()
+                    )
+
+        # Deduplicate while preserving order
+        return list(dict.fromkeys(resolved))
 
     @classmethod
     def format_dispatch_payload(
@@ -964,6 +1070,7 @@ setup_worktree_env = HerdrDispatcher.setup_worktree_env
 abort_task = HerdrDispatcher.abort_task
 dispatch_interactive_critics = HerdrDispatcher.dispatch_interactive_critics
 format_dispatch_payload = HerdrDispatcher.format_dispatch_payload
+resolve_domain_skills = HerdrDispatcher.resolve_domain_skills
 
 __all__ = [
     "HerdrDispatcher",
@@ -973,6 +1080,7 @@ __all__ = [
     "dispatch_interactive_critics",
     "format_dispatch_payload",
     "merge_worktree_to_feature",
+    "resolve_domain_skills",
     "setup_worktree_env",
     "stop_agent",
     "wait_for_task",
