@@ -30,7 +30,7 @@ Before writing any code or Sub-Spec, operate in read-only mode:
 - Map dependencies between components
 - Note risks and unknowns
 
-**Do NOT write code during planning.** The output is a master plan document saved to the project folder at `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` (with YAML frontmatter containing mandatory `plan_id` and `goal`), which outlines the sequence of Sub-Specs to generate.
+**Do NOT write code during planning.** The output is a master plan document saved to the project folder at `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` (with YAML frontmatter containing mandatory `plan_id` and `goal`), which outlines the sequence of Sub-Specs to generate. Always load and adhere to the master plan template located at `.agents/skills/sdlc-planning-task-breakdown/resources/main_plan_template.md`.
 
 ### Step 2: Identify Dependencies & Parallel Execution (DAG)
 
@@ -112,9 +112,11 @@ Each task defined in the plan should follow this structure. Later, each task wil
 **Estimated scope:** [Small: 1-2 files | Medium: 3-5 files | Large: 5+ files]
 ```
 
-### Step 6: Master Plan Output Structure & Edge Cases Section
+### Step 6: Master Plan Output Structure & Template Adherence
 
-The master plan document saved to `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` must include an explicit section detailing edge cases:
+The master plan document saved to `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` MUST strictly follow the structure defined in [`.agents/skills/sdlc-planning-task-breakdown/resources/main_plan_template.md`](resources/main_plan_template.md). This template standardizes frontmatter (`plan_id`), Executive Summary, Background, Objectives, Scope, Stakeholders, Requirements, Architecture, Task DAG, Edge Cases & Boundary Conditions, Risk Assessment, Success Metrics, and References.
+
+Specifically, it must include an explicit section detailing edge cases:
 
 ```markdown
 ## Edge Cases & Boundary Conditions
@@ -164,7 +166,7 @@ If a task is L or larger, it should be broken into smaller tasks.
 
 ## Output Files
 
-- **Plan document:** Save the implementation plan to the project folder at `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` (do not save it to a separate artifact folder).
+- **Plan document:** Save the implementation plan to the project folder at `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` (do not save it to a separate artifact folder), strictly following `.agents/skills/sdlc-planning-task-breakdown/resources/main_plan_template.md`.
 - **Next Step:** Once the plan is approved by the user, the Orchestrator will use `sdlc-subtask-specifier` to generate individual `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[task_id].md` files for each task in the plan.
 
 ## Verification
