@@ -126,12 +126,13 @@ Every Sub-Spec MUST provide exact, copy-pasteable commands targeting the specifi
 
 ### 2.11. Storage & Approval Workflow
 - **Storage**: The Orchestrator MUST save every generated `sub-spec` locally as a Markdown file in the project's dedicated plan directory: `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[feature].md` using 2-digit zero-padded numbers (`01`, `02`, ..., `10`). This isolates tasks per plan, prevents filename collisions across concurrent or sequential plans, and guarantees strictly numeric sorting.
+- **Template Adherence**: The generated sub-spec MUST strictly follow the template located at [`.agents/skills/sdlc-subtask-specifier/resources/subtask_template.md`](resources/subtask_template.md).
 - **User Approval**: After saving the file, the Orchestrator MUST ask the User for approval (e.g., *"Please review the sub-spec at `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[feature].md`"*).
 - **Execution**: The Orchestrator MUST NOT spawn the Sub-Agent until the User explicitly approves the Sub-Spec.
 
 ---
 
-## 3. Sub-Spec Markdown Template
+## 3. Sub-Spec Markdown Template (Reference: [resources/subtask_template.md](resources/subtask_template.md))
 
 ```markdown
 # SUB-SPEC: [Task-ID] - [Task Name]
