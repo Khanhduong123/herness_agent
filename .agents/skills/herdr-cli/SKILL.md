@@ -44,12 +44,16 @@ herdr pane split --current --direction down --cwd ".worktrees/agent/<task_id>" -
 > The command returns JSON output containing `.result.pane.pane_id` (e.g. `pane_123`).
 
 ### 2.3. Inspect Pane Status & Content
+
+> [!WARNING]
+> **Anti-Polling Rule:** The Orchestrator is **strictly forbidden** from continuously polling or dumping terminal buffers (`herdr pane read` / `herdr agent read`) during worker execution. This wastes context tokens and degrades agent reasoning. Reading the buffer is permitted **only once** upon a timeout or fatal error to inspect tracebacks.
+
 ```powershell
 # Query pane state:
 herdr pane get <pane_id>
 
-# Read recent terminal output (unwrapped lines):
-herdr pane read <pane_id> --source recent-unwrapped --lines 120
+# Read recent terminal output (strictly capped at 20 lines for diagnostics):
+herdr pane read <pane_id> --source recent-unwrapped --lines 20
 
 # Available read sources:
 # - visible: Currently rendered viewport
@@ -130,15 +134,20 @@ herdr agent read worker_<task_id> --source recent-unwrapped --lines 100
 ```
 
 ### 3.4. Wait on an Agent
+
+> [!IMPORTANT]
+> **Deterministic Blocking Wait (Zero LLM Tokens):**
+> Always use long timeouts (300s–600s) for agent execution turns. Short timeouts (30s–60s) trigger artificial timeout failures and panic polling loops. `harness-agent wait` blocks in local Python while checking `.ai/status/<task_id>.complete`, consuming zero LLM tokens.
+
 ```powershell
-# Wait until idle or done (default settled state):
-herdr agent wait worker_<task_id> --timeout 120000
+# Primary: Blocking wait via harness-agent CLI (detects completion flag automatically):
+conda run -n pytorch harness-agent wait <task_id> --timeout 600
 
-# Wait for a specific state (e.g. blocked, waiting for input):
-herdr agent wait worker_<task_id> --until blocked --timeout 60000
+# Alternative: Socket-level wait via Herdr (300s):
+herdr agent wait worker_<task_id> --timeout 300000
 
-# Blocking wait via harness-agent CLI:
-conda run -n pytorch harness-agent wait worker_<task_id> --timeout 120
+# Wait for a specific state if debugging (e.g. blocked, waiting for input):
+herdr agent wait worker_<task_id> --until blocked --timeout 300000
 ```
 
 ### 3.5. Send Interactive Keystrokes
@@ -209,10 +218,17 @@ Target: 100% pytest pass -> write .ai/status/<task_id>.complete -> output [WORKE
 "@
 # (Note: In PowerShell, the closing "@ must be at column 0 without leading whitespace)
 
-# 5. Monitor progress (active query, no stream-of-consciousness waiting):
-herdr agent wait worker_<task_id> --timeout 120000
-# Or inspect output:
-herdr agent read worker_<task_id> --source recent-unwrapped --lines 60
+# 5. Monitor progress (deterministic blocking wait, zero token consumption):
+# Primary: Blocking wait via harness-agent CLI (detects .ai/status/<task_id>.complete automatically):
+conda run -n pytorch harness-agent wait <task_id> --timeout 600
+# Alternative: Herdr agent wait (300s):
+herdr agent wait worker_<task_id> --timeout 300000
+
+# Confirm completion flag file exists:
+Test-Path ".ai/status/<task_id>.complete"
+
+# Single diagnostic read ONLY on timeout / failure (strictly capped at 20 lines):
+herdr agent read worker_<task_id> --source recent-unwrapped --lines 20
 
 # 6. Success Flow: Merge back, cleanup pane first, full regression, and open PR:
 git merge --no-ff agent/<task_id>

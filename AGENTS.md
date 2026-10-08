@@ -63,7 +63,7 @@
   "@
   ```
   *(Note: In PowerShell here-strings, the closing `\"@` must be at the beginning of the line without leading whitespace).*
-- **Worker Background Task Lockout:** Spawning background tasks (`ManageTask`) or setting scheduling loops (`schedule`) is strictly forbidden for leaf workers. All execution must be synchronous with blocking wait.
+- **Background Task & Polling Lockout (Both Worker & Orchestrator):** Spawning background tasks (`ManageTask`) or setting scheduling loops (`schedule`) is strictly forbidden for leaf workers and Orchestrators tracking workers. Orchestrator must NEVER invoke `ManageTask` to monitor worker processes; all worker waits must be synchronous and blocking.
 
 ### Tier 2: Role Isolation & Anti-Role-Drift
 - **Dedicated Role Prompts:** Never share the Orchestrator's `AGENTS.md` with Worker Agents. Every sub-agent role has its dedicated prompt/skill file preloaded at startup via `--system-prompt-file`:
@@ -81,13 +81,19 @@
 - **Worker Thinking Budget & Task Lock:** Coder Workers are locked to synchronous blocking commands (`WaitMsBeforeAsync=10000ms`, direct `pytest` execution) with capped reasoning effort (`--effort low`) to prevent token burn and spinlocks.
 
 ### Tier 3: Anti-Spinlock, Timeout & Loop Truncation
-- **Anti-Deadlock & Passive Waiting Ban:** DO NOT emit stream-of-consciousness waiting loops (e.g., "Let's wait for notification..."). The Orchestrator must actively query pane status.
-- **Anti-Monologue & Stream-of-Consciousness Ban:** Strictly ban roleplaying or outputting internal monologues during waiting states (e.g., "I am currently in a state of watchful waiting..."). During asynchronous execution, agents must either invoke a blocking tool (like `herdr agent wait` or `harness-agent wait`) or stop calling tools immediately without emitting commentary.
-- **Hard Timeout Ceiling:** Enforce a hard timeout ceiling (60s–120s per socket/pane poll, 10–15 minutes total subtask max). If a worker is non-responsive or hangs, raise a `TimeoutError` instead of waiting indefinitely.
+- **Strict Ban on Repetitive Pane Reading & Polling Loops:** The Orchestrator is **STRICTLY FORBIDDEN** from continuously calling `herdr pane read`, `herdr agent read`, or `ManageTask(status...)` while a worker is coding. Polling the terminal buffer floods the context window with thousands of redundant tokens and degrades reasoning.
+- **Deterministic Blocking Wait (Zero Tokens):** All worker waits must be executed as blocking, single-command invocations:
+  - Primary: `conda run -n pytorch harness-agent wait <task_id> --timeout 600`
+  - Socket Alternative: `herdr agent wait worker_<task_id> --timeout 300000`
+- **Hard Timeout Ceiling (300s–600s Default):** Set default wait timeouts to 300s–600s (5–10 minutes) per subtask turn. Subtasks requiring deep reasoning, code generation, and test execution take minutes, not seconds; short timeouts (30s–60s) induce artificial timeout failures and panic loops.
+- **Single-Read-On-Timeout Policy (Max 20 Lines):** Reading terminal buffers during execution is prohibited. ONLY if a blocking wait times out or raises an error, the Orchestrator may execute exactly ONE diagnostic read capped at 20 lines:
+  `herdr agent read worker_<task_id> --source recent-unwrapped --lines 20`
+- **Authoritative File-Based Completion Signal:** The presence of `.ai/status/<task_id>.complete` is the sole authoritative trigger to resume orchestration. Scraping terminal buffers for arbitrary string markers is strictly forbidden.
+- **Anti-Monologue & Passive Waiting Ban:** Agents must never roleplay or output internal monologues during waiting states (e.g., "I am currently watching the terminal..."). Use blocking CLI commands and stop tool execution cleanly.
 - **Loop Truncation (Max 3 Rejection Cycles):** Maximum **3 iteration loops** between Coder and Critics/Pytest on any single subtask. If defects persist after 3 remediation cycles, the Orchestrator MUST abort immediately and escalate to the human User with complete error and critic traces.
 - **Rollback & Abort Protocol:** When a subtask times out or fails 3 consecutive Critic cycles:
   1. Dump diagnostic git diff and error traceback to `.ai/failures/<task_id>_<timestamp>.log`.
-  2. Terminate the Herdr worker pane / process.
+  2. Terminate the Herdr worker pane / process (`herdr pane close <pane_id>`).
   3. Remove the abandoned worktree (`git worktree remove --force .worktrees/agent/<task_id>`) and delete the subtask branch (`git branch -D agent/<task_id>`).
   4. Escalate to the human User with the failure log path for intervention.
 
@@ -430,10 +436,17 @@ Instructions: Read assigned spec. Implement using Pydantic v2 schemas and standa
 "@
 # (Note: In PowerShell, the closing "@ must be at column 0 without leading whitespace)
 
-# 6. Active status polling or wait (anti-monologue: no commentary while waiting)
-herdr agent wait worker_<task_id> --timeout 120000
-# Or inspect output:
-herdr agent read worker_<task_id>
+# 6. Deterministic blocking wait (300s-600s, zero LLM tokens, no repetitive pane reads, no ManageTask background polling)
+# Primary: Blocking wait via harness-agent CLI (detects .ai/status/<task_id>.complete automatically):
+conda run -n pytorch harness-agent wait <task_id> --timeout 600
+# Alternative: Herdr agent wait (300s):
+herdr agent wait worker_<task_id> --timeout 300000
+
+# Confirm completion flag file exists:
+Test-Path ".ai/status/<task_id>.complete"
+
+# Single diagnostic read ONLY on timeout / failure (strictly capped at 20 lines):
+herdr agent read worker_<task_id> --source recent-unwrapped --lines 20
 
 # 7. Execute automated Adversarial Critics Gate
 conda run -n pytorch harness-agent review --base main
@@ -470,6 +483,6 @@ git branch -D agent/<task_id>
 ## 8. Language & Communication Standards
 
 - **Code, Docs, & Plans**: All generated plans, specs, code, and docs MUST be written in **English**.
-- **Chat**: Agents should communicate with the user in the user's preferred language (e.g., Vietnamese) when responding in the chat UI.
+- **Chat**: Agents should communicate with the user in the user's preferred language (e.g., English) when responding in the chat UI.
 - **ASCII Status Formatting vs. Markdown**: Use human-friendly emojis only in user-facing Markdown documentation; use token-efficient plain ASCII indicators (`[OK]`, `[ERROR]`, `[PASSED]`, `[FAILED]`, `[TASK_DONE]`) in code, logs, and CLI output.
 - **Exhaustive Context Invariance Rule**: The Orchestrator must provide the identical granular constraints, role anchors, and acceptance gates regardless of input language. Never summarize instructions into single-line prompts due to English brevity bias.
