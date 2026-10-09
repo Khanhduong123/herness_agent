@@ -138,3 +138,127 @@ def test_token_logger_compute_summary(tmp_path: Path):
     assert summary["total_tokens"] == 4500
     assert summary["total_cost_usd"] > 0
     assert summary["estimated_savings_usd"] > 0
+
+
+def test_extract_stream_data_nested_step_update_and_cache_read_tokens():
+    """TC-01: Verify nested step_update usage parsing and cache_read_tokens extraction."""
+    from harness_agent.core.runner import AgyRunner
+
+    runner = AgyRunner()
+    token_usage = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cached_tokens": 0,
+    }
+    event = {
+        "event": "step_update",
+        "step_update": {
+            "usage": {
+                "input_tokens": 2860,
+                "output_tokens": 12,
+                "cache_read_tokens": 16518,
+            }
+        },
+    }
+
+    runner._extract_stream_data(
+        event=event,
+        text_pieces=[],
+        tool_calls=[],
+        token_usage=token_usage,
+    )
+
+    assert token_usage["prompt_tokens"] == 2860
+    assert token_usage["completion_tokens"] == 12
+    assert token_usage["cached_tokens"] == 16518
+
+
+def test_extract_stream_data_nested_result_usage():
+    """TC-02: Verify nested result usage parsing."""
+    from harness_agent.core.runner import AgyRunner
+
+    runner = AgyRunner()
+    token_usage = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cached_tokens": 0,
+    }
+    event = {
+        "event": "result",
+        "result": {
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 50,
+            }
+        },
+    }
+
+    runner._extract_stream_data(
+        event=event,
+        text_pieces=[],
+        tool_calls=[],
+        token_usage=token_usage,
+    )
+
+    assert token_usage["prompt_tokens"] == 100
+    assert token_usage["completion_tokens"] == 50
+    assert token_usage["cached_tokens"] == 0
+
+
+def test_extract_stream_data_edge_cases():
+    """Verify edge cases: missing usage, non-integer values, accumulation max."""
+    from harness_agent.core.runner import AgyRunner
+
+    runner = AgyRunner()
+    token_usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "cached_tokens": 2,
+    }
+
+    # Missing usage - should not fail or decrease
+    runner._extract_stream_data(
+        event={"event": "ping"},
+        text_pieces=[],
+        tool_calls=[],
+        token_usage=token_usage,
+    )
+    assert token_usage["prompt_tokens"] == 10
+
+    # Non-integer values in usage
+    invalid_event = {
+        "usage": {
+            "prompt_tokens": "invalid_num",
+            "completion_tokens": None,
+            "cache_read_tokens": "not_an_int",
+        }
+    }
+    runner._extract_stream_data(
+        event=invalid_event,
+        text_pieces=[],
+        tool_calls=[],
+        token_usage=token_usage,
+    )
+    assert token_usage["prompt_tokens"] == 10
+    assert token_usage["completion_tokens"] == 5
+    assert token_usage["cached_tokens"] == 2
+
+    # Multiple events update to maximum observed
+    higher_event = {
+        "step_update": {
+            "token_usage": {
+                "input_tokens": 500,
+                "output_tokens": 300,
+                "cache_read_tokens": 150,
+            }
+        }
+    }
+    runner._extract_stream_data(
+        event=higher_event,
+        text_pieces=[],
+        tool_calls=[],
+        token_usage=token_usage,
+    )
+    assert token_usage["prompt_tokens"] == 500
+    assert token_usage["completion_tokens"] == 300
+    assert token_usage["cached_tokens"] == 150
