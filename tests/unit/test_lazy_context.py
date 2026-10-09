@@ -396,8 +396,16 @@ def test_real_repo_subtask_plan_resolution():
     assert "subtask_03_agents_md_skills" in content or "subtask_3_agents_md_skills" in content
 
 
-def test_real_repo_legacy_subtask_plan_fallback():
-    """Verify that orchestrator falls back to actual repository legacy .ai/plan/ for old tasks."""
+def test_real_repo_legacy_subtask_plan_fallback(tmp_path):
+    """Verify that orchestrator falls back to legacy .ai/plan/ for old tasks."""
+    legacy_dir = tmp_path / ".ai" / "plan"
+    legacy_dir.mkdir(parents=True)
+    plan_file = legacy_dir / "subtask_03_lazy_context.md"
+    plan_file.write_text(
+        "# Sub-Spec: Lazy Context Loading\n\nPrevent context rot and keep context lean.",
+        encoding="utf-8",
+    )
+
     orchestrator = AgentOrchestrator()
     subtask = SubTask(
         id="subtask_3_lazy_context",
@@ -406,11 +414,11 @@ def test_real_repo_legacy_subtask_plan_fallback():
         instruction="Implement lazy context loading",
     )
 
-    resolved = orchestrator.resolve_subtask_plan_file(subtask)
+    resolved = orchestrator.resolve_subtask_plan_file(subtask, workspace_dir=str(tmp_path))
     assert resolved is not None
     assert "subtask_03_lazy_context.md" in resolved or "subtask_3_lazy_context.md" in resolved
 
-    content = orchestrator.read_subtask_plan(subtask)
+    content = orchestrator.read_subtask_plan(subtask, workspace_dir=str(tmp_path))
     assert content is not None
     assert "# Sub-Spec: Lazy Context Loading" in content
     assert "Prevent context rot" in content
