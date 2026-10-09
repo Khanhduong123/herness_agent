@@ -227,6 +227,11 @@ class RunResult(BaseModel):
     tool_calls: List[ToolCallRecord] = Field(default_factory=list)
     check_results: Dict[str, bool] = Field(default_factory=dict)
     error_message: Optional[str] = None
+    prompt_tokens: int = Field(default=0, description="Input prompt tokens consumed")
+    completion_tokens: int = Field(default=0, description="Output completion tokens generated")
+    cached_tokens: int = Field(default=0, description="Cached tokens read from context")
+    total_tokens: int = Field(default=0, description="Total tokens consumed (prompt + completion)")
+    estimated_cost_usd: float = Field(default=0.0, description="Estimated total run cost in USD")
     critic_review: Optional[AggregatedCriticReview] = None
 
 
@@ -239,6 +244,11 @@ class EvalReport(BaseModel):
     failed_tasks: int
     duration_seconds: float
     pass_rate: float
+    total_prompt_tokens: int = Field(default=0, description="Aggregated prompt tokens")
+    total_completion_tokens: int = Field(default=0, description="Aggregated completion tokens")
+    total_cached_tokens: int = Field(default=0, description="Aggregated cached tokens")
+    total_tokens: int = Field(default=0, description="Aggregated total tokens")
+    total_cost_usd: float = Field(default=0.0, description="Aggregated cost in USD")
     results: List[RunResult] = Field(default_factory=list)
 
 

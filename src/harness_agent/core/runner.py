@@ -11,6 +11,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from harness_agent.core.models import AgyConfig, RunResult, Task, ToolCallRecord
+from harness_agent.core.token_logger import ModelPricing, TokenLogger
 
 STATIC_PREFIX = (
     "DO NOT output decorative emojis, pictographs, or icons such as "
@@ -140,6 +141,11 @@ class AgyRunner:
         events: List[Dict[str, Any]] = []
         tool_calls: List[ToolCallRecord] = []
         collected_text_pieces: List[str] = []
+        token_usage: Dict[str, int] = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cached_tokens": 0,
+        }
         error_message: Optional[str] = None
         exit_code = -1
         stderr_output = ""
@@ -171,7 +177,9 @@ class AgyRunner:
                         try:
                             event = json.loads(line)
                             events.append(event)
-                            self._extract_stream_data(event, collected_text_pieces, tool_calls)
+                            self._extract_stream_data(
+                                event, collected_text_pieces, tool_calls, token_usage
+                            )
                         except json.JSONDecodeError:
                             collected_text_pieces.append(line)
                 else:
@@ -191,7 +199,19 @@ class AgyRunner:
         final_text = "".join(collected_text_pieces).strip()
         success = (exit_code == 0) and (error_message is None)
 
-        return RunResult(
+        prompt_tokens = token_usage["prompt_tokens"]
+        completion_tokens = token_usage["completion_tokens"]
+        cached_tokens = token_usage["cached_tokens"]
+        total_tokens = prompt_tokens + completion_tokens
+        model_name = self.config.model or "default"
+        estimated_cost = ModelPricing.calculate_cost(
+            model=model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
+        )
+
+        result = RunResult(
             task_id=task.id,
             success=success,
             exit_code=exit_code,
@@ -201,15 +221,32 @@ class AgyRunner:
             raw_events=events,
             tool_calls=tool_calls,
             error_message=error_message,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
+            total_tokens=total_tokens,
+            estimated_cost_usd=estimated_cost,
         )
+
+        try:
+            TokenLogger.log_run(
+                result=result,
+                role="coder",
+                model=model_name,
+            )
+        except Exception:
+            pass
+
+        return result
 
     def _extract_stream_data(
         self,
         event: Dict[str, Any],
         text_pieces: List[str],
         tool_calls: List[ToolCallRecord],
+        token_usage: Optional[Dict[str, int]] = None,
     ) -> None:
-        """Helper to extract text and tool calls from stream-json events."""
+        """Helper to extract text, tool calls, and tokens from stream-json events."""
         event_type = event.get("type") or event.get("event")
         # Standard Antigravity / Gemini stream event structure
         if event_type == "text" or "text" in event:
@@ -230,3 +267,34 @@ class AgyRunner:
                         output=tc.get("output"),
                     )
                 )
+
+        # Extract token usage metrics if present
+        if token_usage is not None:
+            usage = (
+                event.get("usage")
+                or event.get("token_usage")
+                or event.get("tokens")
+                or (event if event_type in ("usage", "token_usage", "metrics") else None)
+            )
+            if isinstance(usage, dict):
+                pt = (
+                    usage.get("prompt_tokens")
+                    or usage.get("input_tokens")
+                    or usage.get("prompt_token_count")
+                    or 0
+                )
+                ct = (
+                    usage.get("completion_tokens")
+                    or usage.get("output_tokens")
+                    or usage.get("candidates_token_count")
+                    or 0
+                )
+                cached = (
+                    usage.get("cached_tokens")
+                    or usage.get("cached_content_token_count")
+                    or usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
+                    or 0
+                )
+                token_usage["prompt_tokens"] = max(token_usage["prompt_tokens"], int(pt))
+                token_usage["completion_tokens"] = max(token_usage["completion_tokens"], int(ct))
+                token_usage["cached_tokens"] = max(token_usage["cached_tokens"], int(cached))
