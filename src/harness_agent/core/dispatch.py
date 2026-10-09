@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+from harness_agent.core.models import ROLE_TOOL_ALLOWLIST, AgentRole
+
+logger = logging.getLogger(__name__)
 
 
 class HerdrDispatcher:
@@ -1060,6 +1065,59 @@ class HerdrDispatcher:
         return True, f"Task {task_id} aborted. Failure log archived to {log_file}"
 
 
+def filter_tools_for_role(
+    all_tools: List[Dict[str, Any]],
+    role: AgentRole,
+) -> List[Dict[str, Any]]:
+    """Filters tool declarations based on assigned agent role.
+
+    Args:
+        all_tools: Complete list of tool schemas.
+        role: The target agent role.
+
+    Returns:
+        Pruned list of tools relevant exclusively to the role.
+    """
+    if not all_tools:
+        return []
+
+    # Safe fallback if unknown role or not in allowlist
+    allowlist = ROLE_TOOL_ALLOWLIST.get(role)
+    if allowlist is None:
+        try:
+            matched_role = AgentRole(role)
+            allowlist = ROLE_TOOL_ALLOWLIST.get(matched_role)
+        except Exception:
+            allowlist = None
+
+    if allowlist is None:
+        # Fallback to safe default toolset (read-only tools)
+        logger.warning(
+            "Unknown role '%s' encountered during tool filtering. Using safe default.", role
+        )
+        allowlist = ROLE_TOOL_ALLOWLIST[AgentRole.REVIEWER]
+
+    filtered_tools: List[Dict[str, Any]] = []
+    for tool_schema in all_tools:
+        if not isinstance(tool_schema, dict):
+            logger.warning("Skipping non-dict tool schema: %s", type(tool_schema))
+            continue
+
+        tool_name = (
+            tool_schema.get("name")
+            or tool_schema.get("tool_name")
+            or tool_schema.get("function", {}).get("name")
+        )
+        if not tool_name or not isinstance(tool_name, str):
+            logger.warning("Missing or invalid tool name in schema: %s", tool_schema)
+            continue
+
+        if tool_name in allowlist:
+            filtered_tools.append(tool_schema)
+
+    return filtered_tools
+
+
 # Module-level aliases
 wait_for_task = HerdrDispatcher.wait_for_task
 create_feature_branch = HerdrDispatcher.create_feature_branch
@@ -1078,6 +1136,7 @@ __all__ = [
     "cleanup_worktree",
     "create_feature_branch",
     "dispatch_interactive_critics",
+    "filter_tools_for_role",
     "format_dispatch_payload",
     "merge_worktree_to_feature",
     "resolve_domain_skills",

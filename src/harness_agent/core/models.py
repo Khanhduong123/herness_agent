@@ -96,6 +96,85 @@ class AgentRole(str, Enum):
         return super()._missing_(value)
 
 
+# Role-based tool schema filtering mappings
+ROLE_TOOL_ALLOWLIST: Dict[AgentRole, List[str]] = {
+    AgentRole.CODER: [
+        "view_file",
+        "replace_file_content",
+        "write_to_file",
+        "apply_patch",
+        "multi_replace_file_content",
+        "run_command",
+        "manage_task",
+        "ask_question",
+    ],
+    AgentRole.TESTER: [
+        "view_file",
+        "replace_file_content",
+        "write_to_file",
+        "apply_patch",
+        "run_command",
+        "manage_task",
+        "ask_question",
+    ],
+    AgentRole.REVIEWER: [
+        "view_file",
+        "read_url_content",
+        "search_web",
+        "ask_question",
+    ],
+    AgentRole.SECURITY_REVIEWER: [
+        "view_file",
+        "read_url_content",
+        "search_web",
+        "ask_question",
+    ],
+    AgentRole.PERFORMANCE_REVIEWER: [
+        "view_file",
+        "read_url_content",
+        "search_web",
+        "ask_question",
+    ],
+    AgentRole.REQUIREMENT_REVIEWER: [
+        "view_file",
+        "read_url_content",
+        "search_web",
+        "ask_question",
+    ],
+    AgentRole.RESEARCHER: [
+        "view_file",
+        "read_url_content",
+        "search_web",
+        "ask_question",
+    ],
+    AgentRole.ORCHESTRATOR: [
+        "view_file",
+        "write_to_file",
+        "replace_file_content",
+        "apply_patch",
+        "multi_replace_file_content",
+        "run_command",
+        "manage_task",
+        "ask_question",
+        "schedule",
+        "send_message",
+        "invoke_subagent",
+        "define_subagent",
+        "manage_subagents",
+        "read_url_content",
+        "search_web",
+    ],
+}
+
+# Critic roles share read-only tools
+CRITIC_ROLES = {
+    AgentRole.REVIEWER,
+    AgentRole.SECURITY_REVIEWER,
+    AgentRole.PERFORMANCE_REVIEWER,
+    AgentRole.REQUIREMENT_REVIEWER,
+}
+
+
 class CriticFeedback(BaseModel):
     """Feedback and evaluation result from an individual adversarial critic."""
 
