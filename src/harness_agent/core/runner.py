@@ -12,6 +12,55 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from harness_agent.core.models import AgyConfig, RunResult, Task, ToolCallRecord
 
+STATIC_PREFIX = (
+    "DO NOT output decorative emojis, pictographs, or icons such as "
+    "\U0001f680, \U0001f4a1, \u26a0\ufe0f, \u274c, \u2705; "
+    "keep output strictly plain ASCII/Markdown."
+)
+
+
+def build_cache_aligned_prompt(
+    system_instructions: str,
+    dynamic_context: Dict[str, Any],
+    user_prompt: str,
+) -> Tuple[str, str]:
+    """Constructs prompt partitioned into static cacheable prefix and dynamic tail.
+
+    Args:
+        system_instructions: Invariant base instructions.
+        dynamic_context: Dictionary of runtime context (timestamps, paths, etc.).
+        user_prompt: Current turn prompt.
+
+    Returns:
+        Tuple of (static_prefix, dynamic_tail).
+    """
+    cleaned_instructions = system_instructions.strip() if system_instructions else ""
+    if not cleaned_instructions:
+        static_prefix = ""
+    else:
+        # Static prefix must be invariant and contain zero-emoji instruction
+        if STATIC_PREFIX not in cleaned_instructions:
+            static_prefix = f"{cleaned_instructions}\n\n{STATIC_PREFIX}".strip()
+        else:
+            static_prefix = cleaned_instructions
+
+    # Build dynamic tail
+    dynamic_lines: List[str] = []
+    if dynamic_context:
+        dynamic_lines.append("## Dynamic Context:")
+        for key in sorted(dynamic_context.keys()):
+            val = dynamic_context[key]
+            dynamic_lines.append(f"- {key}: {val}")
+
+    cleaned_prompt = user_prompt.strip() if user_prompt else ""
+    if cleaned_prompt:
+        if dynamic_lines:
+            dynamic_lines.append("")
+        dynamic_lines.append(cleaned_prompt)
+
+    dynamic_tail = "\n".join(dynamic_lines).strip()
+    return static_prefix, dynamic_tail
+
 
 class AgyRunner:
     """Manages the execution of the agy CLI as a subprocess."""

@@ -535,6 +535,11 @@ class AgentOrchestrator:
                 "- **Git Operations:** Direct terminal execution via agy CLI, branch protection "
                 "(never commit directly to `main`), conventional commits (`feat:`, `fix:`, etc.)."
             ),
+            (
+                "- **Zero-Emoji Policy:** DO NOT output decorative emojis, pictographs, or icons "
+                "such as \U0001f680, \U0001f4a1, \u26a0\ufe0f, \u274c, \u2705; "
+                "keep output strictly plain ASCII/Markdown."
+            ),
             "",
             f"## Assigned SubTask: {subtask.name} (Plan ID: {plan.plan_id}, Task ID: {subtask.id})",
             "Expert Role: Dedicated Domain Expert",
