@@ -933,14 +933,15 @@ def dispatch_cmd(
 
     click.secho(f"[OK] Worktree ready: {msg_or_path} (pane: {pane_id})", fg="green")
 
-    click.echo(f"Starting worker agent for task '{task_id}' in pane {pane_id} (kind={kind})...")
-    ok, start_msg = HerdrDispatcher.start_agent(
-        task_id=task_id,
-        pane_id=pane_id,
-        kind=kind,
-        dangerously_skip_permissions=dangerously_skip_permissions,
-        model=model,
-    )
+    start_agent_kwargs = {
+        "task_id": task_id,
+        "pane_id": pane_id,
+        "kind": kind,
+        "dangerously_skip_permissions": dangerously_skip_permissions,
+    }
+    if model is not None:
+        start_agent_kwargs["model"] = model
+    ok, start_msg = HerdrDispatcher.start_agent(**start_agent_kwargs)
     if not ok:
         click.secho(f"[FAIL] Failed to start agent: {start_msg}", fg="red")
         sys.exit(1)
