@@ -164,3 +164,45 @@ def test_wait_for_task_legacy_plain_text(tmp_path: Path):
         assert row["completion_tokens"] == "0"
         assert row["total_tokens"] == "0"
         assert row["status"] == "COMPLETED"
+
+
+def test_wait_for_task_preserves_telemetry_or_active_model(tmp_path: Path, monkeypatch):
+    """TC-05: wait_for_task uses active model when model is missing from telemetry."""
+    import csv
+
+    from harness_agent.core.dispatch import HerdrDispatcher
+
+    monkeypatch.setenv("AGY_MODEL", "gemini-3.8-flash")
+
+    status_dir = tmp_path / ".ai" / "status"
+    status_dir.mkdir(parents=True, exist_ok=True)
+    runs_dir = tmp_path / ".runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    telemetry_content = """status: COMPLETED
+plan_id: plan_model_selection
+task_id: subtask_model_test
+prompt_tokens: 12000
+completion_tokens: 800
+cached_tokens: 4000
+"""
+    complete_flag = status_dir / "subtask_model_test.complete"
+    complete_flag.write_text(telemetry_content, encoding="utf-8")
+
+    ok, msg = HerdrDispatcher.wait_for_task(
+        task_id="subtask_model_test",
+        timeout_seconds=5,
+        status_dir=status_dir,
+        repo_root=tmp_path,
+    )
+
+    assert ok is True
+    log_csv = runs_dir / "log.csv"
+    assert log_csv.exists()
+
+    with open(log_csv, mode="r", encoding="utf-8") as f:
+        reader = list(csv.DictReader(f))
+        assert len(reader) == 1
+        row = reader[0]
+        assert row["task_id"] == "subtask_model_test"
+        assert row["model"] == "gemini-3.8-flash"

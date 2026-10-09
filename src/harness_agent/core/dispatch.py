@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 from harness_agent.core.models import ROLE_TOOL_ALLOWLIST, AgentRole
-from harness_agent.core.token_logger import TokenLogger
+from harness_agent.core.token_logger import TokenLogger, get_active_model
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +226,7 @@ class HerdrDispatcher:
         system_prompt_file: Optional[str] = None,
         thinking_level: Optional[str] = None,
         skill_files: Optional[List[str]] = None,
+        model: Optional[str] = None,
         executable: str = "herdr",
     ) -> Tuple[bool, str]:
         """Run 'herdr agent start worker_<task_id> --kind <kind> --pane <pane_id>'.
@@ -239,6 +240,7 @@ class HerdrDispatcher:
             system_prompt_file: Optional path to system prompt / skill file.
             thinking_level: Optional model thinking level (e.g. 'low', 'medium', 'high').
             skill_files: Optional list of skill file paths to inject.
+            model: Optional model identifier (defaults to active user model).
             executable: Herdr executable binary name or path.
 
         Returns:
@@ -254,6 +256,8 @@ class HerdrDispatcher:
                 if not Path(sf).exists():
                     return False, f"Skill file not found: {sf}"
 
+        active_model = get_active_model(model)
+
         worker_name = cls.get_worker_name(task_id)
         cmd = [executable, "agent", "start", worker_name, "--kind", kind, "--pane", pane_id]
         if system_prompt_file:
@@ -266,6 +270,8 @@ class HerdrDispatcher:
             agy_flags.append("--dangerously-skip-permissions")
         if effort:
             agy_flags.extend(["--effort", effort])
+        if active_model:
+            agy_flags.extend(["--model", active_model])
         if skill_files:
             for sf in skill_files:
                 agy_flags.extend(["--skill-file", Path(sf).as_posix()])
@@ -398,6 +404,7 @@ class HerdrDispatcher:
         spec_path: str,
         prohibitions: Optional[List[str]] = None,
         target: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> str:
         """Construct strict multi-line payload template for worker dispatch.
 
@@ -406,6 +413,7 @@ class HerdrDispatcher:
             spec_path: Path to the subtask spec markdown file.
             prohibitions: Optional list of prohibited actions/tools.
             target: Optional target description / deliverables.
+            model: Optional model identifier.
 
         Returns:
             str: Multi-line formatted dispatch payload string.
@@ -426,9 +434,15 @@ class HerdrDispatcher:
         lines = [
             f"[ROLE: {clean_role}]",
             f"Spec: {clean_spec}",
-            f"Prohibitions: {prohibitions_str}",
-            f"Target: {target_str}",
         ]
+        if model and model.strip():
+            lines.append(f"Model: {model.strip()}")
+        lines.extend(
+            [
+                f"Prohibitions: {prohibitions_str}",
+                f"Target: {target_str}",
+            ]
+        )
         return "\n".join(lines)
 
     @classmethod
@@ -744,7 +758,11 @@ class HerdrDispatcher:
                                 or 0
                             )
                             plan_id = str(telemetry.get("plan_id") or "default_plan")
-                            model_str = telemetry.get("model")
+                            raw_model = telemetry.get("model")
+                            if isinstance(raw_model, str) and raw_model.strip():
+                                model_str = raw_model.strip()
+                            else:
+                                model_str = get_active_model()
                             role_str = str(telemetry.get("role") or "coder")
                             status_str = str(telemetry.get("status") or "COMPLETED")
 
