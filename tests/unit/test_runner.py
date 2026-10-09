@@ -1,4 +1,4 @@
-"""Unit tests for AgyRunner."""
+import pytest
 
 from harness_agent.core.models import AgyConfig, Task
 from harness_agent.core.runner import AgyRunner
@@ -46,3 +46,30 @@ def test_extract_stream_data():
     assert len(tool_calls) == 1
     assert tool_calls[0].name == "run_command"
     assert tool_calls[0].args == {"cmd": "ls"}
+
+
+@pytest.mark.asyncio
+async def test_runner_log_run_suppression(tmp_path, monkeypatch):
+    """TC-03: execute_task(task, log_run=False) suppresses writing to log.csv."""
+    custom_csv = tmp_path / "suppressed_log.csv"
+    from harness_agent.core.token_logger import TokenLogger
+
+    monkeypatch.setattr(TokenLogger, "DEFAULT_CSV_PATH", custom_csv)
+
+    runner = AgyRunner(config=AgyConfig(model="gemini-1.5-flash", auto_log=True))
+    task = Task(id="t_suppressed", name="Suppressed Task", prompt="Test suppression")
+
+    class DummyProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return b'{"type": "usage", "prompt_tokens": 100, "completion_tokens": 50}\n', b""
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        return DummyProcess()
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_create_subprocess_exec)
+
+    result = await runner.execute_task(task, log_run=False)
+    assert result.success is True
+    assert not custom_csv.exists()

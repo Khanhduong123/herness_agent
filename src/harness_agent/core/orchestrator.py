@@ -24,6 +24,7 @@ from harness_agent.core.models import (
 from harness_agent.core.runner import AgyRunner
 from harness_agent.core.security import wrap_untrusted_content
 from harness_agent.core.state import DAGStateStore
+from harness_agent.core.token_logger import TokenLogger
 
 
 class AgentOrchestrator:
@@ -728,6 +729,7 @@ class AgentOrchestrator:
             model=worker.model or self.base_config.model,
             effort=worker.effort or self.base_config.effort,
             system_prompt=worker.system_prompt,
+            auto_log=False,
         )
         if worker.extra_flags:
             worker_config.extra_flags.extend(worker.extra_flags)
@@ -984,9 +986,6 @@ class AgentOrchestrator:
 
             # 4. State: COMPLETED or FAILED
             if result.success:
-                task_statuses[subtask.id] = TaskStatus.COMPLETED
-                completed_count += 1
-
                 # When a Coder finishes a task, dispatch diff/file to all 3 critics in parallel
                 should_dispatch_critics = (
                     self.auto_dispatch_critics
@@ -1007,6 +1006,59 @@ class AgentOrchestrator:
                     )
                     critic_reviews[subtask.id] = review
 
+            # Cumulative metric aggregation across worker and any dispatched critics
+            cum_prompt = result.prompt_tokens
+            cum_completion = result.completion_tokens
+            cum_cached = result.cached_tokens
+            cum_cost = result.estimated_cost_usd
+            cum_duration = result.duration_seconds
+            cum_truncated = getattr(result, "truncated_output_tokens", 0)
+
+            if subtask.id in critic_reviews:
+                review = critic_reviews[subtask.id]
+                for cf in review.critics_feedback.values():
+                    if cf.run_result:
+                        cum_prompt += cf.run_result.prompt_tokens
+                        cum_completion += cf.run_result.completion_tokens
+                        cum_cached += cf.run_result.cached_tokens
+                        cum_cost += cf.run_result.estimated_cost_usd
+                        cum_duration += cf.run_result.duration_seconds
+
+            if not result.success or (
+                subtask.id in critic_reviews and not critic_reviews[subtask.id].approved
+            ):
+                consolidated_status = "FAILED"
+                result.success = False
+            else:
+                consolidated_status = "COMPLETED"
+
+            result.prompt_tokens = cum_prompt
+            result.completion_tokens = cum_completion
+            result.cached_tokens = cum_cached
+            result.total_tokens = cum_prompt + cum_completion
+            result.estimated_cost_usd = round(cum_cost, 6)
+            result.duration_seconds = round(cum_duration, 2)
+
+            try:
+                TokenLogger.log_task_summary(
+                    task_id=subtask.id,
+                    plan_id=plan.plan_id,
+                    role=subtask.role.value,
+                    model=self.base_config.model,
+                    prompt_tokens=cum_prompt,
+                    completion_tokens=cum_completion,
+                    cached_tokens=cum_cached,
+                    total_tokens=cum_prompt + cum_completion,
+                    truncated_output_tokens=cum_truncated,
+                    duration_seconds=round(cum_duration, 2),
+                    status=consolidated_status,
+                )
+            except Exception:
+                pass
+
+            if consolidated_status == "COMPLETED":
+                task_statuses[subtask.id] = TaskStatus.COMPLETED
+                completed_count += 1
                 if hasattr(self, "state_store") and self.state_store:
                     self.state_store.update_task_status(
                         plan_id=plan.plan_id,
