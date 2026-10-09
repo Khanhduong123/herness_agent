@@ -8,12 +8,149 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 from harness_agent.core.models import OrchestrationPlan, RunResult, TaskStatus
+
+
+def compress_history(
+    events: List[Dict[str, Any]],
+    window_size: int = 5,
+) -> Tuple[str, List[Dict[str, Any]]]:
+    """Compresses event history into a micro-summary and a trailing active window.
+
+    Args:
+        events: Full list of interaction events or tool calls.
+        window_size: Number of recent turns to retain verbatim.
+
+    Returns:
+        Tuple of (summary_markdown, recent_active_events).
+    """
+    if not events:
+        return "", []
+
+    if len(events) <= window_size:
+        return "", list(events)
+
+    cutoff = len(events) - window_size
+    older_events = events[:cutoff]
+    recent_events = events[cutoff:]
+
+    summary_lines = ["### Execution History Summary", ""]
+
+    # Track repeated tool executions to collapse duplicates
+    # Structure of summarized entries: (action_summary, status_summary, key_facts)
+    summarized_items: List[Dict[str, Any]] = []
+
+    for event in older_events:
+        if not isinstance(event, dict):
+            summarized_items.append(
+                {
+                    "action": "non-dict event",
+                    "status": "unknown",
+                    "facts": str(event),
+                    "count": 1,
+                }
+            )
+            continue
+
+        tool_calls = event.get("tool_calls") or []
+        action_parts: List[str] = []
+        if isinstance(tool_calls, list) and tool_calls:
+            for tc in tool_calls:
+                if isinstance(tc, dict):
+                    name = tc.get("name") or tc.get("tool") or "unknown_tool"
+                    args = tc.get("args") or tc.get("arguments") or {}
+                    target_file = ""
+                    if isinstance(args, dict):
+                        target_file = (
+                            args.get("TargetFile")
+                            or args.get("file_path")
+                            or args.get("path")
+                            or ""
+                        )
+                    if target_file:
+                        action_parts.append(f"{name}({target_file})")
+                    else:
+                        action_parts.append(f"{name}")
+                else:
+                    action_parts.append(str(tc))
+        elif event.get("tool"):
+            tool_name = event.get("tool")
+            target_file = event.get("file") or event.get("path") or ""
+            if target_file:
+                action_parts.append(f"{tool_name}({target_file})")
+            else:
+                action_parts.append(f"{tool_name}")
+        elif event.get("action"):
+            action_parts.append(str(event.get("action")))
+        elif event.get("role"):
+            action_parts.append(f"{event.get('role')} message")
+        else:
+            action_parts.append("interaction turn")
+
+        action_str = ", ".join(action_parts) if action_parts else "interaction turn"
+
+        status_str = "success"
+        if event.get("status"):
+            status_str = str(event.get("status"))
+        elif event.get("error") or event.get("is_error"):
+            status_str = f"failure ({event.get('error') or 'error'})"
+        elif event.get("returncode") is not None:
+            rc = event.get("returncode")
+            status_str = "success" if rc == 0 else f"failure (code {rc})"
+        elif event.get("exit_code") is not None:
+            ec = event.get("exit_code")
+            status_str = "success" if ec == 0 else f"failure (code {ec})"
+
+        facts_str = ""
+        if event.get("facts"):
+            facts_str = str(event.get("facts"))
+        elif event.get("summary"):
+            facts_str = str(event.get("summary"))
+        elif event.get("decision"):
+            facts_str = str(event.get("decision"))
+        elif event.get("output"):
+            out = str(event.get("output")).strip()
+            if len(out) > 80:
+                out = out[:77] + "..."
+            facts_str = out
+        elif event.get("content"):
+            cnt = str(event.get("content")).strip()
+            if len(cnt) > 80:
+                cnt = cnt[:77] + "..."
+            facts_str = cnt
+
+        # Check for repeated identical turn/failure to collapse
+        if (
+            summarized_items
+            and summarized_items[-1]["action"] == action_str
+            and summarized_items[-1]["status"] == status_str
+            and summarized_items[-1]["facts"] == facts_str
+        ):
+            summarized_items[-1]["count"] += 1
+        else:
+            summarized_items.append(
+                {
+                    "action": action_str,
+                    "status": status_str,
+                    "facts": facts_str,
+                    "count": 1,
+                }
+            )
+
+    for idx, item in enumerate(summarized_items, 1):
+        count_suffix = f" (repeated {item['count']}x)" if item["count"] > 1 else ""
+        line = f"- Step {idx}: Action: `{item['action']}` | Status: `{item['status']}`"
+        if item["facts"]:
+            line += f" | Key facts: {item['facts']}"
+        line += count_suffix
+        summary_lines.append(line)
+
+    return "\n".join(summary_lines), list(recent_events)
 
 
 class OrchestrationRunRecord(SQLModel, table=True):
