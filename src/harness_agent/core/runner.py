@@ -270,13 +270,24 @@ class AgyRunner:
 
         # Extract token usage metrics if present
         if token_usage is not None:
+            inner = event.get("step_update") or event.get("result") or {}
             usage = (
                 event.get("usage")
+                or (inner.get("usage") if isinstance(inner, dict) else None)
                 or event.get("token_usage")
+                or (inner.get("token_usage") if isinstance(inner, dict) else None)
                 or event.get("tokens")
+                or (inner.get("tokens") if isinstance(inner, dict) else None)
                 or (event if event_type in ("usage", "token_usage", "metrics") else None)
             )
             if isinstance(usage, dict):
+
+                def _safe_int(val: Any) -> int:
+                    try:
+                        return int(val)
+                    except (TypeError, ValueError):
+                        return 0
+
                 pt = (
                     usage.get("prompt_tokens")
                     or usage.get("input_tokens")
@@ -290,11 +301,18 @@ class AgyRunner:
                     or 0
                 )
                 cached = (
-                    usage.get("cached_tokens")
+                    usage.get("cache_read_tokens")
+                    or usage.get("cached_tokens")
                     or usage.get("cached_content_token_count")
-                    or usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
+                    or (
+                        usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
+                        if isinstance(usage.get("prompt_tokens_details"), dict)
+                        else 0
+                    )
                     or 0
                 )
-                token_usage["prompt_tokens"] = max(token_usage["prompt_tokens"], int(pt))
-                token_usage["completion_tokens"] = max(token_usage["completion_tokens"], int(ct))
-                token_usage["cached_tokens"] = max(token_usage["cached_tokens"], int(cached))
+                token_usage["prompt_tokens"] = max(token_usage["prompt_tokens"], _safe_int(pt))
+                token_usage["completion_tokens"] = max(
+                    token_usage["completion_tokens"], _safe_int(ct)
+                )
+                token_usage["cached_tokens"] = max(token_usage["cached_tokens"], _safe_int(cached))
