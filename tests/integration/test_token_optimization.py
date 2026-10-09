@@ -74,3 +74,93 @@ async def test_runner_token_capture_and_logging(tmp_path: Path, monkeypatch):
     assert summary["cached_tokens"] == 500
     assert summary["total_tokens"] == 1800
     assert summary["total_cost_usd"] == pytest.approx(result.estimated_cost_usd, rel=1e-5)
+
+
+def test_wait_for_task_telemetry_logging(tmp_path: Path):
+    """TC-05: Verify wait_for_task parses YAML telemetry and writes to .runs/log.csv."""
+    import csv
+
+    from harness_agent.core.dispatch import HerdrDispatcher
+
+    status_dir = tmp_path / ".ai" / "status"
+    status_dir.mkdir(parents=True, exist_ok=True)
+    runs_dir = tmp_path / ".runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    telemetry_content = """status: COMPLETED
+plan_id: plan_token_opt_e2e
+task_id: subtask_08_e2e
+role: coder
+model: gemini-1.5-flash
+prompt_tokens: 25000
+completion_tokens: 1500
+cached_tokens: 8000
+truncated_tokens: 500
+"""
+    complete_flag = status_dir / "subtask_08_e2e.complete"
+    complete_flag.write_text(telemetry_content, encoding="utf-8")
+
+    ok, msg = HerdrDispatcher.wait_for_task(
+        task_id="subtask_08_e2e",
+        timeout_seconds=5,
+        status_dir=status_dir,
+        repo_root=tmp_path,
+    )
+
+    assert ok is True
+    assert "status: COMPLETED" in msg
+
+    log_csv = runs_dir / "log.csv"
+    assert log_csv.exists()
+
+    with open(log_csv, mode="r", encoding="utf-8") as f:
+        reader = list(csv.DictReader(f))
+        assert len(reader) == 1
+        row = reader[0]
+        assert row["plan_id"] == "plan_token_opt_e2e"
+        assert row["task_id"] == "subtask_08_e2e"
+        assert row["role"] == "coder"
+        assert row["model"] == "gemini-1.5-flash"
+        assert row["prompt_tokens"] == "25000"
+        assert row["completion_tokens"] == "1500"
+        assert row["cached_tokens"] == "8000"
+        assert row["total_tokens"] == "26500"
+        assert row["truncated_output_tokens"] == "500"
+        assert float(row["estimated_cost_usd"]) > 0.0
+        assert float(row["total_savings_usd"]) > 0.0
+        assert row["status"] == "COMPLETED"
+
+
+def test_wait_for_task_legacy_plain_text(tmp_path: Path):
+    """TC-06: Verify wait_for_task handles legacy plain text without error."""
+    import csv
+
+    from harness_agent.core.dispatch import HerdrDispatcher
+
+    status_dir = tmp_path / ".ai" / "status"
+    status_dir.mkdir(parents=True, exist_ok=True)
+
+    complete_flag = status_dir / "legacy_task.complete"
+    complete_flag.write_text("[WORKER_COMPLETED]", encoding="utf-8")
+
+    ok, msg = HerdrDispatcher.wait_for_task(
+        task_id="legacy_task",
+        timeout_seconds=5,
+        status_dir=status_dir,
+        repo_root=tmp_path,
+    )
+
+    assert ok is True
+    assert msg == "[WORKER_COMPLETED]"
+
+    log_csv = tmp_path / ".runs" / "log.csv"
+    assert log_csv.exists()
+    with open(log_csv, mode="r", encoding="utf-8") as f:
+        reader = list(csv.DictReader(f))
+        assert len(reader) == 1
+        row = reader[0]
+        assert row["task_id"] == "legacy_task"
+        assert row["prompt_tokens"] == "0"
+        assert row["completion_tokens"] == "0"
+        assert row["total_tokens"] == "0"
+        assert row["status"] == "COMPLETED"
