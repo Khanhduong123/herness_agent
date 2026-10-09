@@ -43,6 +43,84 @@ def test_model_pricing_calculate_cost():
     assert pytest.approx(cost, rel=1e-5) == 0.346875
 
 
+def test_model_pricing_calculate_savings():
+    """TC-01: Verify user savings formula calculation with cached and truncated tokens.
+
+    total_savings_usd = [cached_tokens * (standard_input_rate - cached_input_rate) / 1_000_000]
+                      + [truncated_output_tokens * output_rate / 1_000_000]
+
+    On gemini-1.5-flash:
+    standard_input_rate = 0.075, cached_input_rate = 0.01875, output_rate = 0.30
+    cached=100_000 -> 100_000 * (0.075 - 0.01875) / 1_000_000
+                   = 100_000 * 0.05625 / 1_000_000 = 0.005625
+    truncated=5_000 -> 5_000 * 0.30 / 1_000_000 = 0.0015
+    total = 0.007125
+    """
+    savings = ModelPricing.calculate_savings(
+        model="gemini-1.5-flash",
+        cached_tokens=100_000,
+        truncated_output_tokens=5_000,
+    )
+    assert pytest.approx(savings, rel=1e-5) == 0.007125
+
+    # Zero truncated tokens
+    savings_no_trunc = ModelPricing.calculate_savings(
+        model="gemini-1.5-flash",
+        cached_tokens=100_000,
+        truncated_output_tokens=0,
+    )
+    assert pytest.approx(savings_no_trunc, rel=1e-5) == 0.005625
+
+    # Fallback default model
+    default_savings = ModelPricing.calculate_savings(
+        model="unknown-model",
+        cached_tokens=1_000_000,
+        truncated_output_tokens=1_000_000,
+    )
+    # Default rates: input=1.00, cached=0.25, output=3.00
+    # cache: 1.00 - 0.25 = 0.75
+    # output: 3.00
+    # total = 3.75
+    assert pytest.approx(default_savings, rel=1e-5) == 3.75
+
+
+def test_token_logger_log_task_summary(tmp_path: Path):
+    """TC-02: Verify log_task_summary writes complete row with cost and savings."""
+    csv_file = tmp_path / "task_summary.csv"
+    TokenLogger.log_task_summary(
+        task_id="subtask_08",
+        plan_id="plan_token_opt",
+        role="coder",
+        model="gemini-1.5-flash",
+        prompt_tokens=50_000,
+        completion_tokens=2_000,
+        cached_tokens=10_000,
+        truncated_output_tokens=1_000,
+        duration_seconds=12.5,
+        status="COMPLETED",
+        csv_path=csv_file,
+    )
+
+    assert csv_file.exists()
+    with open(csv_file, mode="r", encoding="utf-8") as f:
+        reader = list(csv.DictReader(f))
+        assert len(reader) == 1
+        row = reader[0]
+        assert row["plan_id"] == "plan_token_opt"
+        assert row["task_id"] == "subtask_08"
+        assert row["role"] == "coder"
+        assert row["model"] == "gemini-1.5-flash"
+        assert row["prompt_tokens"] == "50000"
+        assert row["completion_tokens"] == "2000"
+        assert row["cached_tokens"] == "10000"
+        assert row["total_tokens"] == "52000"
+        assert row["truncated_output_tokens"] == "1000"
+        assert float(row["estimated_cost_usd"]) > 0.0
+        assert float(row["total_savings_usd"]) > 0.0
+        assert row["duration_seconds"] == "12.50"
+        assert row["status"] == "COMPLETED"
+
+
 def test_token_logger_initialization_and_header(tmp_path: Path):
     """TC-01: Verify new log.csv creation with header and 1 data row."""
     csv_file = tmp_path / "runs" / "log.csv"
@@ -70,19 +148,23 @@ def test_token_logger_initialization_and_header(tmp_path: Path):
         reader = list(csv.reader(f))
         assert len(reader) == 2  # Header + 1 row
         header = reader[0]
-        assert "timestamp" in header
+        assert "plan_id" in header
         assert "task_id" in header
         assert "prompt_tokens" in header
         assert "estimated_cost_usd" in header
+        assert "total_savings_usd" in header
         row = reader[1]
-        assert row[1] == "task_tc01"
-        assert row[2] == "coder"
-        assert row[3] == "gemini-1.5-flash"
-        assert row[4] == "1000"
-        assert row[5] == "200"
-        assert row[6] == "400"
-        assert row[7] == "1200"
-        assert float(row[8]) > 0.0
+        assert row[1] == "default_plan"
+        assert row[2] == "task_tc01"
+        assert row[3] == "coder"
+        assert row[4] == "gemini-1.5-flash"
+        assert row[5] == "1000"
+        assert row[6] == "200"
+        assert row[7] == "400"
+        assert row[8] == "1200"
+        assert row[9] == "0"
+        assert float(row[10]) > 0.0
+        assert float(row[11]) > 0.0
 
 
 def test_token_logger_consecutive_appends(tmp_path: Path):

@@ -12,7 +12,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import yaml
+
 from harness_agent.core.models import ROLE_TOOL_ALLOWLIST, AgentRole
+from harness_agent.core.token_logger import TokenLogger
 
 logger = logging.getLogger(__name__)
 
@@ -717,9 +720,54 @@ class HerdrDispatcher:
                     if flag.is_file():
                         try:
                             content = flag.read_text(encoding="utf-8").strip()
-                            return True, content or "[WORKER_COMPLETED]"
                         except Exception:
-                            pass
+                            content = ""
+
+                        # Parse YAML telemetry if present
+                        telemetry: Dict[str, Any] = {}
+                        if content:
+                            try:
+                                parsed = yaml.safe_load(content)
+                                if isinstance(parsed, dict):
+                                    telemetry = parsed
+                            except Exception:
+                                telemetry = {}
+
+                        elapsed = time.time() - start_time
+                        try:
+                            prompt_tokens = int(telemetry.get("prompt_tokens") or 0)
+                            completion_tokens = int(telemetry.get("completion_tokens") or 0)
+                            cached_tokens = int(telemetry.get("cached_tokens") or 0)
+                            truncated_tokens = int(
+                                telemetry.get("truncated_tokens")
+                                or telemetry.get("truncated_output_tokens")
+                                or 0
+                            )
+                            plan_id = str(telemetry.get("plan_id") or "default_plan")
+                            model_str = telemetry.get("model")
+                            role_str = str(telemetry.get("role") or "coder")
+                            status_str = str(telemetry.get("status") or "COMPLETED")
+
+                            csv_target = root / ".runs" / "log.csv"
+                            TokenLogger.log_task_summary(
+                                task_id=clean_task_id,
+                                plan_id=plan_id,
+                                role=role_str,
+                                model=model_str,
+                                prompt_tokens=prompt_tokens,
+                                completion_tokens=completion_tokens,
+                                cached_tokens=cached_tokens,
+                                truncated_output_tokens=truncated_tokens,
+                                duration_seconds=elapsed,
+                                status=status_str,
+                                csv_path=csv_target,
+                            )
+                        except Exception as log_exc:
+                            logger.warning(
+                                f"Failed to log task summary telemetry for {task_id}: {log_exc}"
+                            )
+
+                        return True, content or "[WORKER_COMPLETED]"
 
             elapsed = time.time() - start_time
             if elapsed >= timeout_seconds:
