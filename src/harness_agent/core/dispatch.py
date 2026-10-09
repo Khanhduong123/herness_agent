@@ -256,8 +256,6 @@ class HerdrDispatcher:
                 if not Path(sf).exists():
                     return False, f"Skill file not found: {sf}"
 
-        active_model = get_active_model(model)
-
         worker_name = cls.get_worker_name(task_id)
         cmd = [executable, "agent", "start", worker_name, "--kind", kind, "--pane", pane_id]
         if system_prompt_file:
@@ -270,8 +268,8 @@ class HerdrDispatcher:
             agy_flags.append("--dangerously-skip-permissions")
         if effort:
             agy_flags.extend(["--effort", effort])
-        if active_model:
-            agy_flags.extend(["--model", active_model])
+        if model and model.strip():
+            agy_flags.extend(["--model", model.strip()])
         if skill_files:
             for sf in skill_files:
                 agy_flags.extend(["--skill-file", Path(sf).as_posix()])
