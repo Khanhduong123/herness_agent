@@ -1,0 +1,140 @@
+"""Unit tests for ModelPricing and TokenLogger in harness_agent.core.token_logger."""
+
+from __future__ import annotations
+
+import csv
+from pathlib import Path
+
+import pytest
+
+from harness_agent.core.models import RunResult
+from harness_agent.core.token_logger import ModelPricing, TokenLogger
+
+
+def test_model_pricing_rates():
+    """Verify ModelPricing rate resolution for exact and partial match."""
+    flash_rates = ModelPricing.get_model_rates("gemini-1.5-flash")
+    assert flash_rates["input"] == 0.075
+    assert flash_rates["output"] == 0.30
+    assert flash_rates["cached"] == 0.01875
+
+    # Partial match
+    partial_rates = ModelPricing.get_model_rates("models/gemini-1.5-pro-latest")
+    assert partial_rates["input"] == 3.50
+
+    # Default fallback
+    default_rates = ModelPricing.get_model_rates("unknown-future-model")
+    assert default_rates["input"] == 1.00
+
+
+def test_model_pricing_calculate_cost():
+    """Verify cost calculation with cached discount."""
+    # 1M prompt (including 500k cached) and 1M completion on gemini-1.5-flash
+    # Non-cached prompt: 500k = $0.0375
+    # Cached prompt: 500k = $0.009375
+    # Completion: 1M = $0.30
+    # Total = 0.346875
+    cost = ModelPricing.calculate_cost(
+        model="gemini-1.5-flash",
+        prompt_tokens=1_000_000,
+        completion_tokens=1_000_000,
+        cached_tokens=500_000,
+    )
+    assert pytest.approx(cost, rel=1e-5) == 0.346875
+
+
+def test_token_logger_initialization_and_header(tmp_path: Path):
+    """TC-01: Verify new log.csv creation with header and 1 data row."""
+    csv_file = tmp_path / "runs" / "log.csv"
+    res = RunResult(
+        task_id="task_tc01",
+        success=True,
+        exit_code=0,
+        duration_seconds=1.5,
+        prompt_tokens=1000,
+        completion_tokens=200,
+        cached_tokens=400,
+    )
+
+    logged_path = TokenLogger.log_run(
+        result=res,
+        role="coder",
+        model="gemini-1.5-flash",
+        csv_path=csv_file,
+    )
+
+    assert logged_path == csv_file
+    assert csv_file.exists()
+
+    with open(csv_file, mode="r", encoding="utf-8") as f:
+        reader = list(csv.reader(f))
+        assert len(reader) == 2  # Header + 1 row
+        header = reader[0]
+        assert "timestamp" in header
+        assert "task_id" in header
+        assert "prompt_tokens" in header
+        assert "estimated_cost_usd" in header
+        row = reader[1]
+        assert row[1] == "task_tc01"
+        assert row[2] == "coder"
+        assert row[3] == "gemini-1.5-flash"
+        assert row[4] == "1000"
+        assert row[5] == "200"
+        assert row[6] == "400"
+        assert row[7] == "1200"
+        assert float(row[8]) > 0.0
+
+
+def test_token_logger_consecutive_appends(tmp_path: Path):
+    """TC-02: Verify multiple appends without duplicating header."""
+    csv_file = tmp_path / "log.csv"
+    for i in range(3):
+        res = RunResult(
+            task_id=f"task_{i}",
+            success=True,
+            exit_code=0,
+            duration_seconds=2.0,
+            prompt_tokens=100 * (i + 1),
+            completion_tokens=50 * (i + 1),
+        )
+        TokenLogger.log_run(result=res, csv_path=csv_file)
+
+    with open(csv_file, mode="r", encoding="utf-8") as f:
+        lines = f.readlines()
+        assert len(lines) == 4  # 1 header + 3 rows
+
+
+def test_token_logger_compute_summary(tmp_path: Path):
+    """TC-03: Metric summary aggregation."""
+    csv_file = tmp_path / "summary_log.csv"
+    # Empty summary check
+    empty_summary = TokenLogger.compute_summary(csv_file)
+    assert empty_summary["total_runs"] == 0
+    assert empty_summary["prompt_tokens"] == 0
+
+    # Log 3 tasks
+    for i in range(3):
+        res = RunResult(
+            task_id=f"task_sum_{i}",
+            success=True,
+            exit_code=0,
+            duration_seconds=1.0,
+            prompt_tokens=1000,
+            completion_tokens=500,
+            cached_tokens=200,
+        )
+        TokenLogger.log_run(
+            result=res,
+            role="coder",
+            model="gemini-1.5-flash",
+            csv_path=csv_file,
+        )
+
+    summary = TokenLogger.compute_summary(csv_file)
+    assert summary["total_runs"] == 3
+    assert summary["prompt_tokens"] == 3000
+    assert summary["completion_tokens"] == 1500
+    assert summary["cached_tokens"] == 600
+    assert summary["total_tokens"] == 4500
+    assert summary["total_cost_usd"] > 0
+    assert summary["estimated_savings_usd"] > 0
