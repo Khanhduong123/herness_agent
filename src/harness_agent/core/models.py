@@ -32,6 +32,10 @@ class AgyConfig(BaseModel):
     extra_flags: List[str] = Field(
         default_factory=list, description="Additional CLI flags to append to agy invocation"
     )
+    auto_log: bool = Field(
+        default=True,
+        description="Automatically record single-run execution metrics to log.csv",
+    )
 
 
 class TaskCheck(BaseModel):

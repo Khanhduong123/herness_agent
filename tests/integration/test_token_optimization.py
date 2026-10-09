@@ -206,3 +206,233 @@ cached_tokens: 4000
         row = reader[0]
         assert row["task_id"] == "subtask_model_test"
         assert row["model"] == "gemini-3.8-flash"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_multi_critic_consolidated_log(tmp_path: Path, monkeypatch):
+    """TC-01: Orchestrated plan with critics logs 1 consolidated record with cumulative metrics."""
+    import csv
+    from unittest.mock import AsyncMock
+
+    from harness_agent.core.models import (
+        AgentRole,
+        AggregatedCriticReview,
+        CriticFeedback,
+        OrchestrationPlan,
+        RunResult,
+        SubTask,
+    )
+    from harness_agent.core.orchestrator import AgentOrchestrator
+
+    custom_csv = tmp_path / ".runs" / "log.csv"
+    monkeypatch.setattr(TokenLogger, "DEFAULT_CSV_PATH", custom_csv)
+
+    plan = OrchestrationPlan(
+        plan_id="plan_consolidated_test",
+        goal="Verify consolidated metrics",
+        enable_adversarial_critics=True,
+        tasks=[
+            SubTask(
+                id="task_coder_01",
+                name="Coder Task",
+                role=AgentRole.CODER,
+                instruction="Implement feature",
+            )
+        ],
+    )
+
+    coder_res = RunResult(
+        task_id="task_coder_01",
+        success=True,
+        exit_code=0,
+        duration_seconds=2.5,
+        output_text="Code changes applied.",
+        prompt_tokens=1000,
+        completion_tokens=200,
+        cached_tokens=300,
+        estimated_cost_usd=0.002,
+    )
+
+    critic_sec_res = RunResult(
+        task_id="critic_sec",
+        success=True,
+        exit_code=0,
+        duration_seconds=1.0,
+        prompt_tokens=500,
+        completion_tokens=50,
+        cached_tokens=100,
+        estimated_cost_usd=0.0008,
+    )
+    critic_perf_res = RunResult(
+        task_id="critic_perf",
+        success=True,
+        exit_code=0,
+        duration_seconds=1.2,
+        prompt_tokens=600,
+        completion_tokens=60,
+        cached_tokens=150,
+        estimated_cost_usd=0.0009,
+    )
+    critic_req_res = RunResult(
+        task_id="critic_req",
+        success=True,
+        exit_code=0,
+        duration_seconds=0.8,
+        prompt_tokens=400,
+        completion_tokens=40,
+        cached_tokens=80,
+        estimated_cost_usd=0.0006,
+    )
+
+    review = AggregatedCriticReview(
+        approved=True,
+        critics_feedback={
+            AgentRole.SECURITY_REVIEWER.value: CriticFeedback(
+                role=AgentRole.SECURITY_REVIEWER,
+                critic_name="security-critic",
+                approved=True,
+                run_result=critic_sec_res,
+            ),
+            AgentRole.PERFORMANCE_REVIEWER.value: CriticFeedback(
+                role=AgentRole.PERFORMANCE_REVIEWER,
+                critic_name="performance-critic",
+                approved=True,
+                run_result=critic_perf_res,
+            ),
+            AgentRole.REQUIREMENT_REVIEWER.value: CriticFeedback(
+                role=AgentRole.REQUIREMENT_REVIEWER,
+                critic_name="requirement-critic",
+                approved=True,
+                run_result=critic_req_res,
+            ),
+        },
+    )
+
+    orchestrator = AgentOrchestrator(base_config=AgyConfig(model="gemini-2.5-pro"))
+    mock_runner = AsyncMock()
+    mock_runner.execute_task.return_value = coder_res
+    monkeypatch.setattr(
+        "harness_agent.core.orchestrator.AgyRunner.execute_task", mock_runner.execute_task
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "dispatch_adversarial_critics",
+        AsyncMock(return_value=review),
+    )
+
+    result = await orchestrator.run_plan(plan)
+    assert result.success is True
+
+    # Validate CSV emission
+    assert custom_csv.exists()
+    with open(custom_csv, mode="r", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["task_id"] == "task_coder_01"
+    assert row["plan_id"] == "plan_consolidated_test"
+    assert row["status"] == "COMPLETED"
+    assert int(row["prompt_tokens"]) == 1000 + 500 + 600 + 400
+    assert int(row["completion_tokens"]) == 200 + 50 + 60 + 40
+    assert int(row["cached_tokens"]) == 300 + 100 + 150 + 80
+    assert float(row["duration_seconds"]) == pytest.approx(2.5 + 1.0 + 1.2 + 0.8, rel=1e-2)
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_critic_rejection_marks_failed_with_cumulative_metrics(
+    tmp_path: Path, monkeypatch
+):
+    """TC-02: When a critic rejects, consolidated row status is FAILED with cumulative costs."""
+    import csv
+    from unittest.mock import AsyncMock
+
+    from harness_agent.core.models import (
+        AgentRole,
+        AggregatedCriticReview,
+        CriticFeedback,
+        OrchestrationPlan,
+        RunResult,
+        SubTask,
+    )
+    from harness_agent.core.orchestrator import AgentOrchestrator
+
+    custom_csv = tmp_path / ".runs" / "log.csv"
+    monkeypatch.setattr(TokenLogger, "DEFAULT_CSV_PATH", custom_csv)
+
+    plan = OrchestrationPlan(
+        plan_id="plan_rejected_test",
+        goal="Verify rejected critic consolidated metrics",
+        enable_adversarial_critics=True,
+        tasks=[
+            SubTask(
+                id="task_coder_reject",
+                name="Coder Task",
+                role=AgentRole.CODER,
+                instruction="Implement flawed code",
+            )
+        ],
+    )
+
+    coder_res = RunResult(
+        task_id="task_coder_reject",
+        success=True,
+        exit_code=0,
+        duration_seconds=3.0,
+        output_text="Code written with flaw.",
+        prompt_tokens=800,
+        completion_tokens=150,
+        cached_tokens=200,
+        estimated_cost_usd=0.0015,
+    )
+
+    critic_sec_res = RunResult(
+        task_id="critic_sec_fail",
+        success=True,
+        exit_code=0,
+        duration_seconds=1.5,
+        prompt_tokens=700,
+        completion_tokens=80,
+        cached_tokens=100,
+        estimated_cost_usd=0.0012,
+    )
+
+    review = AggregatedCriticReview(
+        approved=False,
+        critics_feedback={
+            AgentRole.SECURITY_REVIEWER.value: CriticFeedback(
+                role=AgentRole.SECURITY_REVIEWER,
+                critic_name="security-critic",
+                approved=False,
+                issues=["SQL Injection detected"],
+                run_result=critic_sec_res,
+            )
+        },
+    )
+
+    orchestrator = AgentOrchestrator(base_config=AgyConfig(model="gemini-2.5-pro"))
+    mock_runner = AsyncMock()
+    mock_runner.execute_task.return_value = coder_res
+    monkeypatch.setattr(
+        "harness_agent.core.orchestrator.AgyRunner.execute_task", mock_runner.execute_task
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "dispatch_adversarial_critics",
+        AsyncMock(return_value=review),
+    )
+
+    result = await orchestrator.run_plan(plan)
+    assert result.success is False
+
+    assert custom_csv.exists()
+    with open(custom_csv, mode="r", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["task_id"] == "task_coder_reject"
+    assert row["status"] == "FAILED"
+    assert int(row["prompt_tokens"]) == 800 + 700
+    assert int(row["completion_tokens"]) == 150 + 80
+    assert float(row["estimated_cost_usd"]) > 0.0

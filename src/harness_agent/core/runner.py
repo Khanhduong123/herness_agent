@@ -132,7 +132,11 @@ class AgyRunner:
 
         return cmd
 
-    async def execute_task(self, task: Task) -> RunResult:
+    async def execute_task(
+        self,
+        task: Task,
+        log_run: Optional[bool] = None,
+    ) -> RunResult:
         """Execute a single task asynchronously through agy."""
         start_time = time.time()
         cmd = self.build_command(prompt=task.prompt, task=task)
@@ -228,14 +232,16 @@ class AgyRunner:
             estimated_cost_usd=estimated_cost,
         )
 
-        try:
-            TokenLogger.log_run(
-                result=result,
-                role="coder",
-                model=model_name,
-            )
-        except Exception:
-            pass
+        should_log = self.config.auto_log if log_run is None else log_run
+        if should_log:
+            try:
+                TokenLogger.log_run(
+                    result=result,
+                    role="coder",
+                    model=model_name,
+                )
+            except Exception:
+                pass
 
         return result
 

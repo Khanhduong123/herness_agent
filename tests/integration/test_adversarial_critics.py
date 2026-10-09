@@ -295,7 +295,7 @@ def authenticate(cursor, user, pwd):
     orchestrator = AgentOrchestrator()
     result = await orchestrator.run_plan(plan)
 
-    assert result.success is True  # Coder subtask completed
+    assert result.success is False  # Coder subtask rejected by critics
     assert "coder_subtask" in result.critic_reviews
     coder_review = result.critic_reviews["coder_subtask"]
     assert coder_review.approved is False
