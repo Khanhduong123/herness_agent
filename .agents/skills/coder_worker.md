@@ -60,9 +60,11 @@ You are an execution engine responsible for turning a subtask specification into
      status: COMPLETED
      plan_id: <plan_id>
      task_id: <task_id>
+     model: <model_identifier>
      prompt_tokens: <count>
      completion_tokens: <count>
      cached_tokens: <count>
      truncated_tokens: <count>
      ```
+     *(The `model` field records the active model, e.g. `gemini-3.8-flash`)*
    - **Step B: Output completion tag:** Output `[WORKER_COMPLETED]` to conclude your turn.

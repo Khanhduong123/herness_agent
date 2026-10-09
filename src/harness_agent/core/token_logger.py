@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -10,16 +11,37 @@ from typing import Any, Dict, Optional, Union
 from harness_agent.core.models import RunResult
 
 
+def get_active_model(override: Optional[str] = None) -> str:
+    """Resolve active AI model identifier from override, environment, or default catalog."""
+    if override and override.strip():
+        return override.strip()
+
+    env_model = (
+        os.environ.get("AGY_MODEL") or os.environ.get("HERNESS_MODEL") or os.environ.get("MODEL")
+    )
+    if env_model and env_model.strip():
+        return env_model.strip()
+
+    return "gemini-3.8-flash"
+
+
 class ModelPricing:
     """Token pricing calculator based on model catalog rates."""
 
     # Default rates per 1,000,000 tokens (USD)
     RATES: Dict[str, Dict[str, float]] = {
+        "gemini-3.8-flash": {"input": 0.75, "output": 3.75, "cached": 0.075},
+        "gemini-3.7-flash": {"input": 0.75, "output": 3.75, "cached": 0.075},
+        "gemini-3.6-flash": {"input": 0.75, "output": 3.75, "cached": 0.075},
+        "gemini-3.1-pro": {"input": 1.25, "output": 5.00, "cached": 0.3125},
+        "gemini-2.5-pro": {"input": 1.25, "output": 5.00, "cached": 0.3125},
+        "gemini-2.5-flash": {"input": 0.075, "output": 0.30, "cached": 0.01875},
         "gemini-1.5-flash": {"input": 0.075, "output": 0.30, "cached": 0.01875},
         "gemini-1.5-pro": {"input": 3.50, "output": 10.50, "cached": 0.875},
+        "claude-3-5-haiku": {"input": 0.80, "output": 4.00, "cached": 0.08},
+        "claude-3-5-sonnet": {"input": 3.00, "output": 15.00, "cached": 0.30},
         "gpt-4o": {"input": 2.50, "output": 10.00, "cached": 1.25},
         "gpt-4o-mini": {"input": 0.15, "output": 0.60, "cached": 0.075},
-        "claude-3-5-sonnet": {"input": 3.00, "output": 15.00, "cached": 0.30},
         "default": {"input": 1.00, "output": 3.00, "cached": 0.25},
     }
 
@@ -27,7 +49,7 @@ class ModelPricing:
     def get_model_rates(cls, model: Optional[str]) -> Dict[str, float]:
         """Resolves pricing rates for a given model identifier."""
         if not model:
-            return cls.RATES["default"]
+            model = get_active_model()
 
         normalized = model.strip().lower()
         if normalized in cls.RATES:
@@ -36,6 +58,22 @@ class ModelPricing:
         for known_model, rates in cls.RATES.items():
             if known_model != "default" and known_model in normalized:
                 return rates
+
+        # Smart Family Fallback
+        if "flash" in normalized:
+            if "2.5" in normalized or "1.5" in normalized:
+                return {"input": 0.075, "output": 0.30, "cached": 0.01875}
+            return {"input": 0.75, "output": 3.75, "cached": 0.075}
+        if "pro" in normalized:
+            if "1.5" in normalized:
+                return {"input": 3.50, "output": 10.50, "cached": 0.875}
+            return {"input": 1.25, "output": 5.00, "cached": 0.3125}
+        if "mini" in normalized:
+            return {"input": 0.15, "output": 0.60, "cached": 0.075}
+        if "sonnet" in normalized:
+            return {"input": 3.00, "output": 15.00, "cached": 0.30}
+        if "haiku" in normalized:
+            return {"input": 0.80, "output": 4.00, "cached": 0.08}
 
         return cls.RATES["default"]
 
@@ -122,7 +160,7 @@ class TokenLogger:
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
         role_str = role or "coder"
-        model_str = model or "default"
+        model_str = model if (model and model.strip()) else get_active_model()
 
         # Update result's estimated cost if not already computed or if zero
         if result.estimated_cost_usd == 0.0 and (
@@ -196,7 +234,7 @@ class TokenLogger:
 
         plan_id_str = plan_id or "default_plan"
         role_str = role or "coder"
-        model_str = model or "default"
+        model_str = model if (model and model.strip()) else get_active_model()
 
         calc_total_tokens = (
             total_tokens if total_tokens is not None else (prompt_tokens + completion_tokens)

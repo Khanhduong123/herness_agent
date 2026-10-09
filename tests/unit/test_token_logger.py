@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from harness_agent.core.models import RunResult
-from harness_agent.core.token_logger import ModelPricing, TokenLogger
+from harness_agent.core.token_logger import ModelPricing, TokenLogger, get_active_model
 
 
 def test_model_pricing_rates():
@@ -344,3 +344,92 @@ def test_extract_stream_data_edge_cases():
     assert token_usage["prompt_tokens"] == 500
     assert token_usage["completion_tokens"] == 300
     assert token_usage["cached_tokens"] == 150
+
+
+def test_get_active_model_resolution(monkeypatch):
+    """TC-01: get_active_model default, env override, and argument override."""
+    monkeypatch.delenv("AGY_MODEL", raising=False)
+    monkeypatch.delenv("HERNESS_MODEL", raising=False)
+    monkeypatch.delenv("MODEL", raising=False)
+
+    # Default catalog
+    assert get_active_model() == "gemini-3.8-flash"
+
+    # Override takes precedence
+    assert get_active_model("claude-3-5-sonnet") == "claude-3-5-sonnet"
+
+    # Environment variables
+    monkeypatch.setenv("AGY_MODEL", "gpt-4o-mini")
+    assert get_active_model() == "gpt-4o-mini"
+    assert get_active_model("gemini-3.1-pro") == "gemini-3.1-pro"
+
+    monkeypatch.delenv("AGY_MODEL", raising=False)
+    monkeypatch.setenv("HERNESS_MODEL", "gemini-2.5-flash")
+    assert get_active_model() == "gemini-2.5-flash"
+
+    monkeypatch.delenv("HERNESS_MODEL", raising=False)
+    monkeypatch.setenv("MODEL", "claude-3-5-haiku")
+    assert get_active_model() == "claude-3-5-haiku"
+
+
+def test_family_resolution_flash_and_pro():
+    """TC-02 & TC-03: Smart family fallback for variants."""
+    # Flash family (modern defaults to 0.75 / 3.75 / 0.075)
+    flash_variant = ModelPricing.get_model_rates("gemini-3.8-flash-medium")
+    assert flash_variant["input"] == 0.75
+    assert flash_variant["output"] == 3.75
+    assert flash_variant["cached"] == 0.075
+
+    # Flash legacy family (1.5 / 2.5 returns 0.075 / 0.30 / 0.01875)
+    flash_25_variant = ModelPricing.get_model_rates("gemini-2.5-flash-custom")
+    assert flash_25_variant["input"] == 0.075
+    assert flash_25_variant["output"] == 0.30
+    assert flash_25_variant["cached"] == 0.01875
+
+    # Pro family (modern defaults to 1.25 / 5.00 / 0.3125)
+    pro_variant = ModelPricing.get_model_rates("gemini-3.1-pro-high")
+    assert pro_variant["input"] == 1.25
+    assert pro_variant["output"] == 5.00
+    assert pro_variant["cached"] == 0.3125
+
+    # Pro legacy family (1.5 returns 3.50 / 10.50 / 0.875)
+    pro_15_variant = ModelPricing.get_model_rates("gemini-1.5-pro-custom")
+    assert pro_15_variant["input"] == 3.50
+    assert pro_15_variant["output"] == 10.50
+    assert pro_15_variant["cached"] == 0.875
+
+    # Additional families: mini, sonnet, haiku
+    mini_variant = ModelPricing.get_model_rates("custom-mini-agent")
+    assert mini_variant["input"] == 0.15
+
+    sonnet_variant = ModelPricing.get_model_rates("claude-next-sonnet-v1")
+    assert sonnet_variant["input"] == 3.00
+
+    haiku_variant = ModelPricing.get_model_rates("claude-haiku-v2")
+    assert haiku_variant["input"] == 0.80
+
+    # Unrecognized model falls back to default rates
+    unknown = ModelPricing.get_model_rates("unknown-llm-xyz")
+    assert unknown == ModelPricing.RATES["default"]
+
+
+def test_log_task_summary_defaults_to_active_model(tmp_path: Path, monkeypatch):
+    """TC-04: log_task_summary defaults model to active model when model=None."""
+    monkeypatch.setenv("AGY_MODEL", "gemini-3.8-flash")
+    csv_file = tmp_path / "task_summary_model.csv"
+
+    TokenLogger.log_task_summary(
+        task_id="subtask_01_pricing",
+        plan_id="plan_model_selection_and_pricing",
+        model=None,
+        prompt_tokens=1000,
+        completion_tokens=200,
+        csv_path=csv_file,
+    )
+
+    with open(csv_file, mode="r", encoding="utf-8") as f:
+        reader = list(csv.DictReader(f))
+        assert len(reader) == 1
+        row = reader[0]
+        assert row["model"] == "gemini-3.8-flash"
+        assert row["model"] != "default"

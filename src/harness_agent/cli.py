@@ -890,6 +890,7 @@ def cite_check_cmd(report_file: str, sources_dir: Optional[str], is_json: bool) 
     default=None,
     help="Base branch/reference for the worktree branch",
 )
+@click.option("--model", default=None, help="Agent model (defaults to active user model)")
 def dispatch_cmd(
     task_id: str,
     spec_file: Optional[str],
@@ -898,6 +899,7 @@ def dispatch_cmd(
     prompt_override: Optional[str],
     wait: bool,
     base_ref: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> None:
     """Interactively dispatch a task to a worker agent running in a Herdr workspace."""
     if not spec_file and not prompt_override:
@@ -937,6 +939,7 @@ def dispatch_cmd(
         pane_id=pane_id,
         kind=kind,
         dangerously_skip_permissions=dangerously_skip_permissions,
+        model=model,
     )
     if not ok:
         click.secho(f"[FAIL] Failed to start agent: {start_msg}", fg="red")
