@@ -55,5 +55,16 @@ You are an execution engine responsible for turning a subtask specification into
 
 6. **Completion Signal (Mandatory File-First Contract):**
    Once code is written, 100% tests pass, and pre-commit checks succeed:
-   - **Step A: Create status marker FIRST:** Write completion confirmation to `.ai/status/<task_id>.complete`. (Note: The parent Orchestrator's blocking wait tool detects this file on disk to resume; failing to create this file causes orchestration to hang until timeout).
+   - **Step A: Create status marker FIRST:** Write completion confirmation with YAML run telemetry to `.ai/status/<task_id>.complete`. (Note: The parent Orchestrator's blocking wait tool detects this file on disk to resume; failing to create this file causes orchestration to hang until timeout).
+     ```yaml
+     status: COMPLETED
+     plan_id: <plan_id>
+     task_id: <task_id>
+     model: <model_identifier>
+     prompt_tokens: <count>
+     completion_tokens: <count>
+     cached_tokens: <count>
+     truncated_tokens: <count>
+     ```
+     *(The `model` field records the active model, e.g. `gemini-3.8-flash`)*
    - **Step B: Output completion tag:** Output `[WORKER_COMPLETED]` to conclude your turn.

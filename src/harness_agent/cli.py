@@ -890,6 +890,7 @@ def cite_check_cmd(report_file: str, sources_dir: Optional[str], is_json: bool) 
     default=None,
     help="Base branch/reference for the worktree branch",
 )
+@click.option("--model", default=None, help="Agent model (defaults to active user model)")
 def dispatch_cmd(
     task_id: str,
     spec_file: Optional[str],
@@ -898,6 +899,7 @@ def dispatch_cmd(
     prompt_override: Optional[str],
     wait: bool,
     base_ref: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> None:
     """Interactively dispatch a task to a worker agent running in a Herdr workspace."""
     if not spec_file and not prompt_override:
@@ -931,13 +933,15 @@ def dispatch_cmd(
 
     click.secho(f"[OK] Worktree ready: {msg_or_path} (pane: {pane_id})", fg="green")
 
-    click.echo(f"Starting worker agent for task '{task_id}' in pane {pane_id} (kind={kind})...")
-    ok, start_msg = HerdrDispatcher.start_agent(
-        task_id=task_id,
-        pane_id=pane_id,
-        kind=kind,
-        dangerously_skip_permissions=dangerously_skip_permissions,
-    )
+    start_agent_kwargs = {
+        "task_id": task_id,
+        "pane_id": pane_id,
+        "kind": kind,
+        "dangerously_skip_permissions": dangerously_skip_permissions,
+    }
+    if model is not None:
+        start_agent_kwargs["model"] = model
+    ok, start_msg = HerdrDispatcher.start_agent(**start_agent_kwargs)
     if not ok:
         click.secho(f"[FAIL] Failed to start agent: {start_msg}", fg="red")
         sys.exit(1)

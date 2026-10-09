@@ -32,6 +32,10 @@ class AgyConfig(BaseModel):
     extra_flags: List[str] = Field(
         default_factory=list, description="Additional CLI flags to append to agy invocation"
     )
+    auto_log: bool = Field(
+        default=True,
+        description="Automatically record single-run execution metrics to log.csv",
+    )
 
 
 class TaskCheck(BaseModel):
@@ -96,6 +100,85 @@ class AgentRole(str, Enum):
         return super()._missing_(value)
 
 
+# Role-based tool schema filtering mappings
+ROLE_TOOL_ALLOWLIST: Dict[AgentRole, List[str]] = {
+    AgentRole.CODER: [
+        "view_file",
+        "replace_file_content",
+        "write_to_file",
+        "apply_patch",
+        "multi_replace_file_content",
+        "run_command",
+        "manage_task",
+        "ask_question",
+    ],
+    AgentRole.TESTER: [
+        "view_file",
+        "replace_file_content",
+        "write_to_file",
+        "apply_patch",
+        "run_command",
+        "manage_task",
+        "ask_question",
+    ],
+    AgentRole.REVIEWER: [
+        "view_file",
+        "read_url_content",
+        "search_web",
+        "ask_question",
+    ],
+    AgentRole.SECURITY_REVIEWER: [
+        "view_file",
+        "read_url_content",
+        "search_web",
+        "ask_question",
+    ],
+    AgentRole.PERFORMANCE_REVIEWER: [
+        "view_file",
+        "read_url_content",
+        "search_web",
+        "ask_question",
+    ],
+    AgentRole.REQUIREMENT_REVIEWER: [
+        "view_file",
+        "read_url_content",
+        "search_web",
+        "ask_question",
+    ],
+    AgentRole.RESEARCHER: [
+        "view_file",
+        "read_url_content",
+        "search_web",
+        "ask_question",
+    ],
+    AgentRole.ORCHESTRATOR: [
+        "view_file",
+        "write_to_file",
+        "replace_file_content",
+        "apply_patch",
+        "multi_replace_file_content",
+        "run_command",
+        "manage_task",
+        "ask_question",
+        "schedule",
+        "send_message",
+        "invoke_subagent",
+        "define_subagent",
+        "manage_subagents",
+        "read_url_content",
+        "search_web",
+    ],
+}
+
+# Critic roles share read-only tools
+CRITIC_ROLES = {
+    AgentRole.REVIEWER,
+    AgentRole.SECURITY_REVIEWER,
+    AgentRole.PERFORMANCE_REVIEWER,
+    AgentRole.REQUIREMENT_REVIEWER,
+}
+
+
 class CriticFeedback(BaseModel):
     """Feedback and evaluation result from an individual adversarial critic."""
 
@@ -148,6 +231,11 @@ class RunResult(BaseModel):
     tool_calls: List[ToolCallRecord] = Field(default_factory=list)
     check_results: Dict[str, bool] = Field(default_factory=dict)
     error_message: Optional[str] = None
+    prompt_tokens: int = Field(default=0, description="Input prompt tokens consumed")
+    completion_tokens: int = Field(default=0, description="Output completion tokens generated")
+    cached_tokens: int = Field(default=0, description="Cached tokens read from context")
+    total_tokens: int = Field(default=0, description="Total tokens consumed (prompt + completion)")
+    estimated_cost_usd: float = Field(default=0.0, description="Estimated total run cost in USD")
     critic_review: Optional[AggregatedCriticReview] = None
 
 
@@ -160,6 +248,11 @@ class EvalReport(BaseModel):
     failed_tasks: int
     duration_seconds: float
     pass_rate: float
+    total_prompt_tokens: int = Field(default=0, description="Aggregated prompt tokens")
+    total_completion_tokens: int = Field(default=0, description="Aggregated completion tokens")
+    total_cached_tokens: int = Field(default=0, description="Aggregated cached tokens")
+    total_tokens: int = Field(default=0, description="Aggregated total tokens")
+    total_cost_usd: float = Field(default=0.0, description="Aggregated cost in USD")
     results: List[RunResult] = Field(default_factory=list)
 
 

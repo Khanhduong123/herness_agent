@@ -11,6 +11,56 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from harness_agent.core.models import AgyConfig, RunResult, Task, ToolCallRecord
+from harness_agent.core.token_logger import ModelPricing, TokenLogger
+
+STATIC_PREFIX = (
+    "DO NOT output decorative emojis, pictographs, or icons such as "
+    "\U0001f680, \U0001f4a1, \u26a0\ufe0f, \u274c, \u2705; "
+    "keep output strictly plain ASCII/Markdown."
+)
+
+
+def build_cache_aligned_prompt(
+    system_instructions: str,
+    dynamic_context: Dict[str, Any],
+    user_prompt: str,
+) -> Tuple[str, str]:
+    """Constructs prompt partitioned into static cacheable prefix and dynamic tail.
+
+    Args:
+        system_instructions: Invariant base instructions.
+        dynamic_context: Dictionary of runtime context (timestamps, paths, etc.).
+        user_prompt: Current turn prompt.
+
+    Returns:
+        Tuple of (static_prefix, dynamic_tail).
+    """
+    cleaned_instructions = system_instructions.strip() if system_instructions else ""
+    if not cleaned_instructions:
+        static_prefix = ""
+    else:
+        # Static prefix must be invariant and contain zero-emoji instruction
+        if STATIC_PREFIX not in cleaned_instructions:
+            static_prefix = f"{cleaned_instructions}\n\n{STATIC_PREFIX}".strip()
+        else:
+            static_prefix = cleaned_instructions
+
+    # Build dynamic tail
+    dynamic_lines: List[str] = []
+    if dynamic_context:
+        dynamic_lines.append("## Dynamic Context:")
+        for key in sorted(dynamic_context.keys()):
+            val = dynamic_context[key]
+            dynamic_lines.append(f"- {key}: {val}")
+
+    cleaned_prompt = user_prompt.strip() if user_prompt else ""
+    if cleaned_prompt:
+        if dynamic_lines:
+            dynamic_lines.append("")
+        dynamic_lines.append(cleaned_prompt)
+
+    dynamic_tail = "\n".join(dynamic_lines).strip()
+    return static_prefix, dynamic_tail
 
 
 class AgyRunner:
@@ -82,7 +132,11 @@ class AgyRunner:
 
         return cmd
 
-    async def execute_task(self, task: Task) -> RunResult:
+    async def execute_task(
+        self,
+        task: Task,
+        log_run: Optional[bool] = None,
+    ) -> RunResult:
         """Execute a single task asynchronously through agy."""
         start_time = time.time()
         cmd = self.build_command(prompt=task.prompt, task=task)
@@ -91,6 +145,11 @@ class AgyRunner:
         events: List[Dict[str, Any]] = []
         tool_calls: List[ToolCallRecord] = []
         collected_text_pieces: List[str] = []
+        token_usage: Dict[str, int] = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cached_tokens": 0,
+        }
         error_message: Optional[str] = None
         exit_code = -1
         stderr_output = ""
@@ -122,7 +181,9 @@ class AgyRunner:
                         try:
                             event = json.loads(line)
                             events.append(event)
-                            self._extract_stream_data(event, collected_text_pieces, tool_calls)
+                            self._extract_stream_data(
+                                event, collected_text_pieces, tool_calls, token_usage
+                            )
                         except json.JSONDecodeError:
                             collected_text_pieces.append(line)
                 else:
@@ -142,7 +203,19 @@ class AgyRunner:
         final_text = "".join(collected_text_pieces).strip()
         success = (exit_code == 0) and (error_message is None)
 
-        return RunResult(
+        prompt_tokens = token_usage["prompt_tokens"]
+        completion_tokens = token_usage["completion_tokens"]
+        cached_tokens = token_usage["cached_tokens"]
+        total_tokens = prompt_tokens + completion_tokens
+        model_name = self.config.model or "default"
+        estimated_cost = ModelPricing.calculate_cost(
+            model=model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
+        )
+
+        result = RunResult(
             task_id=task.id,
             success=success,
             exit_code=exit_code,
@@ -152,15 +225,34 @@ class AgyRunner:
             raw_events=events,
             tool_calls=tool_calls,
             error_message=error_message,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
+            total_tokens=total_tokens,
+            estimated_cost_usd=estimated_cost,
         )
+
+        should_log = self.config.auto_log if log_run is None else log_run
+        if should_log:
+            try:
+                TokenLogger.log_run(
+                    result=result,
+                    role="coder",
+                    model=model_name,
+                )
+            except Exception:
+                pass
+
+        return result
 
     def _extract_stream_data(
         self,
         event: Dict[str, Any],
         text_pieces: List[str],
         tool_calls: List[ToolCallRecord],
+        token_usage: Optional[Dict[str, int]] = None,
     ) -> None:
-        """Helper to extract text and tool calls from stream-json events."""
+        """Helper to extract text, tool calls, and tokens from stream-json events."""
         event_type = event.get("type") or event.get("event")
         # Standard Antigravity / Gemini stream event structure
         if event_type == "text" or "text" in event:
@@ -181,3 +273,52 @@ class AgyRunner:
                         output=tc.get("output"),
                     )
                 )
+
+        # Extract token usage metrics if present
+        if token_usage is not None:
+            inner = event.get("step_update") or event.get("result") or {}
+            usage = (
+                event.get("usage")
+                or (inner.get("usage") if isinstance(inner, dict) else None)
+                or event.get("token_usage")
+                or (inner.get("token_usage") if isinstance(inner, dict) else None)
+                or event.get("tokens")
+                or (inner.get("tokens") if isinstance(inner, dict) else None)
+                or (event if event_type in ("usage", "token_usage", "metrics") else None)
+            )
+            if isinstance(usage, dict):
+
+                def _safe_int(val: Any) -> int:
+                    try:
+                        return int(val)
+                    except (TypeError, ValueError):
+                        return 0
+
+                pt = (
+                    usage.get("prompt_tokens")
+                    or usage.get("input_tokens")
+                    or usage.get("prompt_token_count")
+                    or 0
+                )
+                ct = (
+                    usage.get("completion_tokens")
+                    or usage.get("output_tokens")
+                    or usage.get("candidates_token_count")
+                    or 0
+                )
+                cached = (
+                    usage.get("cache_read_tokens")
+                    or usage.get("cached_tokens")
+                    or usage.get("cached_content_token_count")
+                    or (
+                        usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
+                        if isinstance(usage.get("prompt_tokens_details"), dict)
+                        else 0
+                    )
+                    or 0
+                )
+                token_usage["prompt_tokens"] = max(token_usage["prompt_tokens"], _safe_int(pt))
+                token_usage["completion_tokens"] = max(
+                    token_usage["completion_tokens"], _safe_int(ct)
+                )
+                token_usage["cached_tokens"] = max(token_usage["cached_tokens"], _safe_int(cached))

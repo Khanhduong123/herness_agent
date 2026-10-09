@@ -513,6 +513,7 @@ async def dispatch_parallel_critics(
 
         # Merge runner config with worker specifics
         cfg = base_config.model_copy()
+        cfg.auto_log = False
         if worker_cfg.model:
             cfg.model = worker_cfg.model
         if worker_cfg.effort:

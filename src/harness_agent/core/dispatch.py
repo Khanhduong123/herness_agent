@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+import yaml
+
+from harness_agent.core.models import ROLE_TOOL_ALLOWLIST, AgentRole
+from harness_agent.core.token_logger import TokenLogger, get_active_model
+
+logger = logging.getLogger(__name__)
 
 
 class HerdrDispatcher:
@@ -218,6 +226,7 @@ class HerdrDispatcher:
         system_prompt_file: Optional[str] = None,
         thinking_level: Optional[str] = None,
         skill_files: Optional[List[str]] = None,
+        model: Optional[str] = None,
         executable: str = "herdr",
     ) -> Tuple[bool, str]:
         """Run 'herdr agent start worker_<task_id> --kind <kind> --pane <pane_id>'.
@@ -231,6 +240,7 @@ class HerdrDispatcher:
             system_prompt_file: Optional path to system prompt / skill file.
             thinking_level: Optional model thinking level (e.g. 'low', 'medium', 'high').
             skill_files: Optional list of skill file paths to inject.
+            model: Optional model identifier (defaults to active user model).
             executable: Herdr executable binary name or path.
 
         Returns:
@@ -258,6 +268,8 @@ class HerdrDispatcher:
             agy_flags.append("--dangerously-skip-permissions")
         if effort:
             agy_flags.extend(["--effort", effort])
+        if model and model.strip():
+            agy_flags.extend(["--model", model.strip()])
         if skill_files:
             for sf in skill_files:
                 agy_flags.extend(["--skill-file", Path(sf).as_posix()])
@@ -390,6 +402,7 @@ class HerdrDispatcher:
         spec_path: str,
         prohibitions: Optional[List[str]] = None,
         target: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> str:
         """Construct strict multi-line payload template for worker dispatch.
 
@@ -398,6 +411,7 @@ class HerdrDispatcher:
             spec_path: Path to the subtask spec markdown file.
             prohibitions: Optional list of prohibited actions/tools.
             target: Optional target description / deliverables.
+            model: Optional model identifier.
 
         Returns:
             str: Multi-line formatted dispatch payload string.
@@ -418,9 +432,15 @@ class HerdrDispatcher:
         lines = [
             f"[ROLE: {clean_role}]",
             f"Spec: {clean_spec}",
-            f"Prohibitions: {prohibitions_str}",
-            f"Target: {target_str}",
         ]
+        if model and model.strip():
+            lines.append(f"Model: {model.strip()}")
+        lines.extend(
+            [
+                f"Prohibitions: {prohibitions_str}",
+                f"Target: {target_str}",
+            ]
+        )
         return "\n".join(lines)
 
     @classmethod
@@ -712,9 +732,58 @@ class HerdrDispatcher:
                     if flag.is_file():
                         try:
                             content = flag.read_text(encoding="utf-8").strip()
-                            return True, content or "[WORKER_COMPLETED]"
                         except Exception:
-                            pass
+                            content = ""
+
+                        # Parse YAML telemetry if present
+                        telemetry: Dict[str, Any] = {}
+                        if content:
+                            try:
+                                parsed = yaml.safe_load(content)
+                                if isinstance(parsed, dict):
+                                    telemetry = parsed
+                            except Exception:
+                                telemetry = {}
+
+                        elapsed = time.time() - start_time
+                        try:
+                            prompt_tokens = int(telemetry.get("prompt_tokens") or 0)
+                            completion_tokens = int(telemetry.get("completion_tokens") or 0)
+                            cached_tokens = int(telemetry.get("cached_tokens") or 0)
+                            truncated_tokens = int(
+                                telemetry.get("truncated_tokens")
+                                or telemetry.get("truncated_output_tokens")
+                                or 0
+                            )
+                            plan_id = str(telemetry.get("plan_id") or "default_plan")
+                            raw_model = telemetry.get("model")
+                            if isinstance(raw_model, str) and raw_model.strip():
+                                model_str = raw_model.strip()
+                            else:
+                                model_str = get_active_model()
+                            role_str = str(telemetry.get("role") or "coder")
+                            status_str = str(telemetry.get("status") or "COMPLETED")
+
+                            csv_target = root / ".runs" / "log.csv"
+                            TokenLogger.log_task_summary(
+                                task_id=clean_task_id,
+                                plan_id=plan_id,
+                                role=role_str,
+                                model=model_str,
+                                prompt_tokens=prompt_tokens,
+                                completion_tokens=completion_tokens,
+                                cached_tokens=cached_tokens,
+                                truncated_output_tokens=truncated_tokens,
+                                duration_seconds=elapsed,
+                                status=status_str,
+                                csv_path=csv_target,
+                            )
+                        except Exception as log_exc:
+                            logger.warning(
+                                f"Failed to log task summary telemetry for {task_id}: {log_exc}"
+                            )
+
+                        return True, content or "[WORKER_COMPLETED]"
 
             elapsed = time.time() - start_time
             if elapsed >= timeout_seconds:
@@ -1060,6 +1129,59 @@ class HerdrDispatcher:
         return True, f"Task {task_id} aborted. Failure log archived to {log_file}"
 
 
+def filter_tools_for_role(
+    all_tools: List[Dict[str, Any]],
+    role: AgentRole,
+) -> List[Dict[str, Any]]:
+    """Filters tool declarations based on assigned agent role.
+
+    Args:
+        all_tools: Complete list of tool schemas.
+        role: The target agent role.
+
+    Returns:
+        Pruned list of tools relevant exclusively to the role.
+    """
+    if not all_tools:
+        return []
+
+    # Safe fallback if unknown role or not in allowlist
+    allowlist = ROLE_TOOL_ALLOWLIST.get(role)
+    if allowlist is None:
+        try:
+            matched_role = AgentRole(role)
+            allowlist = ROLE_TOOL_ALLOWLIST.get(matched_role)
+        except Exception:
+            allowlist = None
+
+    if allowlist is None:
+        # Fallback to safe default toolset (read-only tools)
+        logger.warning(
+            "Unknown role '%s' encountered during tool filtering. Using safe default.", role
+        )
+        allowlist = ROLE_TOOL_ALLOWLIST[AgentRole.REVIEWER]
+
+    filtered_tools: List[Dict[str, Any]] = []
+    for tool_schema in all_tools:
+        if not isinstance(tool_schema, dict):
+            logger.warning("Skipping non-dict tool schema: %s", type(tool_schema))
+            continue
+
+        tool_name = (
+            tool_schema.get("name")
+            or tool_schema.get("tool_name")
+            or tool_schema.get("function", {}).get("name")
+        )
+        if not tool_name or not isinstance(tool_name, str):
+            logger.warning("Missing or invalid tool name in schema: %s", tool_schema)
+            continue
+
+        if tool_name in allowlist:
+            filtered_tools.append(tool_schema)
+
+    return filtered_tools
+
+
 # Module-level aliases
 wait_for_task = HerdrDispatcher.wait_for_task
 create_feature_branch = HerdrDispatcher.create_feature_branch
@@ -1078,6 +1200,7 @@ __all__ = [
     "cleanup_worktree",
     "create_feature_branch",
     "dispatch_interactive_critics",
+    "filter_tools_for_role",
     "format_dispatch_payload",
     "merge_worktree_to_feature",
     "resolve_domain_skills",
