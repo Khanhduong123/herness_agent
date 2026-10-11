@@ -8,8 +8,10 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+from pydantic import BaseModel
+from pydantic import Field as PydanticField
 from sqlalchemy import text
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
@@ -426,3 +428,64 @@ class DAGStateStore:
             updated_content = content.rstrip() + "\n\n" + new_block + "\n"
 
         path.write_text(updated_content, encoding="utf-8")
+
+
+class SessionState(BaseModel):
+    """Working memory and state snapshot for a subtask execution session."""
+
+    task_id: str
+    session_id: str
+    goal: str
+    active_step: int = 0
+    memory_variables: Dict[str, Any] = PydanticField(default_factory=dict)
+    modified_files: List[str] = PydanticField(default_factory=list)
+    dependency_graph: Dict[str, List[str]] = PydanticField(default_factory=dict)
+    status: str = "active"
+    updated_at: float = PydanticField(default_factory=time.time)
+
+
+class AtomicSessionStore:
+    """Provides atomic write-then-rename persistence and loading for SessionState."""
+
+    @staticmethod
+    def save_snapshot(state: SessionState, target_path: Union[str, Path]) -> None:
+        """Atomically writes session state using write-then-rename semantics.
+
+        Ensures parent directories exist, writes serialized JSON to a temporary file,
+        and atomically replaces the target path with retry on transient PermissionErrors.
+        """
+        target = Path(target_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = target.with_suffix(f"{target.suffix}.tmp" if target.suffix else ".tmp")
+
+        payload = state.model_dump_json(indent=2)
+        tmp_path.write_text(payload, encoding="utf-8")
+
+        max_retries = 3
+        backoff_sec = 0.05
+        for attempt in range(max_retries):
+            try:
+                os.replace(tmp_path, target)
+                break
+            except PermissionError:
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(backoff_sec)
+
+    @staticmethod
+    def load_snapshot(target_path: Union[str, Path]) -> Optional[SessionState]:
+        """Loads session snapshot from target path, returning None if missing.
+
+        Raises:
+            ValueError: If the file contents are malformed JSON or invalid schema.
+        """
+        target = Path(target_path)
+        if not target.exists():
+            return None
+
+        try:
+            content = target.read_text(encoding="utf-8")
+            data = json.loads(content)
+            return SessionState.model_validate(data)
+        except (json.JSONDecodeError, Exception) as exc:
+            raise ValueError(f"Corrupted session snapshot at {target_path}") from exc
