@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import re
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -489,3 +491,118 @@ class AtomicSessionStore:
             return SessionState.model_validate(data)
         except (json.JSONDecodeError, Exception) as exc:
             raise ValueError(f"Corrupted session snapshot at {target_path}") from exc
+
+
+class WALEvent(BaseModel):
+    """Event entry in the Write-Ahead Log."""
+
+    timestamp: float = PydanticField(default_factory=time.time)
+    session_id: str
+    step_index: int
+    event_type: str
+    tool_name: str = ""
+    status_code: int = 0
+    latency_ms: float = 0.0
+    error_message: str = ""
+
+
+class EventWAL:
+    """Append-only Write-Ahead Log (WAL) logger using CSV storage with secret redaction
+    and thread safety.
+    """
+
+    CSV_HEADER: List[str] = [
+        "timestamp",
+        "session_id",
+        "step_index",
+        "event_type",
+        "tool_name",
+        "status_code",
+        "latency_ms",
+        "error_message",
+    ]
+
+    _SECRET_PATTERNS = [
+        re.compile(r"ghp_[a-zA-Z0-9_-]+"),
+        re.compile(r"Bearer\s+[a-zA-Z0-9_\-\.]+"),
+    ]
+
+    def __init__(self, wal_path: Union[str, Path]) -> None:
+        self.wal_path = Path(wal_path)
+        self.wal_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
+
+        # Initialize CSV with header if file is missing or 0 bytes
+        with self._lock:
+            if not self.wal_path.exists() or self.wal_path.stat().st_size == 0:
+                with open(self.wal_path, mode="w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
+                    writer.writerow(self.CSV_HEADER)
+
+    @classmethod
+    def redact_secrets(cls, message: str) -> str:
+        """Redacts sensitive tokens in error messages."""
+        if not message:
+            return ""
+        sanitized = message
+        for pattern in cls._SECRET_PATTERNS:
+            sanitized = pattern.sub("[REDACTED_SECRET]", sanitized)
+        return sanitized
+
+    def append_event(self, event: WALEvent) -> None:
+        """Synchronously appends a WALEvent to the log CSV and flushes."""
+        redacted_error = self.redact_secrets(event.error_message)
+        row = [
+            str(event.timestamp),
+            str(event.session_id),
+            str(event.step_index),
+            str(event.event_type),
+            str(event.tool_name),
+            str(event.status_code),
+            str(event.latency_ms),
+            redacted_error,
+        ]
+        with self._lock:
+            with open(self.wal_path, mode="a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
+                writer.writerow(row)
+                f.flush()
+
+    def read_all_events(self) -> List[WALEvent]:
+        """Parses and returns all WAL events in order."""
+        with self._lock:
+            if not self.wal_path.exists():
+                return []
+
+            events: List[WALEvent] = []
+            with open(self.wal_path, mode="r", newline="", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                header = next(reader, None)
+                if not header:
+                    return []
+
+                for row in reader:
+                    if not row:
+                        continue
+                    # Pad missing columns if any
+                    while len(row) < len(self.CSV_HEADER):
+                        row.append("")
+                    event = WALEvent(
+                        timestamp=float(row[0]) if row[0] else time.time(),
+                        session_id=row[1],
+                        step_index=int(row[2]) if row[2] else 0,
+                        event_type=row[3],
+                        tool_name=row[4],
+                        status_code=int(row[5]) if row[5] else 0,
+                        latency_ms=float(row[6]) if row[6] else 0.0,
+                        error_message=row[7],
+                    )
+                    events.append(event)
+            return events
+
+    def read_last_event(self) -> Optional[WALEvent]:
+        """Returns the most recent WAL event or None."""
+        events = self.read_all_events()
+        if not events:
+            return None
+        return events[-1]
