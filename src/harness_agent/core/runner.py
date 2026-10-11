@@ -77,6 +77,37 @@ def build_cache_aligned_prompt(
     return static_prefix, dynamic_tail
 
 
+def build_pre_step_reanchoring_prompt(
+    objective: str,
+    active_constraints: list[str],
+    modified_files: list[str],
+) -> str:
+    """Builds a concise reminder injected before action turns to prevent instruction drift.
+
+    Args:
+        objective (str): High-level task objective.
+        active_constraints (list[str]): Key constraints (e.g. no full file overwrite).
+        modified_files (list[str]): List of files touched in current session.
+
+    Returns:
+        str: Injected prompt text.
+    """
+    clean_obj = objective.strip() if objective else "None"
+    constraints_str = (
+        "; ".join(c.strip() for c in active_constraints if c.strip())
+        if active_constraints
+        else "None"
+    )
+    files_str = (
+        ", ".join(f.strip() for f in modified_files if f.strip()) if modified_files else "None yet"
+    )
+
+    return (
+        f"[RE-ANCHORING REMINDER: Objective: {clean_obj} | "
+        f"Constraints: {constraints_str} | Modified Files: {files_str}]"
+    )
+
+
 class AgyRunner:
     """Manages the execution of the agy CLI as a subprocess."""
 
@@ -362,5 +393,6 @@ __all__ = [
     "STATIC_PREFIX",
     "AgyRunner",
     "build_cache_aligned_prompt",
+    "build_pre_step_reanchoring_prompt",
     "verify_and_load_agents_rule",
 ]
