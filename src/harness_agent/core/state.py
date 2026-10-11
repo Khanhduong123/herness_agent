@@ -606,3 +606,148 @@ class EventWAL:
         if not events:
             return None
         return events[-1]
+
+
+class ReconciliationResult(BaseModel):
+    """Result of state reconciliation between session snapshot and WAL."""
+
+    consistent: bool
+    recovered_step: int
+    reconciled_state: Optional[SessionState] = None
+    uncommitted_events: List[WALEvent] = PydanticField(default_factory=list)
+    recovery_action: str = "none"
+
+
+class StateCoordinator:
+    """Coordinates crash recovery and consistency validation between
+    session snapshot and event WAL.
+    """
+
+    def __init__(self, session_path: Union[str, Path], wal_path: Union[str, Path]) -> None:
+        self.session_path = Path(session_path)
+        self.wal_path = Path(wal_path)
+        self.wal = EventWAL(wal_path)
+
+    def reconcile_on_startup(self) -> ReconciliationResult:
+        """Validates consistency between session.json and log.csv on agent boot.
+
+        Handles:
+        - Fresh Run: neither snapshot nor WAL events exist.
+        - Normal/Clean: snapshot active_step matches last WAL event step_index.
+        - WAL Ahead: WAL recorded step K while snapshot is at K-1 (advances snapshot).
+        - Snapshot Missing: WAL exists; reconstructs SessionState from WAL events.
+        - Snapshot Ahead: snapshot step > last WAL step; trusts snapshot with warning.
+        - Interrupted Action: last WAL event is an uncompleted action/tool call.
+        - Trailing Error: last WAL event has status_code != 0.
+        """
+        snapshot = AtomicSessionStore.load_snapshot(self.session_path)
+        all_events = self.wal.read_all_events()
+        last_event = all_events[-1] if all_events else None
+
+        # Edge Case 1: Fresh run (neither snapshot nor WAL events exist)
+        if snapshot is None and not all_events:
+            return ReconciliationResult(
+                consistent=True,
+                recovered_step=0,
+                reconciled_state=None,
+                uncommitted_events=[],
+                recovery_action="fresh_init",
+            )
+
+        # Edge Case 3: Trailing Error in WAL (status_code != 0)
+        if last_event is not None and last_event.status_code != 0:
+            active_step = last_event.step_index
+            if snapshot is not None:
+                snapshot.active_step = active_step
+                snapshot.status = "error"
+                AtomicSessionStore.save_snapshot(snapshot, self.session_path)
+            return ReconciliationResult(
+                consistent=False,
+                recovered_step=active_step,
+                reconciled_state=snapshot,
+                uncommitted_events=[last_event],
+                recovery_action="error_detected",
+            )
+
+        # Scenario D: Interrupted Action
+        # Last WAL event is action_start or tool_call without closing status
+        if last_event is not None and last_event.event_type in (
+            "action_start",
+            "tool_call",
+            "action_in_progress",
+        ):
+            active_step = last_event.step_index
+            return ReconciliationResult(
+                consistent=False,
+                recovered_step=active_step,
+                reconciled_state=snapshot,
+                uncommitted_events=[last_event],
+                recovery_action="interrupted_action_detected",
+            )
+
+        # Scenario C & Edge Case 2: Snapshot Missing, WAL exists
+        if snapshot is None and all_events:
+            last_ev = all_events[-1]
+            reconstructed_state = SessionState(
+                task_id=f"recovered_{last_ev.session_id}",
+                session_id=last_ev.session_id,
+                goal=f"Reconstructed from WAL for session {last_ev.session_id}",
+                active_step=last_ev.step_index,
+                status="recovered",
+            )
+            AtomicSessionStore.save_snapshot(reconstructed_state, self.session_path)
+            return ReconciliationResult(
+                consistent=True,
+                recovered_step=last_ev.step_index,
+                reconciled_state=reconstructed_state,
+                uncommitted_events=[],
+                recovery_action="replayed_from_log",
+            )
+
+        # At this point, snapshot is not None
+        assert snapshot is not None
+
+        # Snapshot exists, but no WAL events exist
+        if not all_events:
+            return ReconciliationResult(
+                consistent=True,
+                recovered_step=snapshot.active_step,
+                reconciled_state=snapshot,
+                uncommitted_events=[],
+                recovery_action="none",
+            )
+
+        last_ev = all_events[-1]
+
+        # Scenario A: Normal/Clean (snapshot step == last event step)
+        if snapshot.active_step == last_ev.step_index:
+            return ReconciliationResult(
+                consistent=True,
+                recovered_step=snapshot.active_step,
+                reconciled_state=snapshot,
+                uncommitted_events=[],
+                recovery_action="none",
+            )
+
+        # Scenario B: WAL Ahead of Snapshot
+        if last_ev.step_index > snapshot.active_step:
+            uncommitted = [e for e in all_events if e.step_index > snapshot.active_step]
+            snapshot.active_step = last_ev.step_index
+            AtomicSessionStore.save_snapshot(snapshot, self.session_path)
+            return ReconciliationResult(
+                consistent=True,
+                recovered_step=last_ev.step_index,
+                reconciled_state=snapshot,
+                uncommitted_events=uncommitted,
+                recovery_action="advanced_to_wal",
+            )
+
+        # Edge Case 4: Snapshot Ahead of WAL (snapshot step > last WAL step)
+        # Trust snapshot but record warning action
+        return ReconciliationResult(
+            consistent=True,
+            recovered_step=snapshot.active_step,
+            reconciled_state=snapshot,
+            uncommitted_events=[],
+            recovery_action="snapshot_ahead_of_wal",
+        )

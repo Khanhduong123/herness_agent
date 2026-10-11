@@ -23,7 +23,7 @@ from harness_agent.core.models import (
 )
 from harness_agent.core.runner import AgyRunner
 from harness_agent.core.security import wrap_untrusted_content
-from harness_agent.core.state import DAGStateStore
+from harness_agent.core.state import DAGStateStore, StateCoordinator
 from harness_agent.core.token_logger import TokenLogger
 from harness_agent.evaluation.evaluator import (
     CoverageSummary,
@@ -165,6 +165,7 @@ class AgentOrchestrator:
         self.state_store = state_store or DAGStateStore(db_path=db_path)
         self.auto_dispatch_critics = auto_dispatch_critics
         self.lazy_context = lazy_context
+        self.state_coordinator: Optional[StateCoordinator] = None
 
     @classmethod
     def load_plan(cls, file_path: str) -> OrchestrationPlan:
@@ -1152,8 +1153,19 @@ class AgentOrchestrator:
         self,
         plan_or_id: Optional[str] = None,
         plan_file: Optional[str] = None,
+        session_path: Optional[str] = None,
+        wal_path: Optional[str] = None,
     ) -> OrchestrationResult:
         """Resume an interrupted or pending orchestration run from disk state."""
+        # If session_path and wal_path are provided or state_coordinator is set, reconcile state
+        if session_path and wal_path:
+            self.state_coordinator = StateCoordinator(session_path=session_path, wal_path=wal_path)
+
+        if self.state_coordinator:
+            recon = self.state_coordinator.reconcile_on_startup()
+            if recon.recovery_action == "interrupted_action_detected":
+                pass
+
         state_data = None
         resolved_plan_file = plan_file
 
