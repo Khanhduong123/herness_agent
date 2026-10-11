@@ -25,6 +25,11 @@ from harness_agent.core.runner import AgyRunner
 from harness_agent.core.security import wrap_untrusted_content
 from harness_agent.core.state import DAGStateStore
 from harness_agent.core.token_logger import TokenLogger
+from harness_agent.evaluation.evaluator import (
+    CoverageSummary,
+    build_coverage_gap_prompt,
+    evaluate_coverage_gate,
+)
 
 
 class AgentOrchestrator:
@@ -842,6 +847,36 @@ class AgentOrchestrator:
             ),
             depends_on=[coder_subtask.id],
             workspace_dir=coder_subtask.workspace_dir,
+        )
+
+    def evaluate_coverage_gate(
+        self,
+        coverage: CoverageSummary,
+        min_coverage: float = 80.0,
+    ) -> bool:
+        """Evaluates whether the test suite coverage meets min_coverage threshold."""
+        return evaluate_coverage_gate(coverage=coverage, threshold=min_coverage)
+
+    def create_coverage_remediation_task(
+        self,
+        target_subtask: SubTask,
+        coverage: CoverageSummary,
+        tester_role: AgentRole = AgentRole.TESTER,
+    ) -> SubTask:
+        """Create a targeted remediation task for tester/coder to cover missed branches."""
+        gap_prompt = build_coverage_gap_prompt(coverage)
+        return SubTask(
+            id=f"{target_subtask.id}_coverage_gap",
+            name=f"Address Coverage Gaps in {target_subtask.name}",
+            role=tester_role,
+            instruction=(
+                f"Test suite coverage for '{target_subtask.name}' is currently "
+                f"{coverage.total_coverage:.2f}%, which is below the required 80.0% threshold.\n\n"
+                f"{gap_prompt}\n\n"
+                "Write targeted unit tests to cover uncovered branches and achieve >= 80% coverage."
+            ),
+            depends_on=[target_subtask.id],
+            workspace_dir=target_subtask.workspace_dir,
         )
 
     async def run_plan(
