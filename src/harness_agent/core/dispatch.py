@@ -10,7 +10,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 
@@ -18,6 +18,60 @@ from harness_agent.core.models import ROLE_TOOL_ALLOWLIST, AgentRole
 from harness_agent.core.token_logger import TokenLogger, get_active_model
 
 logger = logging.getLogger(__name__)
+
+
+def verify_and_load_agents_rule(
+    root_path: Union[str, Path],
+    max_retries: int = 3,
+    base_delay: float = 0.5,
+) -> str:
+    """Verifies AGENTS.md existence with exponential retry and loads system instructions.
+
+    Args:
+        root_path (Union[str, Path]): Root repository directory path.
+        max_retries (int): Maximum number of retry attempts before failure.
+        base_delay (float): Initial backoff delay in seconds.
+
+    Returns:
+        str: Contents of AGENTS.md ready for direct system prompt injection.
+
+    Raises:
+        RuntimeError: If AGENTS.md cannot be read after maximum retries.
+        ValueError: If AGENTS.md is empty.
+    """
+    resolved_root = Path(root_path).resolve()
+    target_file = resolved_root / "AGENTS.md"
+
+    for attempt in range(max_retries):
+        try:
+            if target_file.is_file():
+                content = target_file.read_text(encoding="utf-8")
+                if not content.strip():
+                    raise ValueError("AGENTS.md is empty")
+                return content
+            else:
+                logger.warning(
+                    "Pre-flight verification attempt %d/%d: %s not found",
+                    attempt + 1,
+                    max_retries,
+                    target_file,
+                )
+        except ValueError:
+            raise
+        except (PermissionError, OSError) as exc:
+            logger.warning(
+                "Pre-flight verification attempt %d/%d: Error reading %s: %s",
+                attempt + 1,
+                max_retries,
+                target_file,
+                exc,
+            )
+
+        if attempt < max_retries - 1:
+            delay = base_delay * (2**attempt)
+            time.sleep(delay)
+
+    raise RuntimeError("Pre-flight bootstrap failed: AGENTS.md not accessible after retries")
 
 
 class HerdrDispatcher:
@@ -228,6 +282,8 @@ class HerdrDispatcher:
         skill_files: Optional[List[str]] = None,
         model: Optional[str] = None,
         executable: str = "herdr",
+        inject_agents_rule: bool = False,
+        repo_root: Optional[Path] = None,
     ) -> Tuple[bool, str]:
         """Run 'herdr agent start worker_<task_id> --kind <kind> --pane <pane_id>'.
 
@@ -242,11 +298,42 @@ class HerdrDispatcher:
             skill_files: Optional list of skill file paths to inject.
             model: Optional model identifier (defaults to active user model).
             executable: Herdr executable binary name or path.
+            inject_agents_rule: If True, pre-flight verify AGENTS.md and prepend into system prompt.
+            repo_root: Optional repository root path for AGENTS.md preflight verification.
 
         Returns:
             Tuple[bool, str]: (success, output_or_error_message)
         """
-        if system_prompt_file:
+        effective_spf = system_prompt_file
+        if inject_agents_rule:
+            root = repo_root or Path.cwd()
+            try:
+                agents_rule = verify_and_load_agents_rule(root)
+            except Exception as exc:
+                return False, f"Pre-flight AGENTS.md verification failed: {exc}"
+
+            # If system_prompt_file provided, inject at top of system prompt
+            if system_prompt_file:
+                spf = Path(system_prompt_file)
+                if not spf.exists():
+                    return False, f"System prompt file not found: {system_prompt_file}"
+                try:
+                    orig_content = spf.read_text(encoding="utf-8")
+                    if agents_rule.strip() not in orig_content:
+                        injected_content = f"{agents_rule.strip()}\n\n{orig_content}"
+                        spf.write_text(injected_content, encoding="utf-8")
+                except Exception as exc:
+                    return False, f"Failed injecting AGENTS.md into system prompt file: {exc}"
+            else:
+                # Create a temporary or dedicated system prompt file with AGENTS.md
+                injected_spf = root / ".ai" / f".injected_system_prompt_{task_id}.md"
+                injected_spf.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    injected_spf.write_text(agents_rule, encoding="utf-8")
+                    effective_spf = str(injected_spf)
+                except Exception as exc:
+                    return False, f"Failed creating injected system prompt file: {exc}"
+        elif system_prompt_file:
             spf = Path(system_prompt_file)
             if not spf.exists():
                 return False, f"System prompt file not found: {system_prompt_file}"
@@ -258,8 +345,8 @@ class HerdrDispatcher:
 
         worker_name = cls.get_worker_name(task_id)
         cmd = [executable, "agent", "start", worker_name, "--kind", kind, "--pane", pane_id]
-        if system_prompt_file:
-            cmd.extend(["--system-prompt-file", Path(system_prompt_file).as_posix()])
+        if effective_spf:
+            cmd.extend(["--system-prompt-file", Path(effective_spf).as_posix()])
         if thinking_level:
             cmd.extend(["--thinking-level", str(thinking_level)])
 
@@ -450,6 +537,8 @@ class HerdrDispatcher:
         prompt: str,
         wait: bool = False,
         executable: str = "herdr",
+        inject_agents_rule: bool = False,
+        repo_root: Optional[Union[str, Path]] = None,
     ) -> Tuple[bool, str]:
         """Run 'herdr agent prompt worker_<task_id> "<prompt>"'.
 
@@ -458,12 +547,24 @@ class HerdrDispatcher:
             prompt: Prompt instruction text to send to the worker agent.
             wait: Wait for first matching settled state if True.
             executable: Herdr executable binary name or path.
+            inject_agents_rule: Whether to preflight-verify and inject AGENTS.md.
+            repo_root: Optional repository root path for AGENTS.md verification.
 
         Returns:
             Tuple[bool, str]: (success, output_or_error_message)
         """
+        effective_prompt = prompt
+        if inject_agents_rule:
+            root = repo_root or Path.cwd()
+            try:
+                agents_rule = verify_and_load_agents_rule(root)
+                if agents_rule.strip() not in effective_prompt:
+                    effective_prompt = f"{agents_rule.strip()}\n\n{effective_prompt}"
+            except Exception as exc:
+                return False, f"Pre-flight AGENTS.md verification failed: {exc}"
+
         worker_name = cls.get_worker_name(task_id)
-        cmd = [executable, "agent", "prompt", worker_name, prompt]
+        cmd = [executable, "agent", "prompt", worker_name, effective_prompt]
         if wait:
             cmd.append("--wait")
 
@@ -1193,6 +1294,10 @@ abort_task = HerdrDispatcher.abort_task
 dispatch_interactive_critics = HerdrDispatcher.dispatch_interactive_critics
 format_dispatch_payload = HerdrDispatcher.format_dispatch_payload
 resolve_domain_skills = HerdrDispatcher.resolve_domain_skills
+start_agent = HerdrDispatcher.start_agent
+prompt_agent = HerdrDispatcher.prompt_agent
+
+HerdrDispatcher.verify_and_load_agents_rule = staticmethod(verify_and_load_agents_rule)
 
 __all__ = [
     "HerdrDispatcher",
@@ -1203,8 +1308,11 @@ __all__ = [
     "filter_tools_for_role",
     "format_dispatch_payload",
     "merge_worktree_to_feature",
+    "prompt_agent",
     "resolve_domain_skills",
     "setup_worktree_env",
+    "start_agent",
     "stop_agent",
+    "verify_and_load_agents_rule",
     "wait_for_task",
 ]

@@ -16,6 +16,62 @@ from sqlmodel import Field, Session, SQLModel, create_engine, select
 from harness_agent.core.models import OrchestrationPlan, RunResult, TaskStatus
 
 
+def check_token_compaction_trigger(
+    current_tokens: int,
+    max_tokens: int,
+    threshold_ratio: float = 0.65,
+) -> bool:
+    """Determines if conversational history requires compaction based on token usage.
+
+    Args:
+        current_tokens (int): Current count of tokens in active context.
+        max_tokens (int): Maximum token capacity of the model context window.
+        threshold_ratio (float): Ratio triggering compaction (default 0.65).
+
+    Returns:
+        bool: True if compaction should be triggered, False otherwise.
+    """
+    if not (0.1 <= threshold_ratio <= 1.0):
+        raise ValueError(f"threshold_ratio must be between 0.1 and 1.0, got {threshold_ratio}")
+    if max_tokens <= 0 or current_tokens <= 0:
+        return False
+    return (current_tokens / max_tokens) >= threshold_ratio
+
+
+def compact_history_to_checkpoint(
+    turns: List[Dict[str, Any]],
+    preserve_recent: int = 3,
+) -> List[Dict[str, Any]]:
+    """Condenses older turns into a structured checkpoint summary while
+    maintaining exact recent records.
+
+    Args:
+        turns: Complete history turns list.
+        preserve_recent: Number of most recent turns to keep intact.
+
+    Returns:
+        List of compacted turns with a checkpoint summary turn at the
+        beginning if older turns exist.
+    """
+    if not turns:
+        return []
+
+    if preserve_recent < 0:
+        preserve_recent = 0
+
+    if len(turns) <= preserve_recent:
+        return [dict(t) for t in turns]
+
+    summary_text, recent_turns = compress_history(turns, window_size=preserve_recent)
+    checkpoint_turn: Dict[str, Any] = {
+        "role": "system",
+        "checkpoint": True,
+        "content": summary_text,
+        "summarized_turns_count": len(turns) - len(recent_turns),
+    }
+    return [checkpoint_turn] + [dict(t) for t in recent_turns]
+
+
 def compress_history(
     events: List[Dict[str, Any]],
     window_size: int = 5,

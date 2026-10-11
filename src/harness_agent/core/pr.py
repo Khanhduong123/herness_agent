@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
@@ -114,17 +116,93 @@ class PRResult:
     web_fallback: bool = False
 
 
-def _run_git_cmd(args: List[str], cwd: Optional[Path] = None) -> Tuple[int, str, str]:
-    """Execute a git command safely and return returncode, stdout, and stderr."""
+def _redact_secrets(text: str) -> str:
+    """Mask known sensitive token patterns in text."""
+    if not text:
+        return ""
+    # Redact GitHub PATs (ghp_...) and Bearer tokens
+    redacted = re.sub(r"ghp_[A-Za-z0-9]+", "[REDACTED_SECRET]", text)
+    redacted = re.sub(r"Bearer\s+[A-Za-z0-9\-_]+", "Bearer [REDACTED_SECRET]", redacted)
+    return redacted
+
+
+def safe_run_git_command(
+    args: list[str],
+    cwd: Optional[Path] = None,
+    timeout: float = 60.0,
+    log_path: Optional[Path] = None,
+) -> subprocess.CompletedProcess:
+    """Executes a git command in non-interactive headless mode with strict timeout and diagnostics.
+
+    Args:
+        args (list[str]): Git arguments, e.g. ["push", "origin", "branch"].
+        cwd (Optional[Path]): Working directory for the git command.
+        timeout (float): Execution timeout in seconds (defaults to 60.0).
+        log_path (Optional[Path]): Path for writing error diagnostics.
+
+    Returns:
+        subprocess.CompletedProcess: Execution result with stdout and stderr.
+
+    Raises:
+        ValueError: When cwd is provided but does not exist.
+        subprocess.TimeoutExpired: When command execution exceeds timeout.
+        subprocess.CalledProcessError: When git command returns a non-zero exit code.
+    """
+    if cwd is not None and not cwd.exists():
+        raise ValueError("Working directory does not exist")
+
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
+    # Fallback environment credentials
+    if "GITHUB_TOKEN" in env and "GH_TOKEN" not in env:
+        env["GH_TOKEN"] = env["GITHUB_TOKEN"]
+    elif "GH_TOKEN" in env and "GITHUB_TOKEN" not in env:
+        env["GITHUB_TOKEN"] = env["GH_TOKEN"]
+
+    target_log = log_path or (Path(".runs") / "git_diagnostics.log")
+
     try:
         res = subprocess.run(
             ["git"] + args,
             capture_output=True,
             text=True,
             cwd=str(cwd) if cwd else None,
-            check=False,
+            env=env,
+            timeout=timeout,
+            check=True,
         )
+        return res
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        try:
+            target_log.parent.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now(timezone.utc).isoformat()
+            stderr_content = exc.stderr if exc.stderr else ""
+            if isinstance(stderr_content, bytes):
+                stderr_content = stderr_content.decode("utf-8", errors="replace")
+            redacted_err = _redact_secrets(str(stderr_content))
+            log_entry = (
+                f"[{timestamp}] Command: git {' '.join(args)}\n"
+                f"Error: {type(exc).__name__}\n"
+                f"Details: {redacted_err}\n"
+                f"{'-'*40}\n"
+            )
+            with open(target_log, "a", encoding="utf-8") as f:
+                f.write(log_entry)
+        except Exception:
+            pass
+        raise exc
+
+
+def _run_git_cmd(args: List[str], cwd: Optional[Path] = None) -> Tuple[int, str, str]:
+    """Execute a git command safely and return returncode, stdout, and stderr."""
+    try:
+        res = safe_run_git_command(args, cwd=cwd, timeout=60.0)
         return res.returncode, res.stdout.strip(), res.stderr.strip()
+    except subprocess.CalledProcessError as exc:
+        stdout_str = exc.stdout.strip() if exc.stdout else ""
+        stderr_str = exc.stderr.strip() if exc.stderr else ""
+        return exc.returncode, stdout_str, stderr_str
     except Exception as exc:
         return 1, "", str(exc)
 
