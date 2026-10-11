@@ -8,8 +8,10 @@ import os
 import shutil
 import subprocess
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+from harness_agent.core.dispatch import verify_and_load_agents_rule
 from harness_agent.core.models import AgyConfig, RunResult, Task, ToolCallRecord
 from harness_agent.core.token_logger import ModelPricing, TokenLogger
 
@@ -24,6 +26,8 @@ def build_cache_aligned_prompt(
     system_instructions: str,
     dynamic_context: Dict[str, Any],
     user_prompt: str,
+    inject_agents_rule: bool = False,
+    root_path: Optional[Union[str, Path]] = None,
 ) -> Tuple[str, str]:
     """Constructs prompt partitioned into static cacheable prefix and dynamic tail.
 
@@ -31,11 +35,21 @@ def build_cache_aligned_prompt(
         system_instructions: Invariant base instructions.
         dynamic_context: Dictionary of runtime context (timestamps, paths, etc.).
         user_prompt: Current turn prompt.
+        inject_agents_rule: Whether to preflight-verify and inject AGENTS.md rules.
+        root_path: Optional root directory path to locate AGENTS.md.
 
     Returns:
         Tuple of (static_prefix, dynamic_tail).
     """
     cleaned_instructions = system_instructions.strip() if system_instructions else ""
+    if inject_agents_rule:
+        agents_rule = verify_and_load_agents_rule(root_path or Path.cwd())
+        if agents_rule.strip() not in cleaned_instructions:
+            if cleaned_instructions:
+                cleaned_instructions = f"{agents_rule.strip()}\n\n{cleaned_instructions}"
+            else:
+                cleaned_instructions = agents_rule.strip()
+
     if not cleaned_instructions:
         static_prefix = ""
     else:
@@ -136,10 +150,30 @@ class AgyRunner:
         self,
         task: Task,
         log_run: Optional[bool] = None,
+        inject_agents_rule: bool = False,
+        repo_root: Optional[Union[str, Path]] = None,
     ) -> RunResult:
         """Execute a single task asynchronously through agy."""
         start_time = time.time()
-        cmd = self.build_command(prompt=task.prompt, task=task)
+        effective_prompt = task.prompt
+        if inject_agents_rule:
+            root = repo_root or (Path(task.workspace_dir) if task.workspace_dir else Path.cwd())
+            try:
+                rule_content = verify_and_load_agents_rule(root)
+                if rule_content.strip() not in effective_prompt:
+                    effective_prompt = f"{rule_content.strip()}\n\n{effective_prompt}"
+            except Exception as exc:
+                return RunResult(
+                    task_id=task.id,
+                    success=False,
+                    exit_code=1,
+                    duration_seconds=0.0,
+                    output_text="",
+                    stderr=f"Pre-flight AGENTS.md verification failed: {exc}",
+                    error_message=f"Pre-flight AGENTS.md verification failed: {exc}",
+                )
+
+        cmd = self.build_command(prompt=effective_prompt, task=task)
         cwd = task.workspace_dir or os.getcwd()
 
         events: List[Dict[str, Any]] = []
@@ -322,3 +356,11 @@ class AgyRunner:
                     token_usage["completion_tokens"], _safe_int(ct)
                 )
                 token_usage["cached_tokens"] = max(token_usage["cached_tokens"], _safe_int(cached))
+
+
+__all__ = [
+    "STATIC_PREFIX",
+    "AgyRunner",
+    "build_cache_aligned_prompt",
+    "verify_and_load_agents_rule",
+]
