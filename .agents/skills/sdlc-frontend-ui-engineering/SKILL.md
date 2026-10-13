@@ -232,6 +232,87 @@ function useToggleTask() {
 }
 ```
 
+## Mobile & Responsive UX Standards
+
+### Touch Target Sizing & Spacing
+- **Minimum Target Size**: Ensure interactive elements meet minimum bounding boxes:
+  - iOS Human Interface Guidelines: at least **44×44px**.
+  - Android Material Design: at least **48×48px**.
+- **Touch Clearance**: Maintain at least **8px** spacing between adjacent touch targets to prevent accidental mis-taps.
+
+### Modern Touch Components (React Native)
+- Prefer `Pressable` over legacy `TouchableOpacity` or `TouchableHighlight` for finer interaction states and performance.
+- Use `hitSlop` to expand small hit areas (e.g. icons, close buttons) without modifying visible padding or layout geometry:
+```jsx
+<Pressable
+  onPress={handleDelete}
+  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+  accessibilityRole="button"
+  accessibilityLabel="Delete item"
+  style={({ pressed }) => [styles.actionButton, pressed && styles.actionButtonPressed]}
+>
+  <TrashIcon />
+</Pressable>
+```
+
+### Safe Area Insets
+- Always account for device notches, camera cutouts, dynamic islands, and home indicator bars.
+- In React Native, prefer `useSafeAreaInsets()` from `react-native-safe-area-context` to dynamically apply padding or margins where appropriate:
+```jsx
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+export function ScreenContainer({ children }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={{ flex: 1, paddingTop: insets.top, paddingBottom: insets.bottom }}>
+      {children}
+    </View>
+  );
+}
+```
+- In Mobile Web, utilize CSS environment variables (`padding-top: env(safe-area-inset-top)`).
+
+### Navigation & Back Handling
+- **Bottom Navigation Tabs**: Keep bottom tabs focused and scannable — maximum **3 to 5** tabs. If more destinations exist, group under an accessible "More" screen or drawer.
+- **Android Hardware Back-Button**: In React Native screens with modals, multi-step wizards, or modified back navigation, preserve expected platform behavior with `BackHandler` and `useFocusEffect`:
+```jsx
+import { useEffect, useCallback } from 'react';
+import { BackHandler } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+
+export function FormScreen({ navigation, isDirty, onDiscard }) {
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        if (isDirty) {
+          onDiscard();
+          return true; // Prevent default back action
+        }
+        return false; // Allow standard back action
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [isDirty, onDiscard])
+  );
+
+  return <FormView />;
+}
+```
+
+### Modal & Bottom Sheet Escape Hatches
+- Support intuitive swipe-to-dismiss gestures for bottom sheets and modals.
+- Always provide an explicit, visible close button (`X`) in addition to gesture dismissal to avoid trapping users.
+
+### Integration with UI/UX Pro Max Engine
+- For color palettes, typography pairings, design tokens, and platform-specific mobile guidelines, query the offline intelligence tool:
+```bash
+# Search mobile UX guidelines, touch targets, and React Native tokens
+python .agents/skills/ui-ux-pro-max/scripts/search.py "mobile touch targets safe areas react native"
+```
+- Ensure tokens and styles align with project design systems without introducing TypeScript.
+
+
 ## Common Rationalizations
 
 | Rationalization | Reality |
