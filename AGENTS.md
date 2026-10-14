@@ -10,13 +10,13 @@
 > If the user requests to "implement feature X", "fix bug Y", "write code", or "refactor":
 > 1. **DO NOT touch application code directly.** Calling `replace_file_content`, `apply_patch`, or `write_to_file` on application code files is a critical system violation.
 > 2. **DO NOT write code yourself.** Coding is exclusively the responsibility of a dedicated **Coder Worker Agent**.
-> 3. **FORBIDDEN TOOLS (`invoke_subagent`, `define_subagent`):** Calling `invoke_subagent` or `define_subagent` is strictly forbidden (spawns hidden background agents / 'agents ngầm'). All worker agents must be dispatched interactively via Herdr terminal panes.
+> 3. **FORBIDDEN TOOLS (`invoke_subagent`, `define_subagent`):** Spawning hidden background agents is strictly forbidden. All worker agents must be dispatched interactively via Herdr terminal panes.
 > 4. **YOUR ORCHESTRATOR WORKFLOW IS STRICTLY**:
->    - **Decompose & Plan**: Formulate a Task DAG with mandatory `plan_id` in `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` (strictly adhering to template `.agents/skills/sdlc-planning-task-breakdown/resources/main_plan_template.md`) and Sub-Specs in `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[task_id].md` (strictly adhering to template `.agents/skills/sdlc-subtask-specifier/resources/subtask_template.md`).
->    - **Wait for User Approval**: Present the plan to the user before any workspace setup or worker launch.
->    - **Setup Workspace**: Create an isolated git worktree (`git worktree add -b agent/<task_id> .worktrees/agent/<task_id>`).
->    - **Dispatch to Worker**: Launch a specialized Coder Agent interactively (`herdr agent start worker_[task_id] --kind agy --pane <pane> --cwd .worktrees/agent/<task_id> --system-prompt-file .agents/skills/coder_worker.md --thinking-level low --dangerously-skip-permissions`) and prompt via the multi-line dispatch contract template (`herdr agent prompt worker_[task_id] @"..."@`).
->    - **Quality Gate & Critics**: Dispatch diffs in parallel to the 3 Adversarial Critics and verify 100% pytest pass rate.
+>    - **Decompose & Plan**: Formulate Task DAG in `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` and Sub-Specs in `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[task_id].md`.
+>    - **Wait for User Approval**: Present plan before workspace setup or dispatch.
+>    - **Setup Workspace**: Create isolated git worktree (`git worktree add -b agent/<task_id> .worktrees/agent/<task_id>`).
+>    - **Dispatch to Worker**: Launch Coder Agent (`herdr agent start worker_[task_id] --kind agy --pane <pane> --cwd .worktrees/agent/<task_id> -- --effort low --dangerously-skip-permissions`) and prompt via dispatch contract template (`herdr agent prompt worker_[task_id] @"..."@`).
+>    - **Quality Gate & Critics**: Dispatch diffs in parallel to 3 Adversarial Critics; verify 100% pytest pass rate.
 
 ---
 
@@ -38,451 +38,164 @@
 ## 4-TIER ARCHITECTURAL CONSTRAINTS & WORKFLOW PROTOCOL
 
 ### Tier 1: Infrastructure & Tool-Level Guardrails
-- **Zero Root-Repo Mutations:** The Central Orchestrator is strictly forbidden from directly modifying any project files in the root directory.
-- **Internal Subagent Lockout:** Internal AGY subagent mechanisms (`invoke_subagent`, `define_subagent`) are disabled in the CLI/Orchestrator configuration to prevent AI from bypassing Herdr and mutating the root repository.
-- **Mandatory Git Worktree Isolation:** Every subtask modifying code MUST run in an isolated Git Worktree managed via native `git worktree`, branching from the active feature branch:
-  `git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<feature_name>`
-- **Worktree Environment Setup:** Environment configuration files (`.env`, `.env.test`, `.env.local`, `.env.example` if present) MUST be copied from the repository root into newly created git worktrees before workers run tests.
-- **Multiplexer Workspace Protocol:** All workers must be launched in explicit Herdr panes with low effort and preloaded system prompt:
-  ```bash
-  herdr agent start worker_<task_id> \
-    --kind agy \
-    --pane <pane_id> \
-    --cwd .worktrees/agent/<task_id> \
-    --system-prompt-file .agents/skills/coder_worker.md \
-    --thinking-level low \
-    --dangerously-skip-permissions
-  ```
-- **Socket/Prompt Communication & Dispatch Contract:** Orchestrator communicates with workers strictly via Herdr socket using the mandatory multi-line prompt payload template:
+- **Zero Root-Repo Mutations:** Orchestrator never modifies files directly in root. Internal subagents (`invoke_subagent`, `define_subagent`) are strictly locked out.
+- **Mandatory Git Worktree Isolation:** Code edits MUST run in an isolated Git worktree: `git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<feature_name>`. Copy `.env*` files to worktree if present.
+- **Multiplexer Workspace Protocol:** Launch workers interactively in explicit Herdr panes with low effort and bypass permissions:
+  `herdr agent start worker_<task_id> --kind agy --pane <pane_id> --cwd .worktrees/agent/<task_id> -- --effort low --dangerously-skip-permissions`
+- **Socket/Prompt Dispatch Contract:** Dispatch prompts strictly via Herdr socket:
   ```powershell
   herdr agent prompt worker_<task_id> @"
   [ROLE: Leaf Coder Worker]
   Spec: .ai/plans/subtasks/<date>/<plan_id>/subtask_<id>.md
+  Required Skills: sdlc-clean-code-standards
   Prohibitions: No ManageTask, no background loops, no full-file overwrite.
   Target: 100% pytest pass -> write .ai/status/<task_id>.complete -> output [WORKER_COMPLETED].
+  Instructions: Read assigned spec and activate required skills before implementing code changes.
   "@
   ```
-  *(Note: In PowerShell here-strings, the closing `\"@` must be at the beginning of the line without leading whitespace).*
-- **Background Task & Polling Lockout (Both Worker & Orchestrator):** Spawning background tasks (`ManageTask`) or setting scheduling loops (`schedule`) is strictly forbidden for leaf workers and Orchestrators tracking workers. Orchestrator must NEVER invoke `ManageTask` to monitor worker processes; all worker waits must be synchronous and blocking.
+- **Background Task & Polling Lockout:** No background loops (`ManageTask`) or `schedule` polling for workers or orchestrator tracking workers.
 
 ### Tier 2: Role Isolation & Anti-Role-Drift
-- **Dedicated Role Prompts:** Never share the Orchestrator's `AGENTS.md` with Worker Agents. Every sub-agent role has its dedicated prompt/skill file preloaded at startup via `--system-prompt-file`:
-  - Researcher / Specifier Worker: `.agents/skills/researcher_worker.md`
-  - Coder Worker: `.agents/skills/coder_worker.md`
-  - Adversarial Critic: `.agents/skills/critic_agent.md`
-  - Tester Agent: `.agents/skills/tester_worker.md`
-- **Role Anchoring & Dispatch Contract:** Every prompt dispatched to a worker MUST begin with an explicit role anchor and adhere to the multi-line dispatch contract:
-  - Researcher / Specifier: `[ROLE: Architecture Planner / Contract Specifier]` or `"[SYSTEM CONTEXT: You are a Researcher & Specifier Worker Agent. You CANNOT write application source code or dispatch other agents. Only analyze architecture, formulate Task DAGs, and specify API contracts and sub-specs.]"`
-  - Coder: `[ROLE: Leaf Coder Worker]` or `"[SYSTEM CONTEXT: You are a leaf implementation worker. You CANNOT plan or dispatch other agents. Only write code and run tests in your worktree. DO NOT use background tasks, ManageTask, or schedule polling. Execute all commands synchronously in blocking mode.]"`
-  - Critic: `"[SYSTEM CONTEXT: You are an Adversarial Critic Agent operating strictly in READ-ONLY mode. You CANNOT modify code or dispatch agents. You only evaluate git diffs and code against specifications.]"`
-  - Tester: `"[SYSTEM CONTEXT: You are a QA & Tester Worker Agent. You CANNOT orchestrate or modify core application logic. You write unit/integration tests and verify test coverage in your worktree.]"`
-- **Strict Leaf Worker Boundaries:** Leaf workers are strictly execution engines; they cannot orchestrate, design architectures, or spawn sub-agents.
-- **Read-Only Critics:** Adversarial Critics (Security, Performance, Requirements) operate strictly in READ-ONLY mode and evaluate git diffs only.
-- **Worker Thinking Budget & Task Lock:** Coder Workers are locked to synchronous blocking commands (`WaitMsBeforeAsync=10000ms`, direct `pytest` execution) with capped reasoning effort (`--effort low`) to prevent token burn and spinlocks.
+- **Dedicated Role Prompts & Skill Delivery:** Never share `AGENTS.md` with workers. Roles are anchored via prompt headers; skills delivered via the 3-Tier Delivery Protocol.
+- **Role Anchors:** Researcher/Specifier (`[ROLE: Architecture Planner / Contract Specifier]`), Coder (`[ROLE: Leaf Coder Worker]`), Critic (`[ROLE: Adversarial Critic]`), Tester (`[ROLE: QA & Tester Worker]`).
+- **Strict Leaf Worker Boundaries & Read-Only Critics:** Leaf workers only code/test; Critics only evaluate diffs (read-only). Coder worker locked to synchronous blocking commands with `--effort low`.
 
 ### Tier 3: Anti-Spinlock, Timeout & Loop Truncation
-- **Strict Ban on Repetitive Pane Reading & Polling Loops:** The Orchestrator is **STRICTLY FORBIDDEN** from continuously calling `herdr pane read`, `herdr agent read`, or `ManageTask(status...)` while a worker is coding. Polling the terminal buffer floods the context window with thousands of redundant tokens and degrades reasoning.
-- **Deterministic Blocking Wait (Zero Tokens):** All worker waits must be executed as blocking, single-command invocations:
-  - Primary: `conda run -n pytorch harness-agent wait <task_id> --timeout 600`
-  - Socket Alternative: `herdr agent wait worker_<task_id> --timeout 300000`
-- **Hard Timeout Ceiling (300s–600s Default):** Set default wait timeouts to 300s–600s (5–10 minutes) per subtask turn. Subtasks requiring deep reasoning, code generation, and test execution take minutes, not seconds; short timeouts (30s–60s) induce artificial timeout failures and panic loops.
-- **Single-Read-On-Timeout Policy (Max 20 Lines):** Reading terminal buffers during execution is prohibited. ONLY if a blocking wait times out or raises an error, the Orchestrator may execute exactly ONE diagnostic read capped at 20 lines:
-  `herdr agent read worker_<task_id> --source recent-unwrapped --lines 20`
-- **Authoritative File-Based Completion Signal:** The presence of `.ai/status/<task_id>.complete` is the sole authoritative trigger to resume orchestration. Scraping terminal buffers for arbitrary string markers is strictly forbidden.
-- **Anti-Monologue & Passive Waiting Ban:** Agents must never roleplay or output internal monologues during waiting states (e.g., "I am currently watching the terminal..."). Use blocking CLI commands and stop tool execution cleanly.
-- **Loop Truncation (Max 3 Rejection Cycles):** Maximum **3 iteration loops** between Coder and Critics/Pytest on any single subtask. If defects persist after 3 remediation cycles, the Orchestrator MUST abort immediately and escalate to the human User with complete error and critic traces.
-- **Rollback & Abort Protocol:** When a subtask times out or fails 3 consecutive Critic cycles:
-  1. Dump diagnostic git diff and error traceback to `.ai/failures/<task_id>_<timestamp>.log`.
-  2. Terminate the Herdr worker pane / process (`herdr pane close <pane_id>`).
-  3. Remove the abandoned worktree (`git worktree remove --force .worktrees/agent/<task_id>`) and delete the subtask branch (`git branch -D agent/<task_id>`).
-  4. Escalate to the human User with the failure log path for intervention.
+- **Ban on Terminal Polling:** NEVER continuously call `herdr pane read` or `herdr agent read`. Polling terminal buffers floods the context window.
+- **Deterministic Blocking Wait:** `conda run -n pytorch harness-agent wait <task_id> --timeout 600` (or `herdr agent wait worker_<task_id> --timeout 300000`).
+- **Single-Read-On-Timeout Policy:** Only on wait timeout/error, execute ONE diagnostic read: `herdr agent read worker_<task_id> --source recent-unwrapped --lines 20`.
+- **Authoritative Completion Signal:** `.ai/status/<task_id>.complete` is the sole authoritative trigger.
+- **Loop Truncation & Rollback:** Max 3 rejection cycles between Coder and Critics/Pytest. On abort: log to `.ai/failures/`, close pane (`herdr pane close <pane_id>`), remove worktree (`git worktree remove --force .worktrees/agent/<task_id>`), delete branch (`git branch -D agent/<task_id>`), escalate to User.
 
 ### Tier 4: Human-in-the-Loop (HITL) & Automated PR Gate
-- **Strict Automated Merge Lock:** The Orchestrator and all worker scripts are **STRICTLY FORBIDDEN** from executing `git merge main`, `git merge master`, or `git merge dev`. Direct commits to protected branches are hard-blocked.
-- **Human-Only Merge Authority:** Merging code into `main` or `dev` is exclusively reserved for the human user.
-- **Automated PR Gate Protocol (Feature Branch Hierarchy):** Upon final subtask approval (100% pytest pass + 3 Critics PASS):
-  1. Merge subtask branch back into the feature branch: `git merge --no-ff agent/<task_id>`
-  2. Clean up the isolated workspace: Stop/kill the active Herdr worker pane FIRST, then remove worktree: `git worktree remove --force .worktrees/agent/<task_id>`, and delete the local branch `git branch -d agent/<task_id>`.
-  3. Run full regression test suite (`conda run -n pytorch pytest tests/`) on the feature branch.
-  4. Run automated Adversarial Critics Gate: `conda run -n pytorch harness-agent review --base main`
-  5. Verify 100% pytest pass rate + 3 Critics PASS before PR creation.
-  6. Push feature branch to remote: `git push -u origin feat/<feature_name>`
-  7. Create Pull Request using CLI tool: `conda run -n pytorch harness-agent pr create --base main`
-  8. Provide the PR link directly to the User in chat for manual review and merge authorization.
+- **Strict Merge Lock & Human Authority:** Merging into `main` or `dev` is exclusively reserved for the human user.
+- **Automated PR Gate Protocol:** On approval (100% pytest pass + 3 Critics PASS):
+  1. Merge subtask: `git merge --no-ff agent/<task_id>`
+  2. Cleanup: close worker pane, `git worktree remove --force .worktrees/agent/<task_id>`, `git branch -d agent/<task_id>`.
+  3. Regression: `conda run -n pytorch pytest tests/`
+  4. Critics Gate: `conda run -n pytorch harness-agent review --base main`
+  5. Push & PR: `git push -u origin feat/<feature_name>` -> `conda run -n pytorch harness-agent pr create --base main` -> provide PR link to User.
 
 ---
 
 ## 1. System Architecture: Central Orchestrator Pattern
 
-The system uses a **Central Orchestrator Pattern** to coordinate specialized **Worker Agents**:
-
-```mermaid
-graph TD
-    User["User / Task Request"] --> Orchestrator["Central Orchestrator (AgentHarness / Orchestrator)"]
-
-    subgraph "Herdr Terminal Multiplexer / Workspaces"
-        Orchestrator -->|Decomposes & Dispatches| Researcher["Researcher Agent<br/>(Analyze & Blueprint)"]
-        Orchestrator -->|Assigns Feature Code| Coder["Coder Agent<br/>(Implementation)"]
-        Orchestrator -->|Dispatches Test Suite| Tester["Tester Agent<br/>(QA & Pytest)"]
-        Orchestrator -->|Dispatches Diff in Parallel| Critics["Parallel Adversarial Critics"]
-        Critics --> SecurityReviewer["Security Reviewer Agent<br/>(Vulnerabilities & Injections)"]
-        Critics --> PerformanceReviewer["Performance Reviewer Agent<br/>(Complexity & O(N^2) Loops)"]
-        Critics --> RequirementReviewer["Requirement Reviewer Agent<br/>(Spec & Acceptance Criteria)"]
-    end
-
-    Researcher -->|Context & Specs| Orchestrator
-    Coder -->|Code Diffs & Artifacts| Orchestrator
-    Tester -->|Test Reports & Tracebacks| Orchestrator
-    SecurityReviewer -->|Security Feedback| Orchestrator
-    PerformanceReviewer -->|Performance Feedback| Orchestrator
-    RequirementReviewer -->|Requirement Feedback| Orchestrator
-
-    Orchestrator -->|Aggregated Review Feedback| Coder
-    Orchestrator -->|Final Result & Verification| Output["Validated Deliverable"]
-```
+The system uses a **Central Orchestrator Pattern** to coordinate specialized **Worker Agents** via Herdr terminal multiplexer:
+- **Planning & Blueprint**: Orchestrator assigns DAG planning and contract specifications to Researcher/Specifier.
+- **Implementation**: Feature code is assigned to Coder in isolated Git worktrees.
+- **Testing & Adversarial Review**: Test suites and git diffs are evaluated concurrently by Tester and Adversarial Critics (Security, Performance, Requirements).
 
 | Role | Identifier | Key Responsibilities |
 | :--- | :--- | :--- |
-| **Orchestrator** | `orchestrator` | • Receives the goal from the User.<br/>• Decomposes the goal into a Task DAG.<br/>• **CRITICAL RULE:** NEVER write or edit code files directly. Wait for approval, and create an isolated git worktree via native git (`git worktree add -b agent/<task_id> .worktrees/agent/<task_id>`).<br/>• **CRITICAL RULE (Mandatory Plan ID & Local Storage):** DO NOT create UI Artifacts. MUST explicitly write all plans directly to `.ai/plans/main/YYYY-MM-DD/` and `.ai/plans/subtasks/YYYY-MM-DD/` using standard file paths. Every plan MUST declare a unique `plan_id` (e.g., `plan_[feature_name]`). Master Task DAGs MUST be stored as `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` with YAML frontmatter containing `plan_id` (strictly adhering to template `.agents/skills/sdlc-planning-task-breakdown/resources/main_plan_template.md`). Individual Sub-Specs MUST be stored in dedicated plan folders with 2-digit zero-padded numbers: `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[task_id].md` referencing both `Plan ID: [plan_id]` and `Task ID: [task_id]` (strictly adhering to template `.agents/skills/sdlc-subtask-specifier/resources/subtask_template.md`). This prevents file overwriting across multiple plans and guarantees clean numerical ordering.<br/>• **CRITICAL RULE (Mandatory Edge Cases & Boundary Conditions):** Every Master Plan and Sub-Spec MUST include an explicit **`## Edge Cases & Boundary Conditions`** section detailing at least 3-5 concrete edge cases (missing files, null/empty inputs, path separator differences, race conditions, permission errors) with handling logic and test assertions.<br/>• **CRITICAL RULE (Sub-Agent Domain Expertise):** Every sub-agent MUST be a dedicated domain expert focused exclusively on that 1 assigned task and MUST strictly adhere to system rules.<br/>• **CRITICAL RULE (FORBIDDEN TOOLS - No Hidden Background Subagents):** Calling `invoke_subagent` or `define_subagent` is strictly forbidden (spawns hidden background agents / 'agents ngầm'). All worker agents MUST be dispatched interactively via dedicated Herdr terminal panes.<br/>• **DO NOT run `agy` in the background**. Launch interactively (`herdr agent start worker_[task_id] --kind agy --pane <pane_id> --cwd .worktrees/agent/<task_id> --system-prompt-file .agents/skills/coder_worker.md --thinking-level low --dangerously-skip-permissions`) and send prompts via `herdr agent prompt worker_[task_id] @"..."@`.<br/>• **MANDATORY Completion Contract & Timeout:** Must monitor worker execution. Worker signals completion by outputting `[WORKER_COMPLETED]` or writing `.ai/status/<task_id>.complete`. Orchestrator enforces a strict timeout ceiling (10–15 minutes max) to prevent deadlocks if the worker hangs or prompts for input. |
-| **Researcher** | `researcher` | • Explores the codebase, dependencies, and available libraries.<br/>• Designs architectural blueprints before implementation begins. |
-| **Coder** | `coder`, `agent-backend`, etc. | • Implements feature code, strictly adhering to PEP 8, typing, and the provided spec.<br/>• **CRITICAL RULE ("Patch, Never Regenerate"):** For existing files, MUST NEVER rewrite or overwrite the entire file; MUST ONLY apply minimal diff hunks using patch tools (`apply_patch`, `replace_file_content`, `multi_replace_file_content`). Full-file overwrites on existing files are strictly tool-locked. For newly created files (new modules or tests), `write_to_file` is explicitly permitted.<br/>• **Domain Expert Rule:** The Orchestrator configures this sub-agent as a specialized domain expert (e.g., `agent-backend` for APIs) strictly dedicated to its 1 assigned subtask and compliant with all quality gates. |
-| **Tester** | `tester` | • Writes unit and integration tests using `pytest` and `pytest-asyncio`.<br/>• Strictly categorizes tests into `tests/unit/` and `tests/integration/`.<br/>• Validates a 100% pass rate before hand-off. |
-| **Security Reviewer** | `security_reviewer`, `security-reviewer` | • Evaluates code diffs and files for vulnerabilities, injection flaws (SQLi, shell injection, XSS), hardcoded secrets, and unsafe deserialization. |
-| **Performance Reviewer** | `performance_reviewer`, `performance-reviewer` | • Evaluates code diffs for algorithmic efficiency, nested loops (O(N^2) complexity), memory leaks, and performance bottlenecks. |
-| **Requirement Reviewer** | `requirement_reviewer`, `requirement-reviewer` | • Evaluates code against functional specifications, acceptance criteria, and sub-spec contracts. |
-| **Reviewer** | `reviewer` | • Evaluates code diffs, linting, typing, conventions, and security.<br/>• Verifies that code modifications are atomic diff patches rather than full-file regenerations (retained for backward compatibility). |
+| **Orchestrator** | `orchestrator` | Receives goal, plans Task DAG in `.ai/plans/main/YYYY-MM-DD/main_[plan_id].md` and Sub-Specs in `.ai/plans/subtasks/YYYY-MM-DD/[plan_id]/subtask_01_[task_id].md` with edge cases. Creates isolated worktrees (`git worktree add -b agent/<task_id> .worktrees/agent/<task_id>`). Dispatches workers interactively via Herdr (`herdr agent start worker_[task_id] --kind agy --pane <pane> --cwd .worktrees/agent/<task_id> -- --effort low --dangerously-skip-permissions`). Never writes code directly (Rule 0). |
+| **Researcher** | `researcher` | Explores codebase, dependencies, and architectures; writes blueprints and specs. |
+| **Coder** | `coder`, `agent-backend` | Implements feature code in isolated worktree using patch tools only ("Patch, Never Regenerate"). Runs unit tests. |
+| **Tester** | `tester` | Writes unit/integration tests in `tests/unit/` and `tests/integration/`. Validates 100% pass rate. |
+| **Security Reviewer** | `security_reviewer` | Read-only critic evaluating git diffs for vulnerabilities, injections, and leaked secrets. |
+| **Performance Reviewer** | `performance_reviewer` | Read-only critic evaluating git diffs for complexity, nested loops, and memory leaks. |
+| **Requirement Reviewer** | `requirement_reviewer` | Read-only critic verifying git diffs against sub-spec contracts and acceptance criteria. |
 
 ### 1.1. Adversarial Critics Review Protocol & Workflow Optimization
-When a **Coder** completes a feature implementation or code change:
-1. **Parallel Dispatch**: The Orchestrator automatically extracts the code diff / output and dispatches it concurrently to all 3 adversarial critics (`Security Reviewer`, `Performance Reviewer`, `Requirement Reviewer`) in parallel via `asyncio.gather`.
-2. **Specialized Scrutiny**: Each critic focuses exclusively on its domain of expertise without overlapping biases.
-3. **Feedback Aggregation**: The Orchestrator aggregates all critic evaluations into an `AggregatedCriticReview`.
-4. **Coder / Patcher Remediation**: If defects or vulnerabilities are detected (e.g., SQL injection or quadratic loops), the aggregated feedback is routed directly back to the Coder / Patcher for remediation.
-5. **Loop Truncation & Escalation**:
-   - **Maximum Rejection Cycles**: 3 iterations.
-   - If critics or test gates reject the submission for 3 consecutive cycles, the loop truncates immediately and escalates to the human user with diagnostic traces.
-6. **Critics Diff Guardrails (Diff Size & Binary Filtering)**:
-   - If the git diff exceeds 500 lines or contains generated/binary files, the Orchestrator MUST filter out generated/binary files or require splitting the diff before dispatching to the 3 Critics to prevent LLM context overflow.
-7. **Automated Enforcement in PR Creation**:
-   - `conda run -n pytorch harness-agent pr create` automatically executes the Adversarial Critics Gate (`harness-agent review --base main`) before opening any PR, and strictly blocks PR creation if any critic rejects the changes.
-
-```mermaid
-graph TD
-    User["User Request"] --> Orchestrator["Central Orchestrator"]
-    Orchestrator -->|1. Blueprint| SubSpec[".ai/plans/subtasks/YYYY-MM-DD/"]
-    Orchestrator -->|2. Provision| Worktree["git worktree add -b agent/<task_id> .worktrees/agent/<task_id>"]
-    Orchestrator -->|3. Execute| Coder["herdr agent start worker_<task_id> (Coder + Unit Test)<br/>Reports: 100% Pytest Baseline Pass"]
-    Coder -->|4. Read-Only Parallel Evaluation| EvalGate["Evaluation Gate (No extra worktrees needed)"]
-    EvalGate --> Tester["Tester Agent (Stress & Integration tests on branch)"]
-    EvalGate --> Security["Security Critic (Reads git diff)"]
-    EvalGate --> Performance["Performance Critic (Reads git diff)"]
-    EvalGate --> Requirement["Requirement Critic (Compares diff with sub-spec)"]
-
-    EvalGate -->|FAILED: Loops < 3| Aggregate["Aggregate feedback & Re-prompt Coder"]
-    Aggregate --> Coder
-    EvalGate -->|FAILED: Loops >= 3| Escalate["Escalate to User (Break infinite loops)"]
-    EvalGate -->|PASSED| PR["Push branch & Create PR (harness-agent pr create)<br/>Remove worktree & Human reviews/merges"]
-```
+When a **Coder** completes implementation:
+1. **Parallel Dispatch**: Orchestrator dispatches diff concurrently to the 3 adversarial critics (`Security Reviewer`, `Performance Reviewer`, `Requirement Reviewer`).
+2. **Aggregated Evaluation**: Orchestrator aggregates critic feedback into `AggregatedCriticReview`.
+3. **Remediation Loop**: Routed to Coder if defects are detected (Max 3 iterations; escalates to User if rejected 3 times).
+4. **Diff Guardrails**: Diffs > 500 lines or containing binaries must be split/filtered before LLM evaluation.
+5. **PR Gate Enforcement**: `conda run -n pytorch harness-agent pr create` enforces the Critics Gate before PR creation.
 
 ---
 
 ## 2. Environment & Tooling Standards
 
-All agents must strictly adhere to the following environment rules:
-
-### 2.1. Conda Environment
-- **Mandatory:** Always use the **`pytorch`** conda environment.
-- Run commands using: `conda run -n pytorch <command>`
-
-### 2.2. Python Standards
-- **Version:** `>= 3.10`
-- **Typing:** 100% type hints on all public interfaces (use Pydantic v2 for schemas).
-- **Style:** Black (100 line length), isort (profile black), flake8 (no unused imports or silent exception swallowing).
-- **Documentation:** Do not delete existing, unrelated comments or docstrings.
-
-### 2.3. Testing Gates
-- **Test Structure & Categorization Standard (MANDATORY):**
-  - All test files MUST reside under subdirectories within `tests/` (`tests/unit/` or `tests/integration/`).
-  - Test files must NEVER be placed directly in the root of `tests/`.
-  - All sub-agents (Coder, Tester, Orchestrator) are strictly required to define whether a test is a **Unit Test** (`tests/unit/`) or an **Integration Test** (`tests/integration/`).
-  - `tests/unit/`: Testing single units, pure functions, Pydantic models, schema validation, fast in-memory operations with mocked dependencies.
-  - `tests/integration/`: Multi-module orchestration, CLI commands, process spawning, Herdr socket interactions, filesystem operations, and end-to-end workflows.
-- All new features or bug fixes must include unit or integration tests as appropriate.
-- Run tests via `conda run -n pytorch pytest`.
-- **Gatekeeper Rule:** A task cannot be marked as complete if any tests fail.
-- **Full Regression Testing Gate:** Before opening any PR, the full regression test suite (`conda run -n pytorch pytest tests/`) covering all affected modules must pass 100%. Running only isolated new test files or skipping existing tests is strictly prohibited.
-
-### 2.4. Tool-Locking & Patching Policy ("Patch, Never Regenerate")
-- **Patch-Only Rule for Existing Files:** All code modifications to existing files must be executed exclusively via diff hunks using patch-based tools (`apply_patch`, `replace_file_content`, `multi_replace_file_content`). Regenerating or rewriting whole files causes context rot, hallucination, and loss of unrelated comments/functions.
-- **File Creation Exception:** `write_to_file` is strictly permitted ONLY for creating brand-new files (e.g., newly scaffolded modules, schemas, or test suites) that do not yet exist on disk.
-- **Tool-Locking Enforcement:** Worker agents (especially Coder and Reviewer) are tool-locked against full-file overwrites on existing files (e.g., calling `write_to_file` with `Overwrite=true` on files that already exist). Any attempt to overwrite an entire existing file in one go will be rejected by the orchestrator and fail the quality gate.
-- **Permitted Edit Tools:** For existing files: `apply_patch`, `replace_file_content`, `multi_replace_file_content`. For new files: `write_to_file`.
+- **Environment**: Python `>= 3.10` in Conda `pytorch` (`conda run -n pytorch <command>`).
+- **Style**: Black (100 char limit), isort (black), flake8. Maintain comments and docstrings.
+- **Test Structure**: Tests must reside in `tests/unit/` (isolated logic/mocks) or `tests/integration/` (end-to-end, CLI, processes). Never place tests in root of `tests/`.
+- **Quality Gates**: 100% pytest pass rate. Full regression suite (`conda run -n pytorch pytest tests/`) must pass before PR.
+- **Tool-Locking ("Patch, Never Regenerate")**: Existing files must ONLY be modified using patch tools (`apply_patch`, `replace_file_content`, `multi_replace_file_content`). Full-file overwrites on existing files are strictly locked. `write_to_file` is permitted only for brand-new files.
 
 ---
 
 ## 3. Git Operations: Terminal Execution & Tool Boundaries
 
-- **Separation of Concerns & Tool Boundaries**:
-  - **Python Source Code**: Source code (`src/`) must NEVER invoke Git programmatically (e.g., no `subprocess` or `GitPython`).
-  - **Herdr Multiplexer**: Manages terminal panes and interactive worker processes. Workspace isolation is managed via native Git worktrees (`git worktree add -b agent/<task_id> .worktrees/agent/<task_id>`).
-  - **Standard Git & GitHub CLI**: All repository Git operations (status, diff, staging, commits, remote pushes, and PR creation via `git` and `gh`) must be executed directly in the terminal shell of the active pane.
-- **Strict Branch Protection & Automated Merge Lock**:
-  - **Protected Branches:** `main`, `master`, `dev`, `develop`.
-  - **NO AUTOMATED MERGING:** All AI agents (Orchestrator, Coder, Tester) and scripts are **STRICTLY FORBIDDEN** from automatically merging feature or bugfix branches into `main` or `dev`.
-  - **NO DIRECT COMMITTING:** Committing directly to `main`, `master`, `dev`, or `develop` is strictly blocked (enforced via `.pre-commit-config.yaml` `no-commit-to-branch` hook).
-  - **HUMAN-ONLY MERGE AUTHORITY:** Merging code into `main` or `dev` is exclusively reserved for the human user.
-  - **Dedicated Branches Only:** Always work exclusively on dedicated branches (`feat/...`, `fix/...`, `agent/...`).
-- **Feature Branch & Worktree Hierarchy Protocol**:
-  1. Create feature branch first from `main`: `git checkout -b feat/<feature_name> main` (or `fix/...`).
-  2. Provision isolated subtask worktrees branching from the feature branch:
-     `git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<feature_name>`
-  3. Worker implements, tests, and commits changes atomically on `agent/<task_id>`.
-  4. After worker completes and passes quality gates, merge the subtask branch back into the feature branch:
-     `git merge --no-ff agent/<task_id>`
-  5. Remove the temporary worktree and branch (stop worker pane first, then `git worktree remove --force .worktrees/agent/<task_id>` and `git branch -d agent/<task_id>`).
-  6. Run 100% full regression tests on the feature branch:
-     `conda run -n pytorch pytest tests/`
-  7. Run automated Adversarial Critics Gate:
-     `conda run -n pytorch harness-agent review --base main`
-  8. Push feature branch to remote and create Pull Request to `main`:
-     `git push -u origin feat/<feature_name>`
-     `conda run -n pytorch harness-agent pr create --base main`
-- **Conventional Commits & Pre-Commit Hook Recovery**:
-  - Use conventional prefixes: `feat:`, `fix:`, `test:`, `docs:`, `refactor:`. Always inspect `git status` and `git diff` before committing.
-  - **Pre-Commit Hook Abort Handling**: Pre-commit hooks (`black`, `isort`, `flake8`) automatically run upon `git commit`. If hooks modify/reformat files or abort the commit:
-    1. Inspect the hook output.
-    2. Re-stage the modified files: `git add .`
-    3. Re-run the commit command: `git commit -m "..."`
-    4. Only proceed to push after the commit successfully finishes with exit code 0.
-- **Automated Remote Push & Pull Request Creation**:
-  - After each feature or fix branch is committed, the agent **MUST automatically push** the branch to the remote repository (`git push -u origin <branch-name>`).
-  - **Automated PR Template Filling**: Use `conda run -n pytorch harness-agent pr create --base main` to automatically populate the PR template (`.github/pull_request_template.md`), inspect git history, check relevant checkboxes, record environment/test evidence, push to remote, and create the PR via `gh` (or generate the web comparison link and draft).
-  - Alternatively, preview the populated template using `conda run -n pytorch harness-agent pr fill`.
-  - The agent **MUST provide the resulting PR link directly to the user** for human review and merge authorization.
-- **Rule Sync on Main Only**: Updates to standard rules and SDLC skills must only be pulled/synced into the `main` branch, not in-flight feature branches.
+- **Tool Boundaries**: Python source (`src/`) must NEVER call Git directly. All git operations run in the terminal shell. Worktree isolation uses `git worktree add -b agent/<task_id> .worktrees/agent/<task_id>`.
+- **Merge Lock**: Merging to protected branches (`main`, `master`, `dev`) is exclusively reserved for the human user. Automated merges are strictly forbidden. Always use feature branches (`feat/...`).
+- **Feature Branch & Worktree Hierarchy**:
+  1. Branch feature: `git checkout -b feat/<name> main`
+  2. Provision subtask: `git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<name>`
+  3. Worker develops, tests, and commits atomically on `agent/<task_id>`.
+  4. Merge back: `git merge --no-ff agent/<task_id>`
+  5. Cleanup: close pane, `git worktree remove --force .worktrees/agent/<task_id>`, `git branch -d agent/<task_id>`.
+  6. Full regression & critics gate: `conda run -n pytorch pytest tests/` -> `conda run -n pytorch harness-agent review --base main`.
+  7. Push & PR: `git push -u origin feat/<name>` -> `conda run -n pytorch harness-agent pr create --base main` -> provide PR link to user.
+- **Commits**: Conventional prefixes (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`). Recover from pre-commit hook reformats by re-staging (`git add .`) and committing again until exit code 0. Standard rules/skills sync only to `main`.
 
 ---
 
 ## 4. Herdr Workspace Setup (`herdr.dev`)
 
-Herdr is the terminal multiplexer used for AI agents to maintain persistent sessions. Each worker agent should run in an isolated pane/tab.
-
-- **Windows (PowerShell - Recommended):** `powershell -ExecutionPolicy Bypass -c "irm https://herdr.dev/install.ps1 | iex"`
-- **Windows (CMD):** `curl.exe -fsSLo install.cmd https://herdr.dev/install.cmd && install.cmd && del install.cmd`
-- **Unix/WSL:** `curl -fsSL https://herdr.dev/install.sh | sh`
+Herdr multiplexer runs isolated worker panes (`irm https://herdr.dev/install.ps1 | iex` on Windows, `curl -fsSL https://herdr.dev/install.sh | sh` on Unix/WSL).
 
 ---
 
 ## 5. Task Lifecycle & Context Passing
 
-- **Lifecycle:** `[PENDING] --> [RUNNING] --> [VALIDATING] --> [COMPLETED] / [FAILED] / [BLOCKED]`
-- **Context Passing:** The Orchestrator must provide the worker with the overall goal, specific instructions, and outputs from upstream tasks. If a task fails, record the error and optionally trigger a self-correction loop.
+Lifecycle: `[PENDING] --> [RUNNING] --> [VALIDATING] --> [COMPLETED] / [FAILED] / [BLOCKED]`. Orchestrator passes goal, specs, and upstream outputs; triggers self-correction loops on failure.
 
 ---
 
-## 6. SDLC Skills Protocol (`.agents/skills/`)
+## 6. SDLC Skills Reference (`.agents/skills/`)
 
-Agents MUST ONLY read and apply specific skills that are relevant to their task.
+- **Pre-Task**: `sdlc-pretask-checklist`, `sdlc-architecture-planner`, `sdlc-subtask-specifier`
+- **In-Task**: `sdlc-clean-code-standards`, `sdlc-test-driven-development`
+- **Post-Task**: `sdlc-posttask-quality-gate`, `sdlc-security-audit`, `sdlc-conventional-commit`
 
-### 6.1. Pre-Task Phase
-- `sdlc-pretask-checklist`: Verify clean tree, checkout branch, breakdown requirements.
-- `sdlc-architecture-planner`: Survey codebase, define Pydantic schemas, plan DAG.
-- `sdlc-subtask-specifier`: Generate sub-specs assessing Criticality, Risk, and Function/TestCase Specs.
-
-### 6.2. In-Task Phase
-- `sdlc-clean-code-standards`: Follow PEP 8, Black, type safety.
-- `sdlc-test-driven-development`: Write tests covering happy paths and edge cases.
-
-### 6.3. Post-Task Quality Gate
-- `sdlc-posttask-quality-gate`: Ensure 100% pytest pass rate, execute full regression suite (`pytest tests/`), merge back to feature branch, run linters, and inspect git diffs.
-- `sdlc-security-audit`: Check for leaked secrets and injection vulnerabilities.
-- `sdlc-conventional-commit`: Commit code directly via the terminal using conventional naming.
-
-### 6.4. Dynamic Skill Injection & Automated Domain Delegation Architecture
-
-To achieve fully autonomous and domain-specialized sub-agents across all SDLC phases (from architectural planning to implementation and quality gates), the system utilizes an **Automated Skill Routing Protocol**. Instead of prompting generic workers or requiring manual user selection, the Orchestrator inspects the task stage and target directory paths to automatically inject specific domain skills into dedicated Herdr terminal panes.
-
-#### 6.4.1. Skill & Domain Allocation Matrix
-
-The system strictly separates generic agent execution boundaries (**Role Anchors**) from domain knowledge (**Domain Skills**). To prevent context dilution, do not inject more than 2-3 domain skills per sub-agent:
-
-| SDLC Phase | Sub-Agent Role | Target Scope & Domain | Base Identity Anchor (`--system-prompt-file`) | Injected Domain Skills (`--skill-file` in `.agents/skills/`) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Phase 0: Agile / Ceremony** | **Scrum Master / Agile Facilitator** | Sprint planning, backlog refinement, story slicing, impediment removal | `.agents/skills/researcher_worker.md` | `sdlc-scrum-master`<br/>`sdlc-planning-task-breakdown` |
-| **Phase 0: Agile / Ceremony** | **Daily Standup & Blocker Coordinator** | Standup updates, blockers resolution, timeline triage, daily priorities | `.agents/skills/researcher_worker.md` | `sdlc-daily-standup-planner` |
-| **Phase 0: Research & Spike** | **AI Paper & Scientific Researcher** | ML/AI research exploration, paper synthesis, citation retrieval, blueprints | `.agents/skills/researcher_worker.md` | `sdlc-ai-paper-researcher`<br/>`sdlc-research-to-subagent-plan` |
-| **Phase 0: Research & Spike** | **PoC & Spike Feasibility Evaluator** | Feasibility spikes, PoC decision gating, risk exploration vs production | `.agents/skills/researcher_worker.md` | `sdlc-proof-of-concept-criteria` |
-| **Phase 1: Planning** | **Architecture Planner** | System-wide blueprints, Task DAG construction, module decoupling | `.agents/skills/researcher_worker.md` | `sdlc-architecture-planner`<br/>`sdlc-planning-task-breakdown` |
-| **Phase 1: Planning** | **Contract Specifier** | Granular sub-specs, Pydantic v2 schemas, REST route definitions | `.agents/skills/researcher_worker.md` | `sdlc-subtask-specifier`<br/>`sdlc-api-interface-design` |
-| **Phase 2: Execution** | **Backend Coder** | FastAPI routes, database models/migrations, async logic, services | `.agents/skills/coder_worker.md` | `sdlc-api-interface-design`<br/>`sdlc-clean-code-standards`<br/>`sdlc-backend-engineering` *(when added)* |
-| **Phase 2: Execution** | **Frontend Coder** | UI components, client state management, styling, DOM interactions | `.agents/skills/coder_worker.md` | `sdlc-frontend-ui-engineering`<br/>`sdlc-clean-code-standards` |
-| **Phase 2: Execution** | **QA & Test Engineer** | Unit/integration test suites, fixtures, API mocking (`tests/`) | `.agents/skills/tester_worker.md` | `sdlc-test-driven-development`<br/>`sdlc-clean-code-standards` |
-| **Phase 3: Quality Gate** | **Security Critic** | Secret leak scanning, injection vulnerabilities (SQLi, XSS), unsafe deserialization | `.agents/skills/critic_agent.md` | `sdlc-security-audit` |
-| **Phase 3: Quality Gate** | **Requirement Critic** | Verification of Git diff against original API contracts and acceptance criteria | `.agents/skills/critic_agent.md` | `sdlc-subtask-specifier`<br/>`sdlc-api-interface-design` |
-
-#### 6.4.2. Two-Tier Automated Skill Routing Protocol
-
-The Central Orchestrator MUST automatically bind domain skills using a deterministic two-tier resolution process:
-
-1. **TIER 1: INTENT & LIFECYCLE CEREMONY MATCHING (Zero Workspace Mutation)**:
-   - Match user goal keywords directly to domain skill files before provisioning workspaces or inspecting paths:
-     - **Scrum / Sprint Planning / Backlog Refinement** (`scrum`, `sprint`, `backlog`, `ceremony`):
-       `->` Launch Agile Facilitator (`researcher_worker.md`) with `sdlc-scrum-master` + `sdlc-planning-task-breakdown`.
-     - **Daily Standup / Blocker Coordination** (`standup`, `daily`, `blocker`, `triage`):
-       `->` Launch Blocker Coordinator (`researcher_worker.md`) with `sdlc-daily-standup-planner`.
-     - **AI Paper & Scientific Research** (`paper`, `research paper`, `arxiv`, `scientific`, `literature`):
-       `->` Launch Paper Researcher (`researcher_worker.md`) with `sdlc-ai-paper-researcher` + `sdlc-research-to-subagent-plan`.
-     - **PoC & Spike Feasibility** (`poc`, `spike`, `proof of concept`, `feasibility`):
-       `->` Launch Spike Evaluator (`researcher_worker.md`) with `sdlc-proof-of-concept-criteria`.
-     - **System Architecture / DAG Design** (`architecture`, `system design`, `dag`, `decompose`):
-       `->` Launch Architecture Planner (`researcher_worker.md`) with `sdlc-architecture-planner` + `sdlc-planning-task-breakdown`.
-     - **API Interface Contract Spec** (`api design`, `contract`, `interface`, `sub-spec`):
-       `->` Launch Contract Specifier (`researcher_worker.md`) with `sdlc-subtask-specifier` + `sdlc-api-interface-design`.
-
-2. **TIER 2: TARGET PATH MATCHING (Fallback for Implementation Tasks)**:
-   - When the user goal requests implementation, code editing, or testing in specific repository directories:
-     - **Path matches `src/api/`, `src/services/`, `src/models/`, `alembic/`:**
-       `->` Launch Backend Coder (`coder_worker.md` in isolated worktree) with `sdlc-api-interface-design` + `sdlc-clean-code-standards`.
-     - **Path matches `src/ui/`, `components/`, `static/`:**
-       `->` Launch Frontend Coder (`coder_worker.md` in isolated worktree) with `sdlc-frontend-ui-engineering` + `sdlc-clean-code-standards`.
-     - **Path matches `tests/`:**
-       `->` Launch QA Tester (`tester_worker.md` in isolated worktree) with `sdlc-test-driven-development` + `sdlc-clean-code-standards`.
-
-3. **AMBIGUOUS INTENT RESOLUTION RULE**:
-   - If a task request contains both ceremony/research keywords and code paths (e.g., *"implement scrum feature in src/api"*):
-     - **Primary Action Dictates the Tier:** Code-writing / modification commands execute under **Tier 2** (Coder Worker in Git worktree), whereas facilitation, planning, or evaluation execute under **Tier 1** (Researcher Worker, no code mutation in `src/`).
-
-4. **ADVERSARIAL CRITIC GATE**:
-   - **Security:** Bind `sdlc-security-audit`.
-   - **Contract & Requirements:** Bind `sdlc-api-interface-design` + `sdlc-subtask-specifier`.
-
-#### 6.4.3. Key Principles of Dynamic Injection
-
-- **Zero Prompt Drift:** By feeding the skill files at the CLI startup level (`--skill-file`), the sub-agent inherits domain rules (such as idempotency keys, error formatting, and discriminated unions) without relying on long, error-prone user prompts.
-- **Deterministic Dispatch:** The Orchestrator resolves task types based on user intent and repository paths, fully automating the choice between backend, frontend, research, and QA agents.
-- **Context Hygiene (Skill Cap):** Limit injected skills to at most 2–3 per sub-agent to prevent context saturation and conflicting instructions. Every `--skill-file` path MUST point to a valid file ending in `SKILL.md` (e.g. `.agents/skills/<skill-name>/SKILL.md`).
+### 6.1. Dynamic Skill Injection Protocol (3-Tier Delivery)
+1. **Tier 1 (Native Discovery)**: Skills exist in `.agents/skills/<name>/SKILL.md` in repository worktrees.
+2. **Tier 2 (Sub-Spec Declaration)**: Sub-Specs explicitly list required domain skills and paths.
+3. **Tier 3 (Herdr Prompt Injection)**: Orchestrator passes required skill names in the worker dispatch prompt.
 
 ---
 
-## 7. Orchestrator Operational Commands
+## 7. Orchestrator Operational Commands Quick Reference
 
 ```powershell
-# 1. Check agy & environment connectivity
+# 1. Connectivity & worktree setup
 conda run -n pytorch harness-agent check
-
-# 2. Create an isolated Git worktree branching from the active feature branch
 git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<feature_name>
-
-# 3. Worktree Environment Setup (copy .env files if present)
 Copy-Item -Path ".env*" -Destination ".worktrees/agent/<task_id>/" -ErrorAction SilentlyContinue
 
-# 4. Launch Interactive Workers with Dynamic Skill Injection (--skill-file)
+# 2. Launch Interactive Worker (valid agy flags)
+herdr agent start worker_<task_id> --kind agy --pane p_worker --cwd .worktrees/agent/<task_id> -- --effort low --dangerously-skip-permissions
 
-# --- Case A: Dispatching a Planning / Spec Task (API Interface Design) ---
-herdr agent start specifier_task_01 --kind agy --pane p_spec --cwd . -- `
-  --system-prompt-file .agents/skills/researcher_worker.md `
-  --skill-file .agents/skills/sdlc-subtask-specifier/SKILL.md `
-  --skill-file .agents/skills/sdlc-api-interface-design/SKILL.md `
-  --thinking-level low `
-  --dangerously-skip-permissions
-
-herdr agent prompt specifier_task_01 "Design the API contracts and sub-spec for Task 01 adhering strictly to sdlc-api-interface-design."
-
-# --- Case B: Dispatching a Backend Implementation Worker ---
-herdr agent start worker_<task_id> --kind agy --pane p_worker --cwd .worktrees/agent/<task_id> -- `
-  --system-prompt-file .agents/skills/coder_worker.md `
-  --skill-file .agents/skills/sdlc-api-interface-design/SKILL.md `
-  --skill-file .agents/skills/sdlc-clean-code-standards/SKILL.md `
-  --thinking-level low `
-  --dangerously-skip-permissions
-
-# --- Case C: Dispatching a Scrum Planning / Agile Facilitator Sub-Agent ---
-herdr agent start scrum_planner_01 --kind agy --pane p_scrum --cwd . -- `
-  --system-prompt-file .agents/skills/researcher_worker.md `
-  --skill-file .agents/skills/sdlc-scrum-master/SKILL.md `
-  --skill-file .agents/skills/sdlc-planning-task-breakdown/SKILL.md `
-  --thinking-level low `
-  --dangerously-skip-permissions
-
-herdr agent prompt scrum_planner_01 @"
-[ROLE: Scrum Master / Agile Planner]
-Goal: Facilitate sprint planning and story breakdown for the upcoming sprint.
-Prohibitions: No direct code mutation in src/, no background loops, no ManageTask.
-Target: Formulate backlog stories with acceptance criteria -> output [WORKER_COMPLETED].
-"@
-
-# --- Case D: Dispatching an AI Paper & Scientific Researcher Sub-Agent ---
-herdr agent start researcher_paper_01 --kind agy --pane p_research --cwd . -- `
-  --system-prompt-file .agents/skills/researcher_worker.md `
-  --skill-file .agents/skills/sdlc-ai-paper-researcher/SKILL.md `
-  --skill-file .agents/skills/sdlc-research-to-subagent-plan/SKILL.md `
-  --thinking-level low `
-  --dangerously-skip-permissions
-
-herdr agent prompt researcher_paper_01 @"
-[ROLE: AI Paper Researcher]
-Goal: Investigate target literature, synthesize methodology, and produce an engineering blueprint.
-Prohibitions: No direct code mutation in src/, no background loops, no ManageTask.
-Target: Write methodology blueprint in .ai/blueprints/ -> output [WORKER_COMPLETED].
-"@
-
-# 5. Prompt Worker Agent with explicit Role Anchoring + sub-spec contract (PowerShell here-string)
+# 3. Prompt Worker via Dispatch Contract
 herdr agent prompt worker_<task_id> @"
 [ROLE: Leaf Coder Worker]
 Spec: .ai/plans/subtasks/<date>/<plan_id>/subtask_<id>.md
+Required Skills: sdlc-clean-code-standards
 Prohibitions: No ManageTask, no background loops, no full-file overwrite.
 Target: 100% pytest pass -> write .ai/status/<task_id>.complete -> output [WORKER_COMPLETED].
-Instructions: Read assigned spec. Implement using Pydantic v2 schemas and standard error contracts defined in your injected skills.
+Instructions: Read assigned spec and activate required skills before implementing code changes.
 "@
-# (Note: In PowerShell, the closing "@ must be at column 0 without leading whitespace)
 
-# 6. Deterministic blocking wait (300s-600s, zero LLM tokens, no repetitive pane reads, no ManageTask background polling)
-# Primary: Blocking wait via harness-agent CLI (detects .ai/status/<task_id>.complete automatically):
+# 4. Blocking wait (no polling)
 conda run -n pytorch harness-agent wait <task_id> --timeout 600
-# Alternative: Herdr agent wait (300s):
-herdr agent wait worker_<task_id> --timeout 300000
 
-# Confirm completion flag file exists:
-Test-Path ".ai/status/<task_id>.complete"
-
-# Single diagnostic read ONLY on timeout / failure (strictly capped at 20 lines):
-herdr agent read worker_<task_id> --source recent-unwrapped --lines 20
-
-# 7. Execute automated Adversarial Critics Gate
-conda run -n pytorch harness-agent review --base main
-
-# 8. Success Flow: Merge Back, Cleanup, Full Regression & PR
-# Merge subtask branch back into feature branch:
+# 5. Critics Gate, cleanup & PR
 git merge --no-ff agent/<task_id>
-# Cleanup: STOP/KILL worker pane FIRST, then remove worktree:
 herdr pane close <pane_id>
 git worktree remove --force .worktrees/agent/<task_id>
 git branch -d agent/<task_id>
-# Run full regression tests on feature branch:
 conda run -n pytorch pytest tests/
-# Run automated Adversarial Critics Gate (also auto-verified by pr create):
 conda run -n pytorch harness-agent review --base main
-# Push feature branch and create Pull Request to main:
 git push -u origin feat/<feature_name>
 conda run -n pytorch harness-agent pr create --base main
-# Deliver PR URL to human user for review and merge authorization
-
-# 9. Rollback & Abort Protocol (if timeout or 3 consecutive critic rejections)
-# Dump diagnostic git diff and error traceback:
-git diff feat/<feature_name>...agent/<task_id> > .ai/failures/<task_id>_diff.log
-# Terminate Herdr worker pane first:
-herdr pane close <pane_id>
-# Remove abandoned worktree and delete branch:
-git worktree remove --force .worktrees/agent/<task_id>
-git branch -D agent/<task_id>
-# Escalate to human user with failure log path
 ```
 
 ---
 
 ## 8. Language & Communication Standards
 
-- **Code, Docs, & Plans**: All generated plans, specs, code, and docs MUST be written in **English**.
-- **Chat**: Agents should communicate with the user in the user's preferred language (e.g., English) when responding in the chat UI.
-- **ASCII Status Formatting vs. Markdown**: Use human-friendly emojis only in user-facing Markdown documentation; use token-efficient plain ASCII indicators (`[OK]`, `[ERROR]`, `[PASSED]`, `[FAILED]`, `[TASK_DONE]`) in code, logs, and CLI output.
-- **Exhaustive Context Invariance Rule**: The Orchestrator must provide the identical granular constraints, role anchors, and acceptance gates regardless of input language. Never summarize instructions into single-line prompts due to English brevity bias.
+- **Code, Docs, & Plans**: All plans, specs, code, and docs MUST be in **English**.
+- **Chat**: Communicate in the user's preferred language.
+- **ASCII Status Formatting**: Use plain ASCII indicators (`[OK]`, `[ERROR]`, `[PASSED]`, `[FAILED]`, `[TASK_DONE]`) in code, logs, and CLI output; emojis are permitted in Markdown docs.
+- **Context Invariance**: Orchestrator must provide identical granular constraints and role anchors regardless of input language without summarizing prompts.
