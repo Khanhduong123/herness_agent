@@ -75,12 +75,28 @@ def build_preinvocation_payload(
     return PreInvocationOutput(injectSteps=[EphemeralStep(ephemeralMessage=reminder)])
 
 
+def _configure_utf8_streams() -> None:
+    """Configure sys.stdout, sys.stderr, and sys.stdin to use utf-8 encoding."""
+    for stream_name in ("stdout", "stderr", "stdin"):
+        stream = getattr(sys, stream_name, None)
+        if stream and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
 def main() -> None:
     """Entry point for the PreInvocation enforcement hook script."""
+    _configure_utf8_streams()
     input_data: Dict[str, Any] = {}
     try:
-        if not sys.stdin.isatty():
-            input_data = json.load(sys.stdin)
+        raw_input = ""
+        stdin_stream = getattr(sys, "stdin", None)
+        if stdin_stream and hasattr(stdin_stream, "isatty") and not stdin_stream.isatty():
+            raw_input = stdin_stream.read().strip()
+        if raw_input:
+            input_data = json.loads(raw_input)
     except Exception:
         input_data = {}
 
