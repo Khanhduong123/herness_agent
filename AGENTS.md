@@ -107,7 +107,7 @@ When a **Coder** completes implementation:
 
 ## 2. Environment & Tooling Standards
 
-- **Environment**: Python `>= 3.10` in Conda `pytorch` (`conda run -n pytorch <command>`).
+- **Conda Environment**: Python `>= 3.10` in Conda `pytorch` (`conda run -n pytorch <command>`).
 - **Style**: Black (100 char limit), isort (black), flake8. Maintain comments and docstrings.
 - **Test Structure**: Tests must reside in `tests/unit/` (isolated logic/mocks) or `tests/integration/` (end-to-end, CLI, processes). Never place tests in root of `tests/`.
 - **Quality Gates**: 100% pytest pass rate. Full regression suite (`conda run -n pytorch pytest tests/`) must pass before PR.
@@ -118,7 +118,7 @@ When a **Coder** completes implementation:
 ## 3. Git Operations: Terminal Execution & Tool Boundaries
 
 - **Tool Boundaries**: Python source (`src/`) must NEVER call Git directly. All git operations run in the terminal shell. Worktree isolation uses `git worktree add -b agent/<task_id> .worktrees/agent/<task_id>`.
-- **Merge Lock**: Merging to protected branches (`main`, `master`, `dev`) is exclusively reserved for the human user. Automated merges are strictly forbidden. Always use feature branches (`feat/...`).
+- **Merge Lock**: Merging to protected branches (`main`, `master`, `dev`) is exclusively reserved for the human user (NO AUTOMATED MERGING). Automated merges are strictly forbidden. Always use feature branches (`feat/...`).
 - **Feature Branch & Worktree Hierarchy**:
   1. Branch feature: `git checkout -b feat/<name> main`
   2. Provision subtask: `git worktree add -b agent/<task_id> .worktrees/agent/<task_id> feat/<name>`
