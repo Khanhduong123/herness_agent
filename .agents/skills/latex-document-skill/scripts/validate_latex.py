@@ -31,7 +31,7 @@ TCOLORBOX_ENVS = {
     "definition", "example", "remark", "notebox", "proof",
 }
 
-# Environments where & is valid as a column/alignment separator
+# Environments where & is valid as a column/alignment separator or verbatim literal
 AMPERSAND_ENVS = {
     "tabular", "tabularx", "longtable", "array",
     "align", "align*", "aligned", "alignat", "alignat*",
@@ -40,6 +40,7 @@ AMPERSAND_ENVS = {
     "vmatrix", "Vmatrix", "smallmatrix",
     "eqnarray", "eqnarray*", "flalign", "flalign*",
     "multiline", "multiline*",
+    "lstlisting", "verbatim", "verbatim*", "minted",
 }
 
 # TikZ commands that must be inside tikzpicture
@@ -282,22 +283,34 @@ def validate_file(
 
     # --- Check 3: TikZ commands outside tikzpicture ---
     in_tikzpicture = 0
+    in_doc_body = False if allow_full_document else True
 
     for i, line in enumerate(lines, start=1):
         if is_comment_line(line):
             continue
         clean = re.sub(r"(?<!\\)%.*$", "", line)
 
+        if allow_full_document:
+            if r"\begin{document}" in clean:
+                in_doc_body = True
+                continue
+            if r"\end{document}" in clean:
+                in_doc_body = False
+                continue
+
         if r"\begin{tikzpicture}" in clean:
             in_tikzpicture += 1
         if r"\end{tikzpicture}" in clean:
             in_tikzpicture = max(0, in_tikzpicture - 1)
 
-        if in_tikzpicture == 0 and TIKZ_COMMANDS_RE.search(clean):
-            errors.append(ValidationError(
-                filename, i, "TIKZ_OUTSIDE",
-                f"TikZ command outside \\begin{{tikzpicture}}: {clean.strip()[:80]}"
-            ))
+        # Skip check if we are in preamble (where macros like \newcommand{\foo}{\node...} may be declared)
+        # or if the line uses an inline \tikz[...]{...} or \tikz command
+        if in_doc_body and in_tikzpicture == 0 and not re.search(r"\\tikz\b", clean):
+            if TIKZ_COMMANDS_RE.search(clean):
+                errors.append(ValidationError(
+                    filename, i, "TIKZ_OUTSIDE",
+                    f"TikZ command outside \\begin{{tikzpicture}}: {clean.strip()[:80]}"
+                ))
 
     # --- Check 4: Missing TikZ node labels ---
     for i, line in enumerate(lines, start=1):
@@ -344,7 +357,10 @@ def validate_file(
         # AND this line didn't open one (handles single-line envs like
         # \begin{aligned}...&...\end{aligned} all on one line)
         if ampersand_depth == 0 and not line_opens_amp_env:
-            stray = re.findall(r"(?<!\\)&", clean)
+            # Strip \usepackage[...]{...} and other macros where & might be used in package options
+            line_no_macros = re.sub(r"\\[a-zA-Z]+\[[^\]]*\]", "", clean)
+            line_no_macros = re.sub(r"\\[a-zA-Z]+\{[^}]*\}", "", line_no_macros)
+            stray = re.findall(r"(?<!\\)&", line_no_macros)
             if stray:
                 errors.append(ValidationError(
                     filename, i, "STRAY_AMPERSAND",
