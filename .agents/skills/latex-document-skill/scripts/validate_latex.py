@@ -33,7 +33,7 @@ TCOLORBOX_ENVS = {
 
 # Environments where & is valid as a column/alignment separator or verbatim literal
 AMPERSAND_ENVS = {
-    "tabular", "tabularx", "longtable", "array",
+    "tabular", "tabular*", "tabularx", "longtable", "array",
     "align", "align*", "aligned", "alignat", "alignat*",
     "gather", "gather*", "gathered",
     "split", "cases", "matrix", "pmatrix", "bmatrix",
