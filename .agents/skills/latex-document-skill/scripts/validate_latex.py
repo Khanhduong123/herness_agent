@@ -151,8 +151,12 @@ def is_comment_line(line: str) -> bool:
     return line.lstrip().startswith("%")
 
 
-def validate_file(filepath: str, preamble_commands: set) -> list:
-    """Validate a single batch .tex file. Returns list of ValidationError."""
+def validate_file(
+    filepath: str,
+    preamble_commands: set,
+    allow_full_document: bool = False,
+) -> list:
+    """Validate a single batch or full .tex file. Returns list of ValidationError."""
     errors = []
     path = Path(filepath)
     if not path.exists():
@@ -175,22 +179,24 @@ def validate_file(filepath: str, preamble_commands: set) -> list:
         # Find \begin{env} and \end{env}
         for m in re.finditer(r"\\begin\{([^}]+)\}", clean):
             env_name = m.group(1)
-            # Skip document-level envs (shouldn't appear in batch files)
-            if env_name in ("document",):
-                errors.append(ValidationError(
-                    filename, i, "STRUCTURE",
-                    f"\\begin{{{env_name}}} should not appear in batch files (body only)"
-                ))
+            # Handle document environment
+            if env_name == "document":
+                if not allow_full_document:
+                    errors.append(ValidationError(
+                        filename, i, "STRUCTURE",
+                        f"\\begin{{{env_name}}} should not appear in batch files (body only)"
+                    ))
                 continue
             env_stack.append((env_name, i))
 
         for m in re.finditer(r"\\end\{([^}]+)\}", clean):
             env_name = m.group(1)
-            if env_name in ("document",):
-                errors.append(ValidationError(
-                    filename, i, "STRUCTURE",
-                    f"\\end{{{env_name}}} should not appear in batch files (body only)"
-                ))
+            if env_name == "document":
+                if not allow_full_document:
+                    errors.append(ValidationError(
+                        filename, i, "STRUCTURE",
+                        f"\\end{{{env_name}}} should not appear in batch files (body only)"
+                    ))
                 continue
 
             if not env_stack:
@@ -374,6 +380,11 @@ def main():
         action="store_true",
         help="Output errors as JSON instead of plain text",
     )
+    parser.add_argument(
+        "--full-document",
+        action="store_true",
+        help="Allow \\begin{document} and \\end{document} for standalone documents",
+    )
     args = parser.parse_args()
 
     # Load preamble info
@@ -382,7 +393,11 @@ def main():
     # Validate each file
     all_errors = []
     for filepath in sorted(args.files):
-        file_errors = validate_file(filepath, preamble_commands)
+        file_errors = validate_file(
+            filepath,
+            preamble_commands,
+            allow_full_document=args.full_document,
+        )
         all_errors.extend(file_errors)
 
     # Output

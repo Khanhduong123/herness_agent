@@ -410,6 +410,23 @@ These cause `Undefined control sequence` -- always include the required package:
 - **latexmk** and **texfot** are included with TeX Live. The setup script (`setup.sh`) verifies their availability. latexmk is used when `--use-latexmk` is passed; texfot is used automatically when available (default verbosity mode).
 - A `.chktexrc` configuration file is included at the skill root to suppress common false positives when linting generated LaTeX documents. The `latex_lint.sh` script uses it automatically.
 
+### Windows Compiler Runner (`compile_runner.py`)
+On Windows environments where native `bash` or `pdflatex` might not be pre-configured in PATH, use the cross-platform Python bridge `scripts/compile_runner.py`:
+- **Environment Check**:
+  ```bash
+  python scripts/compile_runner.py --check
+  ```
+  Inspects availability of native engines (`pdflatex`, `xelatex`, `lualatex`, `latexmk`), Docker daemon, poppler preview tools, and the syntax AST validator.
+- **Multi-Tier Execution Strategy**:
+  1. **Tier 1 (Native Engine)**: Executes native compiler when installed (`winget install MiKTeX.MiKTeX` or TeX Live).
+  2. **Tier 2 (Docker TeX Live)**: If Docker daemon is active, runs `texlive/texlive:latest` in a container.
+  3. **Tier 3 (Syntax AST Fallback)**: Runs `validate_latex.py` to ensure zero syntax errors, unclosed environments, or invalid macros, returning actionable installation guidance.
+- **Dry-Run Validation**:
+  ```bash
+  python scripts/compile_runner.py --file document.tex --dry-run-ok
+  ```
+  Returns exit code 0 if syntax validation passes, allowing CI and automated agents to proceed without failing on environments missing local TeX installations.
+
 ## Long-Form Document Anti-Patterns
 
 For documents 5+ pages (reports, theses, books), read [references/long-form-best-practices.md](references/long-form-best-practices.md) for 9 critical anti-patterns, the report preamble best practices, and the content generation checklist. **This is MUST-READ material before generating any long document.**
