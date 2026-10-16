@@ -451,13 +451,16 @@ def main() -> int:
 
     if val_rc == 0:
         if args.dry_run_ok:
-            print("\n[OK] Document syntax is valid. Dry run passed with exit code 0.")
+            if not args.json:
+                print("\n[OK] Document syntax is valid. Dry run passed with exit code 0.")
             return 0
         else:
-            print("\n[NOTICE] Document syntax passed, but a compiler is required to generate the PDF.")
+            if not args.json:
+                print("\n[NOTICE] Document syntax passed, but a compiler is required to generate the PDF.")
             return 1
     else:
-        print("\n[ERROR] Document syntax validation failed.")
+        if not args.json:
+            print("\n[ERROR] Document syntax validation failed.")
         return val_rc
 
 
