@@ -21,12 +21,14 @@ from harness_agent.research.claims import (
     triage_citation,
 )
 from harness_agent.research.researcher import (
+    detect_domain_role,
     extract_text_from_html,
     fetch_web_page,
     read_external_file,
     read_external_source,
     read_issue_tracker,
     read_pdf_document,
+    scan_project_domain_boundaries,
 )
 from harness_agent.research.scholar import (
     PaperMetadata,
@@ -47,6 +49,7 @@ __all__ = [
     "PaperMetadata",
     "check_report_citations",
     "check_report_file",
+    "detect_domain_role",
     "extract_numbers",
     "extract_paper_blueprint",
     "load_sources_from_dir",
@@ -64,6 +67,7 @@ __all__ = [
     "read_external_source",
     "read_issue_tracker",
     "read_pdf_document",
+    "scan_project_domain_boundaries",
     "search_ai_papers",
     "search_arxiv",
     "search_openalex",
