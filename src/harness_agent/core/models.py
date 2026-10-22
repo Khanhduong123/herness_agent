@@ -89,6 +89,11 @@ class AgentRole(str, Enum):
     SECURITY_REVIEWER = "security_reviewer"
     PERFORMANCE_REVIEWER = "performance_reviewer"
     REQUIREMENT_REVIEWER = "requirement_reviewer"
+    DATABASE = "database"
+    BACKEND = "backend"
+    FRONTEND = "frontend"
+    DEVOPS = "devops"
+    AI_ML = "ai_ml"
 
     @classmethod
     def _missing_(cls, value: object):
@@ -168,6 +173,72 @@ ROLE_TOOL_ALLOWLIST: Dict[AgentRole, List[str]] = {
         "read_url_content",
         "search_web",
     ],
+    AgentRole.DATABASE: [
+        "view_file",
+        "replace_file_content",
+        "write_to_file",
+        "apply_patch",
+        "multi_replace_file_content",
+        "run_command",
+        "manage_task",
+        "ask_question",
+    ],
+    AgentRole.BACKEND: [
+        "view_file",
+        "replace_file_content",
+        "write_to_file",
+        "apply_patch",
+        "multi_replace_file_content",
+        "run_command",
+        "manage_task",
+        "ask_question",
+    ],
+    AgentRole.FRONTEND: [
+        "view_file",
+        "replace_file_content",
+        "write_to_file",
+        "apply_patch",
+        "multi_replace_file_content",
+        "run_command",
+        "manage_task",
+        "ask_question",
+    ],
+    AgentRole.DEVOPS: [
+        "view_file",
+        "replace_file_content",
+        "write_to_file",
+        "apply_patch",
+        "multi_replace_file_content",
+        "run_command",
+        "manage_task",
+        "ask_question",
+    ],
+    AgentRole.AI_ML: [
+        "view_file",
+        "replace_file_content",
+        "write_to_file",
+        "apply_patch",
+        "multi_replace_file_content",
+        "run_command",
+        "manage_task",
+        "ask_question",
+    ],
+}
+
+DOMAIN_PROFILES: Dict[AgentRole, List[str]] = {
+    AgentRole.DATABASE: ["migrations/", "models/", "alembic/", "prisma/"],
+    AgentRole.BACKEND: ["backend/", "api/", "services/", "routers/"],
+    AgentRole.FRONTEND: ["frontend/", "src/components/", "src/pages/", "src/features/"],
+    AgentRole.DEVOPS: ["Dockerfile", "docker-compose*", "k8s/", ".github/"],
+    AgentRole.AI_ML: ["training/", "models/", "pipelines/", "notebooks/"],
+}
+
+ROLE_DEFAULT_SKILLS: Dict[AgentRole, List[str]] = {
+    AgentRole.BACKEND: ["sdlc-api-interface-design", "sdlc-clean-code-standards"],
+    AgentRole.FRONTEND: ["sdlc-frontend-ui-engineering"],
+    AgentRole.DATABASE: ["sdlc-clean-code-standards"],
+    AgentRole.DEVOPS: ["sdlc-clean-code-standards"],
+    AgentRole.AI_ML: ["pytorch-patterns", "sdlc-clean-code-standards"],
 }
 
 # Critic roles share read-only tools
@@ -454,6 +525,18 @@ class SubTask(BaseModel):
     external_sources: List[UntrustedSource] = Field(
         default_factory=list,
         description="Untrusted external sources (web pages, PDFs, issues) to inject into context",
+    )
+    target_paths: List[str] = Field(
+        default_factory=list,
+        description="File-scope boundary enforcement (directories or file globs)",
+    )
+    output_artifacts: List[str] = Field(
+        default_factory=list,
+        description="Files or contracts produced by this subtask (e.g., schema.sql, openapi.json)",
+    )
+    injected_context: List[str] = Field(
+        default_factory=list,
+        description="Artifact files consumed from upstream dependencies",
     )
 
 
