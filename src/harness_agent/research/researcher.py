@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import re
 import urllib.request
 from html.parser import HTMLParser
-from typing import Optional, Tuple
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
+from harness_agent.core.models import DOMAIN_PROFILES, AgentRole
 from harness_agent.core.security import wrap_untrusted_content
 
 
@@ -157,3 +160,100 @@ def read_external_source(
 ) -> str:
     """Generic wrapper for any external text read into the agent's context."""
     return wrap_untrusted_content(content, source_type=source_type, source_id=source_id)
+
+
+def _normalize_relative_path(path: str | Path) -> str:
+    """Normalize file path to POSIX style relative path for pattern matching."""
+    raw = str(path).strip().replace("\\", "/")
+    if raw.startswith("./"):
+        raw = raw[2:]
+    return raw.lstrip("/")
+
+
+def _matches_pattern(normalized_path: str, pattern: str) -> bool:
+    """Match a normalized path against a domain pattern."""
+    pat = pattern.replace("\\", "/")
+    if pat.endswith("/"):
+        prefix = pat.lstrip("/")
+        return normalized_path.startswith(prefix) or f"/{prefix}" in f"/{normalized_path}"
+    if "*" in pat:
+        import fnmatch
+
+        filename = os.path.basename(normalized_path)
+        return fnmatch.fnmatch(filename, pat) or fnmatch.fnmatch(normalized_path, pat)
+    return normalized_path.endswith(pat) or pat == os.path.basename(normalized_path)
+
+
+def detect_domain_role(file_paths: List[str]) -> AgentRole:
+    """Analyze a list of targeted file paths and match against DOMAIN_PROFILES.
+
+    Returns canonical AgentRole (DATABASE, BACKEND, FRONTEND, DEVOPS, AI_ML)
+    or falls back to AgentRole.CODER if no specific match or ambiguous.
+    """
+    if not file_paths:
+        return AgentRole.CODER
+
+    role_counts: Dict[AgentRole, int] = {}
+    for path in file_paths:
+        norm = _normalize_relative_path(path)
+        if not norm:
+            continue
+        matched_role: Optional[AgentRole] = None
+        for role, patterns in DOMAIN_PROFILES.items():
+            if any(_matches_pattern(norm, pat) for pat in patterns):
+                matched_role = role
+                break
+        if matched_role is not None:
+            role_counts[matched_role] = role_counts.get(matched_role, 0) + 1
+
+    if not role_counts:
+        return AgentRole.CODER
+
+    # Pick the role with the highest score; fallback to CODER if tie/ambiguous
+    sorted_roles = sorted(role_counts.items(), key=lambda item: item[1], reverse=True)
+    top_role, top_count = sorted_roles[0]
+    if len(sorted_roles) > 1 and sorted_roles[1][1] == top_count:
+        return AgentRole.CODER
+    return top_role
+
+
+def scan_project_domain_boundaries(root_dir: str | Path) -> Dict[AgentRole, List[str]]:
+    """Scan project directory structure and group discovered paths by canonical domain role."""
+    base_dir = Path(root_dir).resolve()
+    boundaries: Dict[AgentRole, List[str]] = {role: [] for role in DOMAIN_PROFILES}
+
+    if not base_dir.exists() or not base_dir.is_dir():
+        return boundaries
+
+    ignore_dirs = {
+        ".git",
+        ".worktrees",
+        "__pycache__",
+        ".pytest_cache",
+        "node_modules",
+        ".venv",
+        "venv",
+        ".mypy_cache",
+        ".ruff_cache",
+        "dist",
+        "build",
+    }
+
+    discovered_files: List[str] = []
+    for root, dirs, files in os.walk(base_dir):
+        dirs[:] = [d for d in dirs if d not in ignore_dirs]
+        for f in files:
+            full_path = Path(root) / f
+            try:
+                rel_path = full_path.relative_to(base_dir).as_posix()
+            except ValueError:
+                rel_path = str(full_path).replace("\\", "/")
+            discovered_files.append(rel_path)
+
+    for rel_path in discovered_files:
+        for role, patterns in DOMAIN_PROFILES.items():
+            if any(_matches_pattern(rel_path, pat) for pat in patterns):
+                boundaries[role].append(rel_path)
+                break
+
+    return boundaries

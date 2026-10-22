@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import time
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 import yaml
 
@@ -30,6 +30,45 @@ from harness_agent.evaluation.evaluator import (
     build_coverage_gap_prompt,
     evaluate_coverage_gate,
 )
+
+
+def validate_output_artifacts(
+    subtask: SubTask,
+    workspace_dir: str,
+) -> Tuple[bool, Optional[str]]:
+    """Verify that all declared output_artifacts for subtask exist and are non-empty.
+
+    Returns:
+        (True, None) if all artifacts exist and os.path.getsize > 0.
+        (False, error_message) if any artifact is missing or 0 bytes.
+    """
+    if not subtask.output_artifacts:
+        return True, None
+
+    ws_root = os.path.abspath(workspace_dir)
+    for art in subtask.output_artifacts:
+        art_clean = art.strip()
+        if not art_clean:
+            continue
+        art_path = art_clean if os.path.isabs(art_clean) else os.path.join(ws_root, art_clean)
+        if not os.path.exists(art_path):
+            return False, f"Declared output artifact '{art_clean}' was not created at {art_path}"
+        if not os.path.isfile(art_path):
+            return (
+                False,
+                f"Declared output artifact '{art_clean}' is not a regular file at {art_path}",
+            )
+        try:
+            size = os.path.getsize(art_path)
+            if size == 0:
+                return (
+                    False,
+                    f"Declared output artifact '{art_clean}' is empty (0 bytes) at {art_path}",
+                )
+        except OSError as exc:
+            return False, f"Failed to access declared output artifact '{art_clean}': {exc}"
+
+    return True, None
 
 
 class AgentOrchestrator:
@@ -148,6 +187,111 @@ class AgentOrchestrator:
                 "Ensure all requested functionality is implemented without missing edge cases "
                 "or extraneous modifications."
             ),
+        ),
+        AgentRole.DATABASE: WorkerAgentConfig(
+            role=AgentRole.DATABASE,
+            name="database-agent",
+            effort="high",
+            system_prompt=(
+                "You are a specialized database engineering agent. "
+                "Follow the 'Patch, never regenerate' principle. "
+                "Design migrations, schemas, queries, and ORM models with high performance "
+                "and data integrity. Never overwrite or regenerate entire files."
+            ),
+            allowed_tools=[
+                "apply_patch",
+                "replace_file_content",
+                "multi_replace_file_content",
+                "view_file",
+                "run_command",
+                "ask_question",
+            ],
+            disallowed_tools=["write_to_file_overwrite", "full_file_rewrite"],
+            enforce_patch_only=True,
+        ),
+        AgentRole.BACKEND: WorkerAgentConfig(
+            role=AgentRole.BACKEND,
+            name="backend-agent",
+            effort="high",
+            system_prompt=(
+                "You are a specialized backend engineering agent. "
+                "Follow the 'Patch, never regenerate' principle. "
+                "Implement REST/gRPC endpoints, service contracts, and business logic with "
+                "100% type safety and error handling. Never overwrite or regenerate entire files."
+            ),
+            allowed_tools=[
+                "apply_patch",
+                "replace_file_content",
+                "multi_replace_file_content",
+                "view_file",
+                "run_command",
+                "ask_question",
+            ],
+            disallowed_tools=["write_to_file_overwrite", "full_file_rewrite"],
+            enforce_patch_only=True,
+        ),
+        AgentRole.FRONTEND: WorkerAgentConfig(
+            role=AgentRole.FRONTEND,
+            name="frontend-agent",
+            effort="high",
+            system_prompt=(
+                "You are a specialized frontend UI/UX engineering agent. "
+                "Follow the 'Patch, never regenerate' principle. "
+                "Implement accessible, responsive UI components and pages matching design "
+                "contracts. Never overwrite or regenerate entire files."
+            ),
+            allowed_tools=[
+                "apply_patch",
+                "replace_file_content",
+                "multi_replace_file_content",
+                "view_file",
+                "run_command",
+                "ask_question",
+            ],
+            disallowed_tools=["write_to_file_overwrite", "full_file_rewrite"],
+            enforce_patch_only=True,
+        ),
+        AgentRole.DEVOPS: WorkerAgentConfig(
+            role=AgentRole.DEVOPS,
+            name="devops-agent",
+            effort="high",
+            system_prompt=(
+                "You are a specialized DevOps and infrastructure engineering agent. "
+                "Follow the 'Patch, never regenerate' principle. "
+                "Implement robust CI/CD pipelines, Dockerfiles, and orchestration configurations. "
+                "Never overwrite or regenerate entire files."
+            ),
+            allowed_tools=[
+                "apply_patch",
+                "replace_file_content",
+                "multi_replace_file_content",
+                "view_file",
+                "run_command",
+                "ask_question",
+            ],
+            disallowed_tools=["write_to_file_overwrite", "full_file_rewrite"],
+            enforce_patch_only=True,
+        ),
+        AgentRole.AI_ML: WorkerAgentConfig(
+            role=AgentRole.AI_ML,
+            name="ai-ml-agent",
+            effort="high",
+            system_prompt=(
+                "You are a specialized AI and machine learning engineering agent. "
+                "Follow the 'Patch, never regenerate' principle. "
+                "Implement PyTorch models, data loaders, training pipelines, and evaluation loops "
+                "following best practices. Never overwrite or regenerate entire files."
+            ),
+            allowed_tools=[
+                "apply_patch",
+                "replace_file_content",
+                "multi_replace_file_content",
+                "view_file",
+                "run_command",
+                "ask_question",
+            ],
+            disallowed_tools=["write_to_file_overwrite", "full_file_rewrite"],
+            enforce_patch_only=True,
         ),
     }
 
@@ -649,6 +793,70 @@ class AgentOrchestrator:
                     )
                 )
 
+        # Inject Authorized File-Scope Boundaries
+        if subtask.target_paths:
+            lines.extend(
+                [
+                    "",
+                    "## Authorized File-Scope Boundaries:",
+                    (
+                        "You are strictly authorized to modify files ONLY "
+                        "within the following target paths:"
+                    ),
+                ]
+            )
+            for tp in subtask.target_paths:
+                lines.append(f"- `{tp}`")
+
+        # Inject Injected Upstream Artifacts
+        if subtask.injected_context:
+            lines.extend(
+                [
+                    "",
+                    "## Injected Upstream Artifacts:",
+                    "The following upstream artifacts are provided as input contracts:",
+                ]
+            )
+            ws_root = (
+                os.path.abspath(workspace_dir) if workspace_dir else os.path.abspath(os.getcwd())
+            )
+            for artifact_path in subtask.injected_context:
+                target_art = (
+                    artifact_path
+                    if os.path.isabs(artifact_path)
+                    else os.path.join(ws_root, artifact_path)
+                )
+                ext = os.path.splitext(artifact_path)[1].lstrip(".") or "text"
+                if os.path.isfile(target_art):
+                    try:
+                        with open(target_art, "r", encoding="utf-8") as f:
+                            art_content = f.read()
+                        lines.extend(
+                            [
+                                "",
+                                f"### Artifact: `{artifact_path}`",
+                                f"```{ext}",
+                                art_content.strip(),
+                                "```",
+                            ]
+                        )
+                    except Exception as exc:
+                        lines.extend(
+                            [
+                                "",
+                                f"### Artifact: `{artifact_path}`",
+                                f"*(Error reading artifact file: {exc})*",
+                            ]
+                        )
+                else:
+                    lines.extend(
+                        [
+                            "",
+                            f"### Artifact: `{artifact_path}`",
+                            "*(Artifact file not found on disk)*",
+                        ]
+                    )
+
         # Tool Policy and Patch-Only Guard instructions (Patch Mechanism)
         patch_only = (
             subtask.enforce_patch_only
@@ -793,6 +1001,13 @@ class AgentOrchestrator:
             from harness_agent.evaluation.evaluator import evaluate_task
 
             evaluate_task(task_def, result, effective_workspace)
+
+        # Validate output artifacts gate if successful so far
+        if result.success and subtask.output_artifacts:
+            art_valid, art_err = validate_output_artifacts(subtask, effective_workspace)
+            if not art_valid:
+                result.success = False
+                result.error_message = art_err
 
         return result
 
@@ -1210,3 +1425,34 @@ class AgentOrchestrator:
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(result.model_dump_json(indent=2))
+
+    @staticmethod
+    def resolve_worktree_base_ref(
+        subtask: SubTask,
+        task_statuses: Optional[Dict[str, TaskStatus]] = None,
+        default_base_ref: Optional[str] = None,
+    ) -> Optional[str]:
+        """Determine base git reference for worktree chaining across dependencies.
+
+        When a subtask depends on upstream tasks, chains from the last completed upstream task
+        branch ('agent/<upstream_task_id>'). Falls back to default_base_ref if no valid upstream.
+        """
+        if not subtask.depends_on:
+            return default_base_ref
+
+        # Check in reverse order of dependencies (most recent upstream task)
+        for dep_id in reversed(subtask.depends_on):
+            if task_statuses is not None:
+                st = task_statuses.get(dep_id)
+                if st != TaskStatus.COMPLETED:
+                    continue
+            clean_dep_id = dep_id.replace("agent/", "").replace("worker_", "")
+            return f"agent/{clean_dep_id}"
+
+        return default_base_ref
+
+
+__all__ = [
+    "AgentOrchestrator",
+    "validate_output_artifacts",
+]
