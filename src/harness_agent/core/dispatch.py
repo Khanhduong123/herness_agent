@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 
-from harness_agent.core.models import ROLE_TOOL_ALLOWLIST, AgentRole
+from harness_agent.core.models import ROLE_DEFAULT_SKILLS, ROLE_TOOL_ALLOWLIST, AgentRole
 from harness_agent.core.token_logger import TokenLogger, get_active_model
 
 logger = logging.getLogger(__name__)
@@ -422,6 +422,23 @@ class HerdrDispatcher:
 
         intent_lower = (intent_or_task or "").lower()
 
+        # Tier 0: Role Default Skills Matching
+        matched_role: Optional[AgentRole] = None
+        try:
+            matched_role = AgentRole(intent_or_task)
+        except Exception:
+            clean_role_candidate = (
+                (intent_or_task or "").replace("-", "_").replace(" ", "_").lower()
+            )
+            for r in AgentRole:
+                if r.value == clean_role_candidate or r.value in clean_role_candidate:
+                    matched_role = r
+                    break
+
+        if matched_role and matched_role in ROLE_DEFAULT_SKILLS:
+            for skill_name in ROLE_DEFAULT_SKILLS[matched_role]:
+                resolved.append((skills_prefix / skill_name / "SKILL.md").as_posix())
+
         # Tier 1: Intent & Ceremony Matching
         if any(kw in intent_lower for kw in ["scrum", "sprint", "backlog"]):
             resolved.append((skills_prefix / "sdlc-scrum-master" / "SKILL.md").as_posix())
@@ -490,6 +507,10 @@ class HerdrDispatcher:
         prohibitions: Optional[List[str]] = None,
         target: Optional[str] = None,
         model: Optional[str] = None,
+        target_paths: Optional[List[str]] = None,
+        required_skills: Optional[List[str]] = None,
+        injected_context: Optional[List[str]] = None,
+        output_artifacts: Optional[List[str]] = None,
     ) -> str:
         """Construct strict multi-line payload template for worker dispatch.
 
@@ -499,6 +520,10 @@ class HerdrDispatcher:
             prohibitions: Optional list of prohibited actions/tools.
             target: Optional target description / deliverables.
             model: Optional model identifier.
+            target_paths: Optional list of authorized target file/directory paths.
+            required_skills: Optional list of required domain skill identifiers or paths.
+            injected_context: Optional list of input artifacts from upstream tasks.
+            output_artifacts: Optional list of produced artifacts to validate.
 
         Returns:
             str: Multi-line formatted dispatch payload string.
@@ -520,6 +545,22 @@ class HerdrDispatcher:
             f"[ROLE: {clean_role}]",
             f"Spec: {clean_spec}",
         ]
+        if required_skills:
+            clean_skills = ", ".join(s.strip() for s in required_skills if s.strip())
+            if clean_skills:
+                lines.append(f"Required Skills: {clean_skills}")
+        if target_paths:
+            clean_targets = ", ".join(t.strip() for t in target_paths if t.strip())
+            if clean_targets:
+                lines.append(f"Target Paths: {clean_targets}")
+        if injected_context:
+            clean_inputs = ", ".join(c.strip() for c in injected_context if c.strip())
+            if clean_inputs:
+                lines.append(f"Injected Context: {clean_inputs}")
+        if output_artifacts:
+            clean_outputs = ", ".join(a.strip() for a in output_artifacts if a.strip())
+            if clean_outputs:
+                lines.append(f"Output Artifacts: {clean_outputs}")
         if model and model.strip():
             lines.append(f"Model: {model.strip()}")
         lines.extend(
