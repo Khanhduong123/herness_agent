@@ -20,6 +20,7 @@ from harness_agent.core.models import (
     STATE_TOOL_ALLOWLIST,
     AgentLifecycleState,
     AgentRole,
+    ArchitectureSpec,
 )
 from harness_agent.core.token_logger import TokenLogger, get_active_model
 
@@ -1306,17 +1307,50 @@ def transition_lifecycle_state(
     target_state: AgentLifecycleState,
     user_input: Optional[str] = None,
     explicit_approval: bool = False,
+    architecture_spec: Optional[Union[ArchitectureSpec, Dict[str, Any]]] = None,
+    spec_validated: bool = False,
 ) -> Tuple[bool, AgentLifecycleState, str]:
     """Validates and performs deterministic state transitions in the agent lifecycle FSM.
 
-    Transition Rule:
-    The transition from PLAN_REVIEW to EXECUTION CAN ONLY be triggered if:
-    - explicit_approval is True, OR
-    - user_input matches an approval command (/approve, approve, proceed).
+    Transition Rules:
+    - DISCOVERY -> PLANNING requires a valid ArchitectureSpec (instance or dict) or
+      spec_validated=True.
+    - PLAN_REVIEW -> EXECUTION requires explicit_approval=True or approval token in user_input.
 
     Returns:
         Tuple of (transition_allowed, new_state, reason_or_message)
     """
+    if (
+        current_state == AgentLifecycleState.DISCOVERY
+        and target_state == AgentLifecycleState.PLANNING
+    ):
+        is_valid = spec_validated
+        if not is_valid and architecture_spec is not None:
+            if isinstance(architecture_spec, ArchitectureSpec):
+                is_valid = True
+            elif isinstance(architecture_spec, dict):
+                try:
+                    ArchitectureSpec.model_validate(architecture_spec)
+                    is_valid = True
+                except Exception:
+                    is_valid = False
+
+        if not is_valid:
+            return (
+                False,
+                current_state,
+                (
+                    "Transition from DISCOVERY to PLANNING blocked: "
+                    "Architecture specification must be populated and validated against "
+                    "ArchitectureSpec schema."
+                ),
+            )
+        return (
+            True,
+            AgentLifecycleState.PLANNING,
+            "Architecture specification validated. Transitioning to PLANNING.",
+        )
+
     if (
         current_state == AgentLifecycleState.PLAN_REVIEW
         and target_state == AgentLifecycleState.EXECUTION
@@ -1339,6 +1373,10 @@ def transition_lifecycle_state(
 
     # Standard transitions
     VALID_TRANSITIONS = {
+        AgentLifecycleState.DISCOVERY: {
+            AgentLifecycleState.PLANNING,
+            AgentLifecycleState.FAILED,
+        },
         AgentLifecycleState.PLANNING: {AgentLifecycleState.PLAN_REVIEW, AgentLifecycleState.FAILED},
         AgentLifecycleState.PLAN_REVIEW: {
             AgentLifecycleState.EXECUTION,
