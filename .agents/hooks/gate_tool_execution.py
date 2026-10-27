@@ -146,11 +146,27 @@ def is_path_forbidden(
     return False, ""
 
 
+def is_in_worker_worktree(workspace_paths: Optional[List[str]] = None) -> bool:
+    """Check if the execution environment is inside an isolated agent worktree."""
+    cwd_str = str(Path.cwd()).replace("\\", "/").lower()
+    if "/.worktrees/agent/" in cwd_str or ".worktrees/agent/" in cwd_str:
+        return True
+    if workspace_paths:
+        for ws in workspace_paths:
+            ws_norm = ws.replace("\\", "/").lower()
+            if "/.worktrees/agent/" in ws_norm or ".worktrees/agent/" in ws_norm:
+                return True
+    return False
+
+
 def evaluate_tool_call(
     tool_name: str,
     tool_args: Dict[str, Any],
     workspace_paths: Optional[List[str]] = None,
 ) -> PreToolUseDecision:
+    # 0. Allow mutation tools if running inside isolated worktree
+    if tool_name in MUTATION_TOOLS and is_in_worker_worktree(workspace_paths):
+        return PreToolUseDecision(decision="allow")
     """Evaluate a tool execution request against Rule 0 and tool gating rules."""
     # 1. Deny forbidden background subagent tools
     if tool_name in FORBIDDEN_SUBAGENT_TOOLS:

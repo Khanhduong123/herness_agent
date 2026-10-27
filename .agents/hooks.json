@@ -1,4 +1,4 @@
-{
+﻿{
   "enforce-orchestrator-role": {
     "PreInvocation": [
       {
@@ -12,7 +12,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -c \"import os, runpy; p = 'hooks/gate_tool_execution.py' if os.path.exists('hooks/gate_tool_execution.py') else '.agents/hooks/gate_tool_execution.py'; runpy.run_path(p, run_name='__main__')\""
+            "command": "python run_hook.py gate_tool_execution.py"
           }
         ]
       }
