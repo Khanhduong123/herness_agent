@@ -12,11 +12,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .agents/hooks/gate_tool_execution.py"
+            "command": "python -c \"import os, runpy; p = 'hooks/gate_tool_execution.py' if os.path.exists('hooks/gate_tool_execution.py') else '.agents/hooks/gate_tool_execution.py'; runpy.run_path(p, run_name='__main__')\""
           }
         ]
       }
     ]
   }
 }
-
