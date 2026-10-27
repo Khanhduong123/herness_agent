@@ -36,6 +36,10 @@ class AgyConfig(BaseModel):
         default=True,
         description="Automatically record single-run execution metrics to log.csv",
     )
+    lifecycle_state: Optional[AgentLifecycleState] = Field(
+        default=None,
+        description="Current lifecycle state of the agent for tool gating",
+    )
 
 
 class TaskCheck(BaseModel):
@@ -76,6 +80,86 @@ class ToolCallRecord(BaseModel):
     name: str = Field(..., description="Name of the tool executed")
     args: Dict[str, Any] = Field(default_factory=dict, description="Arguments passed to tool")
     output: Optional[str] = Field(default=None, description="Tool execution result")
+
+
+class AgentLifecycleState(str, Enum):
+    """Deterministic agent lifecycle states for dynamic tool gating."""
+
+    PLANNING = "planning"
+    PLAN_REVIEW = "plan_review"
+    EXECUTION = "execution"
+    VALIDATING = "validating"
+    CRITIC_GATE = "critic_gate"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+    @classmethod
+    def _missing_(cls, value: object):
+        if isinstance(value, str):
+            normalized = value.replace("-", "_").lower()
+            for member in cls:
+                if member.value == normalized:
+                    return member
+        return super()._missing_(value)
+
+
+# Mapping of agent lifecycle states to allowed tools
+STATE_TOOL_ALLOWLIST: Dict[AgentLifecycleState, List[str]] = {
+    AgentLifecycleState.PLANNING: [
+        "view_file",
+        "read_file",
+        "search_web",
+        "read_url_content",
+        "ask_question",
+        "write_to_file",  # Scoped strictly to .ai/plans/** by pre-tool hooks
+        "write_file",  # Scoped strictly to .ai/plans/** by pre-tool hooks
+    ],
+    AgentLifecycleState.PLAN_REVIEW: [
+        "view_file",
+        "read_file",
+        "search_web",
+        "read_url_content",
+        "ask_question",
+    ],
+    AgentLifecycleState.EXECUTION: [
+        # In execution, tools are governed by the worker's AgentRole allowlist
+        "view_file",
+        "read_file",
+        "replace_file_content",
+        "write_to_file",
+        "write_file",
+        "apply_patch",
+        "multi_replace_file_content",
+        "run_command",
+        "manage_task",
+        "ask_question",
+        "search_web",
+        "read_url_content",
+    ],
+    AgentLifecycleState.VALIDATING: [
+        "view_file",
+        "read_file",
+        "run_command",
+        "ask_question",
+    ],
+    AgentLifecycleState.CRITIC_GATE: [
+        "view_file",
+        "read_file",
+        "read_url_content",
+        "search_web",
+        "ask_question",
+    ],
+    AgentLifecycleState.COMPLETED: [
+        "view_file",
+        "read_file",
+        "ask_question",
+    ],
+    AgentLifecycleState.FAILED: [
+        "view_file",
+        "read_file",
+        "ask_question",
+    ],
+}
 
 
 class AgentRole(str, Enum):
@@ -158,17 +242,13 @@ ROLE_TOOL_ALLOWLIST: Dict[AgentRole, List[str]] = {
     ],
     AgentRole.ORCHESTRATOR: [
         "view_file",
-        "write_to_file",
-        "replace_file_content",
-        "apply_patch",
-        "multi_replace_file_content",
-        "run_command",
-        "manage_task",
+        "read_file",
+        "write_to_file",  # Note: Scoped only to .ai/plans/** by path gate
+        "write_file",  # Scoped only to .ai/plans/** by path gate
         "ask_question",
         "schedule",
         "send_message",
-        "invoke_subagent",
-        "define_subagent",
+        "manage_task",
         "manage_subagents",
         "read_url_content",
         "search_web",
