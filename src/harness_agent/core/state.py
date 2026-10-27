@@ -19,6 +19,11 @@ from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 from harness_agent.core.models import OrchestrationPlan, RunResult, TaskStatus
 
+DEFAULT_CONTEXT_DIR = ".ai/context"
+DEFAULT_STATE_SNAPSHOT_FILE = ".ai/context/state.json"
+DEFAULT_WAL_ACTIONS_FILE = ".ai/context/wal_actions.log"
+DEFAULT_CONTEXT_MD_FILE = ".ai/context/context.md"
+
 
 def check_token_compaction_trigger(
     current_tokens: int,
@@ -432,6 +437,73 @@ class DAGStateStore:
         path.write_text(updated_content, encoding="utf-8")
 
 
+def compile_context_markdown(
+    state: SessionState,
+    recent_events: Optional[List[WALEvent]] = None,
+    max_recent_events: int = 5,
+) -> str:
+    """Compiles machine state and recent WAL events into a concise markdown context summary.
+
+    Designed for direct injection into the Agent System Prompt during session rehydration.
+    Omits historical chat bloat and provides high-signal working memory.
+    """
+    updated_iso = datetime.fromtimestamp(state.updated_at, tz=timezone.utc).strftime(
+        "%Y-%m-%d %H:%M:%SZ"
+    )
+    header_meta = (
+        f"> Task ID: `{state.task_id}` | Session: `{state.session_id}` "
+        f"| Status: `{state.status.upper()}`"
+    )
+    lines = [
+        "# Active Session Context",
+        header_meta,
+        f"> Active Step: {state.active_step} | Updated: {updated_iso}",
+        "",
+        f"## Goal\n{state.goal.strip()}",
+        "",
+    ]
+
+    if state.memory_variables:
+        lines.append("## Working Memory Variables")
+        for k, v in state.memory_variables.items():
+            lines.append(f"- **{k}**: `{v}`")
+        lines.append("")
+
+    if state.modified_files:
+        lines.append("## Modified Files")
+        for f in state.modified_files:
+            lines.append(f"- `{f}`")
+        lines.append("")
+
+    if recent_events:
+        lines.append("## Recent Execution Milestones")
+        events_slice = recent_events[-max_recent_events:]
+        for ev in events_slice:
+            status_text = "SUCCESS" if ev.status_code == 0 else f"FAILED({ev.status_code})"
+            action = f"`{ev.tool_name}`" if ev.tool_name else f"`{ev.event_type}`"
+            err = f" | Error: {ev.error_message}" if ev.error_message else ""
+            lines.append(
+                f"- Step {ev.step_index}: {action} -> {status_text} ({ev.latency_ms:.1f}ms){err}"
+            )
+        lines.append("")
+
+    return "\n".join(lines).strip() + "\n"
+
+
+def sync_context_markdown(
+    state: SessionState,
+    target_path: Union[str, Path] = DEFAULT_CONTEXT_MD_FILE,
+    recent_events: Optional[List[WALEvent]] = None,
+) -> None:
+    """Compiles state and writes context.md atomically."""
+    md_content = compile_context_markdown(state, recent_events)
+    path = Path(target_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(".tmp")
+    tmp_path.write_text(md_content, encoding="utf-8")
+    os.replace(tmp_path, path)
+
+
 class SessionState(BaseModel):
     """Working memory and state snapshot for a subtask execution session."""
 
@@ -623,10 +695,17 @@ class StateCoordinator:
     session snapshot and event WAL.
     """
 
-    def __init__(self, session_path: Union[str, Path], wal_path: Union[str, Path]) -> None:
-        self.session_path = Path(session_path)
-        self.wal_path = Path(wal_path)
-        self.wal = EventWAL(wal_path)
+    def __init__(
+        self,
+        session_path: Optional[Union[str, Path]] = None,
+        wal_path: Optional[Union[str, Path]] = None,
+        context_dir: Optional[Union[str, Path]] = None,
+    ) -> None:
+        base_dir = Path(context_dir or DEFAULT_CONTEXT_DIR)
+        self.session_path = Path(session_path or base_dir / "state.json")
+        self.wal_path = Path(wal_path or base_dir / "wal_actions.log")
+        self.context_md_path = base_dir / "context.md"
+        self.wal = EventWAL(self.wal_path)
 
     def reconcile_on_startup(self) -> ReconciliationResult:
         """Validates consistency between session.json and log.csv on agent boot.
