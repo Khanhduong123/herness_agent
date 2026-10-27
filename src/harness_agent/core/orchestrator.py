@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import time
@@ -40,6 +41,8 @@ from harness_agent.evaluation.evaluator import (
     build_coverage_gap_prompt,
     evaluate_coverage_gate,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def validate_output_artifacts(
@@ -1473,9 +1476,18 @@ class AgentOrchestrator:
         # If session_path and wal_path are provided or state_coordinator is set, reconcile state
         if session_path and wal_path:
             self.state_coordinator = StateCoordinator(session_path=session_path, wal_path=wal_path)
+        else:
+            self.state_coordinator = self.state_coordinator or StateCoordinator()
 
         if self.state_coordinator:
             recon = self.state_coordinator.reconcile_on_startup()
+            if recon.reconciled_state:
+                logger.info(
+                    "Recovered session %s at step %d via action %s",
+                    recon.reconciled_state.session_id,
+                    recon.recovered_step,
+                    recon.recovery_action,
+                )
             if recon.recovery_action == "interrupted_action_detected":
                 pass
 
