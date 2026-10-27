@@ -17,6 +17,7 @@ from harness_agent.core.harness import AgentHarness
 from harness_agent.core.models import AgyConfig, OrchestrationResult, Task, TaskStatus
 from harness_agent.core.orchestrator import AgentOrchestrator
 from harness_agent.core.runner import AgyRunner
+from harness_agent.core.smoke import LiveSmokeProbe
 
 
 def _get_git_diff(
@@ -1256,6 +1257,37 @@ def abort_cmd(task_id: str, reason: str) -> None:
     else:
         click.secho(f"✗ Failed to abort task: {msg}", fg="red")
         sys.exit(1)
+
+
+@main.command(name="smoke")
+@click.option(
+    "--strict/--lenient",
+    default=True,
+    help="Exit with code 1 if any smoke probe fails (default: strict)",
+)
+def smoke_cmd(strict: bool) -> None:
+    """Execute live out-of-process smoke probes to verify CLI and runtime sanity."""
+    click.echo("[SMOKE PROBE] Running live process verification...")
+    probe = LiveSmokeProbe()
+    results = probe.run_all()
+
+    all_passed = True
+    for res in results:
+        status_tag = "[OK]" if res.passed else "[FAILED]"
+        click.echo(f"{status_tag} {res.name} (exit: {res.exit_code}, {res.duration_seconds:.2f}s)")
+        if not res.passed:
+            all_passed = False
+            if res.error_message:
+                click.echo(f"       Reason: {res.error_message}")
+            if res.stderr and res.stderr.strip():
+                click.echo(f"       Stderr: {res.stderr.strip()[:200]}")
+
+    if all_passed:
+        click.echo("[PASSED] All smoke probes succeeded. Live runtime verified.")
+    else:
+        click.echo("[FAILED] One or more smoke probes failed.")
+        if strict:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
