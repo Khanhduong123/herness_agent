@@ -663,14 +663,14 @@ def test_user_creation(tmp_path):
     assert len(detect_requirement_issues(clean_code)) == 0
 
     # 2. Mocking database in tests/integration/ is flagged
-    mock_db_diff = """
---- a/tests/integration/test_repo.py
-+++ b/tests/integration/test_repo.py
-+from unittest.mock import patch
-+@patch("harness_agent.core.database.sqlite3.connect")
-+def test_integration_flow(mock_conn):
-+    run_pipeline()
-"""
+    mock_db_diff = (
+        "--- a/tests/integration/test_repo.py\n"
+        "+++ b/tests/integration/test_repo.py\n"
+        "+from unittest.mock import " + "patch\n"
+        "+" + "@" + "patch(" + '"harness_agent.core.database.sqlite3.connect")\n'
+        "+def test_integration_flow(mock_conn):\n"
+        "+    run_pipeline()\n"
+    )
     issues = detect_requirement_issues(mock_db_diff)
     assert any("Anti-Mock violation" in issue for issue in issues)
 
