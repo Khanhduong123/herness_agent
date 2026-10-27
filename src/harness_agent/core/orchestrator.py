@@ -10,6 +10,9 @@ from typing import Dict, List, Optional, Set, Tuple
 import yaml
 
 from harness_agent.core.models import (
+    ROLE_TOOL_ALLOWLIST,
+    STATE_TOOL_ALLOWLIST,
+    AgentLifecycleState,
     AgentRole,
     AggregatedCriticReview,
     AgyConfig,
@@ -944,9 +947,22 @@ class AgentOrchestrator:
             effort=worker.effort or self.base_config.effort,
             system_prompt=worker.system_prompt,
             auto_log=False,
+            lifecycle_state=AgentLifecycleState.EXECUTION,
         )
         if worker.extra_flags:
             worker_config.extra_flags.extend(worker.extra_flags)
+
+        # Pre-execution tool gating: Compute effective allowed tools for role in EXECUTION state
+        default_reviewer_tools = ROLE_TOOL_ALLOWLIST.get(AgentRole.REVIEWER, [])
+        role_tools = set(
+            worker.allowed_tools or ROLE_TOOL_ALLOWLIST.get(subtask.role, default_reviewer_tools)
+        )
+        state_tools = set(STATE_TOOL_ALLOWLIST.get(AgentLifecycleState.EXECUTION, []))
+        gated_allowed_tools = list(role_tools.intersection(state_tools))
+        if gated_allowed_tools:
+            worker_config.extra_flags.extend(
+                ["--allowed-tools", ",".join(sorted(gated_allowed_tools))]
+            )
 
         effective_workspace = subtask.workspace_dir or workspace_dir or os.getcwd()
         prompt = self._build_worker_prompt(
