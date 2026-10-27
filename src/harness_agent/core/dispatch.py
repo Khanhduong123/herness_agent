@@ -517,6 +517,7 @@ class HerdrDispatcher:
         required_skills: Optional[List[str]] = None,
         injected_context: Optional[List[str]] = None,
         output_artifacts: Optional[List[str]] = None,
+        rehydrate_context: bool = False,
     ) -> str:
         """Construct strict multi-line payload template for worker dispatch.
 
@@ -530,6 +531,8 @@ class HerdrDispatcher:
             required_skills: Optional list of required domain skill identifiers or paths.
             injected_context: Optional list of input artifacts from upstream tasks.
             output_artifacts: Optional list of produced artifacts to validate.
+            rehydrate_context: Whether to append rehydrated session context from
+                .ai/context/context.md.
 
         Returns:
             str: Multi-line formatted dispatch payload string.
@@ -576,16 +579,17 @@ class HerdrDispatcher:
             ]
         )
 
-        ctx_file = Path(".ai/context/context.md")
-        if ctx_file.is_file():
-            try:
-                ctx_text = ctx_file.read_text(encoding="utf-8").strip()
-                if ctx_text:
-                    lines.append(
-                        f"\n[REHYDRATED SESSION CONTEXT]\n{ctx_text}\n[END REHYDRATED CONTEXT]"
-                    )
-            except Exception:
-                pass
+        if rehydrate_context:
+            ctx_file = Path(".ai/context/context.md")
+            if ctx_file.is_file():
+                try:
+                    ctx_text = ctx_file.read_text(encoding="utf-8").strip()
+                    if ctx_text:
+                        lines.append(
+                            f"\n[REHYDRATED SESSION CONTEXT]\n{ctx_text}\n[END REHYDRATED CONTEXT]"
+                        )
+                except Exception:
+                    pass
 
         return "\n".join(lines)
 

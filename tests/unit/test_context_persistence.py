@@ -354,6 +354,7 @@ def test_herdr_dispatcher_rehydrated_context_prompt_injection(tmp_path: Path):
             role="Leaf Coder Worker",
             spec_path=".ai/plans/subtasks/2026-10-27/plan_01/subtask_03.md",
             required_skills=["sdlc-clean-code-standards"],
+            rehydrate_context=True,
         )
 
         assert "[ROLE: Leaf Coder Worker]" in prompt
