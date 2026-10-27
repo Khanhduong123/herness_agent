@@ -40,6 +40,7 @@ MUTATION_TOOLS = frozenset(
 ALLOWED_PATH_PREFIXES = (
     ".ai/plans/",
     ".ai/status/",
+    ".ai/context/",
     ".runs/",
 )
 
@@ -128,7 +129,12 @@ def is_path_forbidden(
             candidate_rel_paths.append(normalized)
 
     for rel_path in candidate_rel_paths:
-        rel_clean = rel_path.lstrip("./").lstrip("/")
+        rel_clean = rel_path
+        while rel_clean.startswith("./") or rel_clean.startswith("/"):
+            if rel_clean.startswith("./"):
+                rel_clean = rel_clean[2:]
+            elif rel_clean.startswith("/"):
+                rel_clean = rel_clean[1:]
         rel_lower = rel_clean.lower()
 
         # Check explicitly allowed prefixes
@@ -138,6 +144,14 @@ def is_path_forbidden(
         # Check forbidden root files
         if "/" not in rel_clean and rel_lower in FORBIDDEN_ROOT_FILES:
             return True, RULE_0_CODE_MUTATION_REASON
+
+        # Guard legacy harness architectural blueprints
+        if rel_lower.startswith(".harness/") and "architecture" in rel_lower:
+            return (
+                True,
+                "RULE 0 HARD-GATE: Orchestrator architecture blueprint must be stored "
+                "in .ai/context/ (e.g. .ai/context/architecture.md), not .harness/.",
+            )
 
         # Check forbidden prefixes
         if any(rel_lower.startswith(prefix.lower()) for prefix in FORBIDDEN_PATH_PREFIXES):
