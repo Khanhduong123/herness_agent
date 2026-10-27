@@ -14,7 +14,15 @@ import click
 
 from harness_agent.core.dispatch import HerdrDispatcher
 from harness_agent.core.harness import AgentHarness
-from harness_agent.core.models import AgyConfig, OrchestrationResult, Task, TaskStatus
+from harness_agent.core.models import (
+    AgyConfig,
+    ArchitectureSpec,
+    DirectoryLayoutSpec,
+    OrchestrationResult,
+    Task,
+    TaskStatus,
+    TechStackSpec,
+)
 from harness_agent.core.orchestrator import AgentOrchestrator
 from harness_agent.core.runner import AgyRunner
 from harness_agent.core.smoke import LiveSmokeProbe
@@ -364,10 +372,17 @@ run_group.add_command(resume_cmd, name="resume")
 @click.argument("project_name", required=False, default=None)
 @click.option("--target-dir", "-t", default=None, help="Specific target directory path")
 @click.option("--force", "-f", is_flag=True, help="Force update without prompt if directory exists")
+@click.option(
+    "--interview/--no-interview",
+    "--discovery/--no-discovery",
+    default=False,
+    help="Interactively formulate contract-first ArchitectureSpec into .ai/context/",
+)
 def init_cmd(
     project_name: Optional[str],
     target_dir: Optional[str],
     force: bool,
+    interview: bool,
 ) -> None:
     """Initialize harness agent rules, AGENTS.md, and workflow templates in a target directory."""
     if not project_name and not target_dir:
@@ -443,6 +458,76 @@ def init_cmd(
         copied += 1
 
     _cleanup_legacy_artifacts(target_path)
+
+    if interview:
+        click.secho(
+            "\n--- Contract-First Architecture Discovery Interview ---",
+            fg="cyan",
+            bold=True,
+        )
+        resolved_proj_name = project_name or target_path.name
+        desc = click.prompt(
+            "Project architectural overview / description",
+            default=f"Architectural specification for {resolved_proj_name}",
+        )
+        src_dir = click.prompt("Source code directory", default="src")
+        tests_unit_dir = click.prompt("Unit test directory", default="tests/unit")
+        tests_int_dir = click.prompt("Integration test directory", default="tests/integration")
+        primary_lang = click.prompt("Primary programming language", default="python")
+        lang_ver = click.prompt("Target language version", default=">=3.10")
+        frameworks_input = click.prompt(
+            "Target frameworks (comma-separated)", default="", show_default=False
+        )
+        frameworks = (
+            [f.strip() for f in frameworks_input.split(",") if f.strip()]
+            if frameworks_input
+            else []
+        )
+        persistence = click.prompt(
+            "Database or storage layer (optional, enter to skip)",
+            default="",
+            show_default=False,
+        )
+        vector_db = click.prompt(
+            "Vector database engine (optional, enter to skip)",
+            default="",
+            show_default=False,
+        )
+        protocols_input = click.prompt(
+            "API / Communication protocols (comma-separated)", default="CLI"
+        )
+        api_protocols = (
+            [p.strip() for p in protocols_input.split(",") if p.strip()]
+            if protocols_input
+            else ["CLI"]
+        )
+
+        arch_spec = ArchitectureSpec(
+            project_name=resolved_proj_name,
+            description=desc,
+            layout=DirectoryLayoutSpec(
+                src_dir=src_dir,
+                tests_unit_dir=tests_unit_dir,
+                tests_integration_dir=tests_int_dir,
+                docs_dir="docs",
+            ),
+            tech_stack=TechStackSpec(
+                primary_language=primary_lang,
+                language_version=lang_ver,
+                frameworks=frameworks,
+                persistence=persistence.strip() or None,
+                vector_db=vector_db.strip() or None,
+                api_protocols=api_protocols,
+            ),
+            approved=True,
+        )
+
+        AgentOrchestrator.save_architecture_blueprint(spec=arch_spec, repo_root=target_path)
+        click.secho(
+            "  [+] Created .ai/context/architecture.md & architecture_spec.json",
+            fg="green",
+        )
+        copied += 2
 
     _register_project(repo_root, target_path)
     click.secho(f"\n[OK] Successfully initialized {copied} items in {target_path}", fg="cyan")
