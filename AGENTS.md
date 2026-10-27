@@ -73,8 +73,9 @@
   1. Merge subtask: `git merge --no-ff agent/<task_id>`
   2. Cleanup: close worker pane, `git worktree remove --force .worktrees/agent/<task_id>`, `git branch -d agent/<task_id>`.
   3. Regression: `conda run -n pytorch pytest tests/`
-  4. Critics Gate: `conda run -n pytorch harness-agent review --base main`
-  5. Push & PR: `git push -u origin feat/<feature_name>` -> `conda run -n pytorch harness-agent pr create --base main` -> provide PR link to User.
+  4. Smoke Probe: `conda run -n pytorch harness-agent smoke`
+  5. Critics Gate: `conda run -n pytorch harness-agent review --base main`
+  6. Push & PR: `git push -u origin feat/<feature_name>` -> `conda run -n pytorch harness-agent pr create --base main` -> provide PR link to User.
 
 ---
 
@@ -111,6 +112,10 @@ When a **Coder** completes implementation:
 - **Style**: Black (100 char limit), isort (black), flake8. Maintain comments and docstrings.
 - **Test Structure**: Tests must reside in `tests/unit/` (isolated logic/mocks) or `tests/integration/` (end-to-end, CLI, processes). Never place tests in root of `tests/`.
 - **Quality Gates**: 100% pytest pass rate. Full regression suite (`conda run -n pytorch pytest tests/`) must pass before PR.
+- **The Tri-Layer Test Verification Contract**:
+  - **Layer 1: Unit Tests**: Pure logic, parsing, serialization, math. Max 2 mocks per test. Never mock internal units or write tautological assertions.
+  - **Layer 2: Integration Tests**: Hard ban on mocking SQLite, embedded databases, vector stores, or filesystems. Use real `tmp_path` filesystems or temporary SQLite instances.
+  - **Layer 3: Deterministic Smoke Probe**: Out-of-process subprocess launch (`conda run -n pytorch harness-agent smoke`).
 - **Tool-Locking ("Patch, Never Regenerate")**: Existing files must ONLY be modified using patch tools (`apply_patch`, `replace_file_content`, `multi_replace_file_content`). Full-file overwrites on existing files are strictly locked. `write_to_file` is permitted only for brand-new files.
 
 ---
@@ -125,7 +130,7 @@ When a **Coder** completes implementation:
   3. Worker develops, tests, and commits atomically on `agent/<task_id>`.
   4. Merge back: `git merge --no-ff agent/<task_id>`
   5. Cleanup: close pane, `git worktree remove --force .worktrees/agent/<task_id>`, `git branch -d agent/<task_id>`.
-  6. Full regression & critics gate: `conda run -n pytorch pytest tests/` -> `conda run -n pytorch harness-agent review --base main`.
+  6. Full regression, smoke probe & critics gate: `conda run -n pytorch pytest tests/` -> `conda run -n pytorch harness-agent smoke` -> `conda run -n pytorch harness-agent review --base main`.
   7. Push & PR: `git push -u origin feat/<name>` -> `conda run -n pytorch harness-agent pr create --base main` -> provide PR link to user.
 - **Commits**: Conventional prefixes (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`). Recover from pre-commit hook reformats by re-staging (`git add .`) and committing again until exit code 0. Standard rules/skills sync only to `main`.
 
@@ -186,6 +191,7 @@ herdr pane close <pane_id>
 git worktree remove --force .worktrees/agent/<task_id>
 git branch -d agent/<task_id>
 conda run -n pytorch pytest tests/
+conda run -n pytorch harness-agent smoke
 conda run -n pytorch harness-agent review --base main
 git push -u origin feat/<feature_name>
 conda run -n pytorch harness-agent pr create --base main
