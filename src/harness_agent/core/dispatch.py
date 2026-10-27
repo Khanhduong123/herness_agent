@@ -575,6 +575,18 @@ class HerdrDispatcher:
                 f"Target: {target_str}",
             ]
         )
+
+        ctx_file = Path(".ai/context/context.md")
+        if ctx_file.is_file():
+            try:
+                ctx_text = ctx_file.read_text(encoding="utf-8").strip()
+                if ctx_text:
+                    lines.append(
+                        f"\n[REHYDRATED SESSION CONTEXT]\n{ctx_text}\n[END REHYDRATED CONTEXT]"
+                    )
+            except Exception:
+                pass
+
         return "\n".join(lines)
 
     @classmethod

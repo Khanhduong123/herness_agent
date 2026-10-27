@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from harness_agent.core.dispatch import verify_and_load_agents_rule
 from harness_agent.core.models import AgyConfig, RunResult, Task, ToolCallRecord
+from harness_agent.core.state import EventWAL, WALEvent
 from harness_agent.core.token_logger import ModelPricing, TokenLogger
 
 STATIC_PREFIX = (
@@ -111,8 +112,19 @@ def build_pre_step_reanchoring_prompt(
 class AgyRunner:
     """Manages the execution of the agy CLI as a subprocess."""
 
-    def __init__(self, config: Optional[AgyConfig] = None) -> None:
+    def __init__(
+        self,
+        config: Optional[AgyConfig] = None,
+        wal_path: Optional[Union[str, Path]] = None,
+        wal: Optional[EventWAL] = None,
+    ) -> None:
         self.config = config or AgyConfig()
+        if wal is not None:
+            self.wal = wal
+        elif wal_path is not None:
+            self.wal = EventWAL(wal_path)
+        else:
+            self.wal = None
 
     def find_executable(self) -> Optional[str]:
         """Locate the agy executable on PATH or via configured path."""
@@ -296,6 +308,24 @@ class AgyRunner:
             total_tokens=total_tokens,
             estimated_cost_usd=estimated_cost,
         )
+
+        if self.wal is not None and tool_calls:
+            tool_duration_ms = (duration / len(tool_calls)) * 1000.0 if duration > 0 else 0.0
+            for tc in tool_calls:
+                try:
+                    self.wal.append_event(
+                        WALEvent(
+                            session_id=task.id,
+                            step_index=0,
+                            event_type="tool_call",
+                            tool_name=tc.name,
+                            status_code=0 if success else 1,
+                            latency_ms=round(tool_duration_ms, 2),
+                            error_message=error_message or "",
+                        )
+                    )
+                except Exception:
+                    pass
 
         should_log = self.config.auto_log if log_run is None else log_run
         if should_log:
