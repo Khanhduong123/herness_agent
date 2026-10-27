@@ -12,11 +12,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .agents/hooks/gate_tool_execution.py"
+            "command": "python run_hook.py gate_tool_execution.py"
           }
         ]
       }
     ]
   }
 }
-
