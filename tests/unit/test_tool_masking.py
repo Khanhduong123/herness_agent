@@ -148,12 +148,12 @@ def test_missing_or_malformed_tool_schemas(caplog):
 
 
 def test_orchestrator_tool_filtering(sample_toolset):
-    """Orchestrator role has access to orchestration and execution tools."""
+    """Orchestrator role has access to orchestration and planning tools without code patch tools."""
     filtered = filter_tools_for_role(sample_toolset, AgentRole.ORCHESTRATOR)
     tool_names = [t["name"] for t in filtered]
 
     assert "view_file" in tool_names
-    assert "replace_file_content" in tool_names
+    assert "replace_file_content" not in tool_names
     assert "write_to_file" in tool_names
-    assert "run_command" in tool_names
-    assert "invoke_subagent" in tool_names
+    assert "run_command" not in tool_names
+    assert "invoke_subagent" not in tool_names
