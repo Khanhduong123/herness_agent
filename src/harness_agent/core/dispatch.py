@@ -14,7 +14,13 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 
-from harness_agent.core.models import ROLE_DEFAULT_SKILLS, ROLE_TOOL_ALLOWLIST, AgentRole
+from harness_agent.core.models import (
+    ROLE_DEFAULT_SKILLS,
+    ROLE_TOOL_ALLOWLIST,
+    STATE_TOOL_ALLOWLIST,
+    AgentLifecycleState,
+    AgentRole,
+)
 from harness_agent.core.token_logger import TokenLogger, get_active_model
 
 logger = logging.getLogger(__name__)
@@ -1271,44 +1277,114 @@ class HerdrDispatcher:
         return True, f"Task {task_id} aborted. Failure log archived to {log_file}"
 
 
-def filter_tools_for_role(
-    all_tools: List[Dict[str, Any]],
-    role: AgentRole,
-) -> List[Dict[str, Any]]:
-    """Filters tool declarations based on assigned agent role.
+def is_approval_command(command_text: str) -> bool:
+    """Checks if a user input string contains an explicit approval token."""
+    if not command_text:
+        return False
+    normalized = command_text.strip().lower()
+    return normalized in {"/approve", "approve", "approved", "/proceed", "proceed", "yes"}
 
-    Args:
-        all_tools: Complete list of tool schemas.
-        role: The target agent role.
+
+def transition_lifecycle_state(
+    current_state: AgentLifecycleState,
+    target_state: AgentLifecycleState,
+    user_input: Optional[str] = None,
+    explicit_approval: bool = False,
+) -> Tuple[bool, AgentLifecycleState, str]:
+    """Validates and performs deterministic state transitions in the agent lifecycle FSM.
+
+    Transition Rule:
+    The transition from PLAN_REVIEW to EXECUTION CAN ONLY be triggered if:
+    - explicit_approval is True, OR
+    - user_input matches an approval command (/approve, approve, proceed).
 
     Returns:
-        Pruned list of tools relevant exclusively to the role.
+        Tuple of (transition_allowed, new_state, reason_or_message)
+    """
+    if (
+        current_state == AgentLifecycleState.PLAN_REVIEW
+        and target_state == AgentLifecycleState.EXECUTION
+    ):
+        approved = explicit_approval or is_approval_command(user_input or "")
+        if not approved:
+            return (
+                False,
+                current_state,
+                (
+                    "Transition from PLAN_REVIEW to EXECUTION blocked: "
+                    "Explicit user approval required (e.g. '/approve')."
+                ),
+            )
+        return (
+            True,
+            AgentLifecycleState.EXECUTION,
+            "Plan approved by user. Transitioning to EXECUTION.",
+        )
+
+    # Standard transitions
+    VALID_TRANSITIONS = {
+        AgentLifecycleState.PLANNING: {AgentLifecycleState.PLAN_REVIEW, AgentLifecycleState.FAILED},
+        AgentLifecycleState.PLAN_REVIEW: {
+            AgentLifecycleState.EXECUTION,
+            AgentLifecycleState.PLANNING,
+            AgentLifecycleState.FAILED,
+        },
+        AgentLifecycleState.EXECUTION: {AgentLifecycleState.VALIDATING, AgentLifecycleState.FAILED},
+        AgentLifecycleState.VALIDATING: {
+            AgentLifecycleState.CRITIC_GATE,
+            AgentLifecycleState.EXECUTION,
+            AgentLifecycleState.FAILED,
+        },
+        AgentLifecycleState.CRITIC_GATE: {
+            AgentLifecycleState.COMPLETED,
+            AgentLifecycleState.EXECUTION,
+            AgentLifecycleState.FAILED,
+        },
+        AgentLifecycleState.COMPLETED: set(),
+        AgentLifecycleState.FAILED: {AgentLifecycleState.PLANNING},
+    }
+
+    allowed_targets = VALID_TRANSITIONS.get(current_state, set())
+    if target_state in allowed_targets:
+        return True, target_state, f"State transitioned to {target_state.value}."
+
+    return (
+        False,
+        current_state,
+        f"Invalid state transition from {current_state.value} to {target_state.value}.",
+    )
+
+
+def filter_tools_for_role_and_state(
+    all_tools: List[Dict[str, Any]],
+    role: AgentRole,
+    state: Optional[AgentLifecycleState] = None,
+) -> List[Dict[str, Any]]:
+    """Filters tool schemas based on the intersection of Role allowlist and State allowlist.
+
+    If state is provided, the allowable tools are:
+        allowed = ROLE_TOOL_ALLOWLIST[role] ∩ STATE_TOOL_ALLOWLIST[state]
     """
     if not all_tools:
         return []
 
-    # Safe fallback if unknown role or not in allowlist
-    allowlist = ROLE_TOOL_ALLOWLIST.get(role)
-    if allowlist is None:
-        try:
-            matched_role = AgentRole(role)
-            allowlist = ROLE_TOOL_ALLOWLIST.get(matched_role)
-        except Exception:
-            allowlist = None
+    # Get role allowlist
+    role_allowlist = set(
+        ROLE_TOOL_ALLOWLIST.get(role, ROLE_TOOL_ALLOWLIST.get(AgentRole.REVIEWER, []))
+    )
 
-    if allowlist is None:
-        # Fallback to safe default toolset (read-only tools)
-        logger.warning(
-            "Unknown role '%s' encountered during tool filtering. Using safe default.", role
-        )
-        allowlist = ROLE_TOOL_ALLOWLIST[AgentRole.REVIEWER]
+    # If state is specified, intersect with state allowlist
+    if state and state in STATE_TOOL_ALLOWLIST:
+        state_allowlist = set(STATE_TOOL_ALLOWLIST[state])
+        effective_allowlist = role_allowlist.intersection(state_allowlist)
+    else:
+        effective_allowlist = role_allowlist
 
-    filtered_tools: List[Dict[str, Any]] = []
+    filtered: List[Dict[str, Any]] = []
     for tool_schema in all_tools:
         if not isinstance(tool_schema, dict):
             logger.warning("Skipping non-dict tool schema: %s", type(tool_schema))
             continue
-
         tool_name = (
             tool_schema.get("name")
             or tool_schema.get("tool_name")
@@ -1318,10 +1394,28 @@ def filter_tools_for_role(
             logger.warning("Missing or invalid tool name in schema: %s", tool_schema)
             continue
 
-        if tool_name in allowlist:
-            filtered_tools.append(tool_schema)
+        if tool_name in effective_allowlist:
+            filtered.append(tool_schema)
 
-    return filtered_tools
+    return filtered
+
+
+def filter_tools_for_role(
+    all_tools: List[Dict[str, Any]],
+    role: AgentRole,
+    state: Optional[AgentLifecycleState] = None,
+) -> List[Dict[str, Any]]:
+    """Filters tool declarations based on assigned agent role and optional lifecycle state.
+
+    Args:
+        all_tools: Complete list of tool schemas.
+        role: The target agent role.
+        state: Optional current agent lifecycle state.
+
+    Returns:
+        Pruned list of tools relevant exclusively to the role and state.
+    """
+    return filter_tools_for_role_and_state(all_tools=all_tools, role=role, state=state)
 
 
 # Module-level aliases
@@ -1347,13 +1441,16 @@ __all__ = [
     "create_feature_branch",
     "dispatch_interactive_critics",
     "filter_tools_for_role",
+    "filter_tools_for_role_and_state",
     "format_dispatch_payload",
+    "is_approval_command",
     "merge_worktree_to_feature",
     "prompt_agent",
     "resolve_domain_skills",
     "setup_worktree_env",
     "start_agent",
     "stop_agent",
+    "transition_lifecycle_state",
     "verify_and_load_agents_rule",
     "wait_for_task",
 ]
