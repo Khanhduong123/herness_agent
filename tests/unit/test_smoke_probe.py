@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -61,14 +60,13 @@ def test_run_cli_check_probe():
     assert res.passed is True
 
 
-def test_run_isolated_init_probe():
+def test_run_isolated_init_probe(tmp_path: Path):
     """Verify run_isolated_init_probe creates assets in temporary directory."""
     probe = LiveSmokeProbe()
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        res = probe.run_isolated_init_probe(target_dir=Path(tmp_dir))
-        assert res.name == "Isolated Init Probe"
-        assert res.exit_code == 0
-        assert res.passed is True
+    res = probe.run_isolated_init_probe(target_dir=tmp_path)
+    assert res.name == "Isolated Init Probe"
+    assert res.exit_code == 0
+    assert res.passed is True
 
 
 def test_run_all_probes():
@@ -77,6 +75,12 @@ def test_run_all_probes():
     results = probe.run_all()
     assert len(results) == 3
     assert all(r.passed for r in results)
+
+
+# Aliases matching alternative naming conventions in sub-specs
+test_cli_help_probe = test_run_cli_help_probe
+test_isolated_init_probe = test_run_isolated_init_probe
+test_run_all_smoke_probes = test_run_all_probes
 
 
 def test_cli_smoke_command_success():

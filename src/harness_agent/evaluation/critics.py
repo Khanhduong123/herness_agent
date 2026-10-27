@@ -293,6 +293,32 @@ def detect_requirement_issues(
                 issues.append(f"Requirement incomplete: Unimplemented stub or TODO for: {req}")
                 break
 
+    # Anti-Mock / Tautological Check for Integration Tests
+    anti_mock_patterns = [
+        (
+            r"""tests/integration/.*(?:sqlite3|create_engine|sessionmaker|Chroma|VectorStore)"""
+            r""".*(?:unittest\.mock|@patch|patch\.object|MagicMock)""",
+            "Anti-Mock violation: Integration tests must not mock databases or vector stores. "
+            "Use real tmp_path filesystems or temporary SQLite instances.",
+        ),
+        (
+            r"""(?:@patch\(["'].*(?:sqlite|database|db|engine|chroma|vector).*["']\)"""
+            r"""|patch\.object\([^)]*(?:sqlite|database|db|engine|chroma|vector)[^)]*\))""",
+            "Anti-Mock violation: Mocking database or persistence layer detected in test code.",
+        ),
+        (
+            r"""assert\s+[\w_]+\.(?:called|call_count|assert_called|assert_called_once"""
+            r"""|assert_called_with)\b""",
+            "Tautological test warning: Assertion only verifies mock call without checking real "
+            "state or data transformation logic.",
+        ),
+    ]
+
+    for pattern, description in anti_mock_patterns:
+        if re.search(pattern, diff_or_code, re.DOTALL | re.IGNORECASE):
+            issues.append(description)
+            break
+
     return issues
 
 
@@ -347,12 +373,18 @@ def build_critic_prompt(
     elif role == AgentRole.REQUIREMENT_REVIEWER:
         lines.extend(
             [
-                "## Critic Instructions (REQUIREMENTS):",
+                "## Critic Instructions (REQUIREMENTS & QA):",
                 "1. Scrutinize code against task instructions and acceptance criteria:",
                 "   - Ensure requested functionality is implemented without stubbed methods.",
                 "   - Ensure adherence to function signatures and type contracts.",
-                "2. If requirements are missing or broken, output: STATUS: REJECTED",
-                "3. If all requirements are satisfied, output: STATUS: APPROVED",
+                "2. Anti-Mock & Tautological Test Verification (The Tri-Layer Test Contract):",
+                "   - Flag any integration tests (`tests/integration/`) that mock databases, "
+                "SQLite, embedded engines, vector stores, or filesystems.",
+                "   - Flag tautological assertions that only check mock call counts without "
+                "validating actual logic, mutations, or data transformations.",
+                "3. If requirements or anti-mock rules are violated, output: STATUS: REJECTED",
+                "4. If all requirements and test contract criteria are satisfied, "
+                "output: STATUS: APPROVED",
             ]
         )
     else:
@@ -407,6 +439,16 @@ def parse_critic_feedback(
         has_loop = any("o(n^2)" in i.lower() or "nested loop" in i.lower() for i in detected_issues)
         if ("o(n^2)" in lower_out or "nested loop" in lower_out) and not has_loop:
             detected_issues.append("Performance Bottleneck: O(N^2) complexity detected.")
+    elif role == AgentRole.REQUIREMENT_REVIEWER:
+        has_mock_issue = any(
+            "anti-mock" in i.lower() or "tautological" in i.lower() for i in detected_issues
+        )
+        if (
+            "anti-mock" in lower_out or "tautological" in lower_out or "mock database" in lower_out
+        ) and not has_mock_issue:
+            detected_issues.append(
+                "Anti-Mock violation: Critic flagged tautological or invalid DB mock in tests."
+            )
 
     # Determine approval status
     has_rejected_status = "status: rejected" in lower_out or "status: fail" in lower_out
