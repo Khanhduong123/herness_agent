@@ -26,7 +26,14 @@ from harness_agent.core.models import (
 )
 from harness_agent.core.runner import AgyRunner
 from harness_agent.core.security import wrap_untrusted_content
-from harness_agent.core.state import DAGStateStore, StateCoordinator
+from harness_agent.core.state import (
+    AtomicSessionStore,
+    DAGStateStore,
+    SessionState,
+    StateCoordinator,
+    WALEvent,
+    sync_context_markdown,
+)
 from harness_agent.core.token_logger import TokenLogger
 from harness_agent.evaluation.evaluator import (
     CoverageSummary,
@@ -312,7 +319,11 @@ class AgentOrchestrator:
         self.state_store = state_store or DAGStateStore(db_path=db_path)
         self.auto_dispatch_critics = auto_dispatch_critics
         self.lazy_context = lazy_context
-        self.state_coordinator: Optional[StateCoordinator] = None
+        try:
+            os.makedirs(".ai/context", exist_ok=True)
+            self.state_coordinator = StateCoordinator()
+        except Exception:
+            self.state_coordinator = None
 
     @classmethod
     def load_plan(cls, file_path: str) -> OrchestrationPlan:
@@ -1030,6 +1041,7 @@ class AgentOrchestrator:
     # Aliases for dispatch function
     dispatch_subtask = execute_subtask
     dispatch = execute_subtask
+    _execute_subtask = execute_subtask
 
     async def dispatch_adversarial_critics(
         self,
@@ -1176,7 +1188,8 @@ class AgentOrchestrator:
         failed_count = sum(1 for st in task_statuses.values() if st == TaskStatus.FAILED)
         aborted = False
 
-        for subtask in ordered_tasks:
+        accumulated_modified_files: List[str] = []
+        for step_idx, subtask in enumerate(ordered_tasks, start=1):
             # Skip already completed tasks when resuming
             if task_statuses.get(subtask.id) == TaskStatus.COMPLETED:
                 continue
@@ -1229,6 +1242,20 @@ class AgentOrchestrator:
                     status=TaskStatus.RUNNING,
                     plan_file=plan_file,
                 )
+
+            # WAL: log subtask_start event
+            if self.state_coordinator and self.state_coordinator.wal:
+                try:
+                    self.state_coordinator.wal.append_event(
+                        WALEvent(
+                            session_id=plan.plan_id,
+                            step_index=step_idx,
+                            event_type="subtask_start",
+                            tool_name=subtask.id,
+                        )
+                    )
+                except Exception:
+                    pass
 
             # 2. Execute subtask
             result = await self.execute_subtask(
@@ -1347,6 +1374,61 @@ class AgentOrchestrator:
                     )
                 if plan.stop_on_failure:
                     aborted = True
+
+            # WAL: log subtask_end event
+            if self.state_coordinator and self.state_coordinator.wal:
+                try:
+                    self.state_coordinator.wal.append_event(
+                        WALEvent(
+                            session_id=plan.plan_id,
+                            step_index=step_idx,
+                            event_type="subtask_end",
+                            tool_name=subtask.id,
+                            status_code=0 if result.success else 1,
+                            error_message=result.error_message or "",
+                        )
+                    )
+                except Exception:
+                    pass
+
+            # Extract modified files if any
+            if hasattr(result, "tool_calls") and result.tool_calls:
+                for tc in result.tool_calls:
+                    target = (
+                        tc.args.get("path")
+                        or tc.args.get("file_path")
+                        or tc.args.get("target_file")
+                    )
+                    if target and isinstance(target, str):
+                        accumulated_modified_files.append(target)
+
+            # Save SessionState snapshot and sync context.md
+            if self.state_coordinator:
+                try:
+                    has_more = (step_idx < len(ordered_tasks)) and not aborted
+                    session_state = SessionState(
+                        task_id=subtask.id,
+                        session_id=plan.plan_id,
+                        goal=plan.goal,
+                        active_step=step_idx,
+                        status=(
+                            "running"
+                            if has_more
+                            else ("completed" if consolidated_status == "COMPLETED" else "failed")
+                        ),
+                        modified_files=list(set(accumulated_modified_files)),
+                    )
+                    AtomicSessionStore.save_snapshot(
+                        session_state, self.state_coordinator.session_path
+                    )
+                    recent_events = self.state_coordinator.wal.read_all_events()[-5:]
+                    sync_context_markdown(
+                        session_state,
+                        target_path=self.state_coordinator.context_md_path,
+                        recent_events=recent_events,
+                    )
+                except Exception:
+                    pass
 
         total_duration = round(time.time() - start_time, 2)
         overall_success = (failed_count == 0) and (completed_count == len(plan.tasks))
