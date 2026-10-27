@@ -211,15 +211,32 @@ def process_hook_payload(payload: Dict[str, Any]) -> PreToolUseDecision:
     )
 
 
+def read_stdin_with_timeout(timeout_sec: float = 0.5) -> str:
+    """Read sys.stdin with a timeout to prevent hanging on open interactive pipes."""
+    import threading
+
+    result = [""]
+
+    def _reader() -> None:
+        try:
+            stdin_stream = getattr(sys, "stdin", None)
+            if stdin_stream:
+                result[0] = stdin_stream.read()
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_reader, daemon=True)
+    t.start()
+    t.join(timeout=timeout_sec)
+    return result[0].strip()
+
+
 def main() -> None:
     """Entry point for PreToolUse enforcement hook."""
     _configure_utf8_streams()
     payload: Dict[str, Any] = {}
     try:
-        raw_input = ""
-        stdin_stream = getattr(sys, "stdin", None)
-        if stdin_stream and hasattr(stdin_stream, "isatty") and not stdin_stream.isatty():
-            raw_input = stdin_stream.read().strip()
+        raw_input = read_stdin_with_timeout(0.5)
         if raw_input:
             payload = json.loads(raw_input)
     except Exception:
