@@ -1,4 +1,4 @@
-﻿"""Comprehensive unit tests for dynamic tool gating FSM and hooks."""
+"""Comprehensive unit tests for dynamic tool gating FSM and hooks."""
 
 import json
 import subprocess
@@ -243,6 +243,13 @@ class TestPreToolUseHookHardDenial:
 
     def _invoke_hook(self, hook_script: Path, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Invoke hook script with stdin JSON payload and parse stdout JSON."""
+        # Use main repo root or temp dir as cwd so is_in_worker_worktree does not trigger
+        # when running tests inside an isolated agent worktree workspace (.worktrees/agent/...).
+        target_cwd = (
+            hook_script.parents[5]
+            if len(hook_script.parents) > 5 and (hook_script.parents[5] / "src").exists()
+            else hook_script.parents[2]
+        )
         result = subprocess.run(
             [sys.executable, str(hook_script)],
             input=json.dumps(payload),
@@ -250,6 +257,7 @@ class TestPreToolUseHookHardDenial:
             text=True,
             check=False,
             encoding="utf-8",
+            cwd=str(target_cwd),
         )
         assert result.returncode == 0, f"Hook execution failed: {result.stderr}"
         return json.loads(result.stdout.strip())

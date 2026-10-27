@@ -1,8 +1,9 @@
 """Tests for CLI default options and command configurations."""
 
 import pytest
+from click.testing import CliRunner
 
-from harness_agent.cli import orchestrate_cmd, resume_cmd, review_cmd, run_suite_cmd
+from harness_agent.cli import main, orchestrate_cmd, resume_cmd, review_cmd, run_suite_cmd
 
 
 def test_cli_default_output_options() -> None:
@@ -103,3 +104,30 @@ def test_sync_single_project_does_not_overwrite_precommit(tmp_path) -> None:
     assert "no-commit-to-branch" in final_precommit
     # Must not contain dummy-hook from template
     assert "dummy-hook" not in final_precommit
+
+
+def test_cli_runner_help_command() -> None:
+    """Verifies Click CliRunner executes --help cleanly."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["--help"])
+    assert result.exit_code == 0
+    assert "Usage:" in result.output
+    assert "smoke" in result.output
+    assert "check" in result.output
+
+
+def test_cli_runner_check_command() -> None:
+    """Verifies Click CliRunner executes check command successfully."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["check"])
+    assert result.exit_code == 0
+    assert "[OK] agy is ready" in result.output
+
+
+def test_cli_runner_smoke_command() -> None:
+    """Verifies Click CliRunner executes smoke command successfully."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["smoke"])
+    assert result.exit_code == 0
+    assert "[SMOKE PROBE]" in result.output
+    assert "[PASSED] All smoke probes succeeded" in result.output

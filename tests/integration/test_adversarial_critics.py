@@ -19,6 +19,7 @@ from harness_agent.core.orchestrator import AgentOrchestrator
 from harness_agent.core.state import DAGStateStore
 from harness_agent.evaluation.critics import (
     aggregate_critic_feedback,
+    detect_requirement_issues,
     detect_security_issues,
     dispatch_parallel_critics,
     sanitize_and_truncate_diff,
@@ -646,3 +647,39 @@ def test_detect_security_issues_sqli_false_positive_prevention():
 + # SELECT * FROM users WHERE username = 'admin'
 """
     assert len(detect_security_issues(comments_with_sql)) == 0
+
+
+def test_detect_requirement_issues_anti_mock_audit():
+    """Verify detect_requirement_issues flags database mocking and tautological assertions."""
+    # 1. Clean test code passes without issue
+    clean_code = """
+def test_user_creation(tmp_path):
+    db_file = tmp_path / "test.db"
+    conn = sqlite3.connect(db_file)
+    repo = UserRepository(conn)
+    repo.add_user("alice")
+    assert repo.get_user("alice").name == "alice"
+"""
+    assert len(detect_requirement_issues(clean_code)) == 0
+
+    # 2. Mocking database in tests/integration/ is flagged
+    mock_db_diff = (
+        "--- a/tests/integration/test_repo.py\n"
+        "+++ b/tests/integration/test_repo.py\n"
+        "+from unittest.mock import " + "patch\n"
+        "+" + "@" + "patch(" + '"harness_agent.core.database.sqlite3.connect")\n'
+        "+def test_integration_flow(mock_conn):\n"
+        "+    run_pipeline()\n"
+    )
+    issues = detect_requirement_issues(mock_db_diff)
+    assert any("Anti-Mock violation" in issue for issue in issues)
+
+    # 3. Tautological assertions are flagged
+    tautological_code = """
+def test_save_event(mock_publisher):
+    service = EventService(mock_publisher)
+    service.send("ping")
+    assert mock_publisher.assert_called_once()
+"""
+    issues_tautological = detect_requirement_issues(tautological_code)
+    assert any("Tautological test warning" in issue for issue in issues_tautological)
