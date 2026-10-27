@@ -18,6 +18,13 @@ This skill defines the mandatory verification gates that must pass **AFTER** com
   ```
 - **Rule**: If even 1 test fails, the task CANNOT be marked complete. Running only isolated new test files is prohibited; full regression verification across `tests/` is mandatory. Debug and resolve all failures first.
 
+### 1.1 Live Process Smoke Probe (Layer 3)
+- Run the deterministic live subprocess smoke probe:
+  ```powershell
+  conda run -n pytorch harness-agent smoke
+  ```
+- **Rule**: Block completion if any smoke probe fails or times out. The smoke probe executes the entry point end-to-end out-of-process without mocks, proving runtime launch and environment viability.
+
 ---
 
 ## 2. Code Quality & Linting Verification
@@ -71,21 +78,26 @@ After committing in the subtask worktree and completing initial quality checks:
    ```powershell
    conda run -n pytorch pytest tests/
    ```
-3. **Execute Automated Adversarial Critics Gate**:
+3. **Execute Live Process Smoke Probe**:
+   Verify that the CLI smoke probe passes out-of-process:
+   ```powershell
+   conda run -n pytorch harness-agent smoke
+   ```
+4. **Execute Automated Adversarial Critics Gate**:
    Verify that all 3 adversarial critics (Security, Performance, Requirements) approve the diff:
    ```powershell
    conda run -n pytorch harness-agent review --base main
    ```
    **Rule**: PR creation is strictly blocked if any critic rejects the changes.
-4. **Push Feature Branch to Remote**:
+5. **Push Feature Branch to Remote**:
    The agent **MUST automatically push** the feature branch to the remote repository:
    ```powershell
    git push -u origin feat/<feature_name>
    ```
-5. **Create Pull Request**:
+6. **Create Pull Request**:
    The agent **MUST create a Pull Request** targeting `main` (or `dev`) using the automated CLI tool:
    ```powershell
    conda run -n pytorch harness-agent pr create --base main
    ```
-6. **Report PR Link to User**:
+7. **Report PR Link to User**:
    The agent **MUST provide the resulting Pull Request URL directly to the user** in the response. Under no circumstances should the agent merge the PR into protected branches (merging remains exclusively the human user's authority).
