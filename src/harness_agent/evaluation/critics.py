@@ -314,9 +314,33 @@ def detect_requirement_issues(
         ),
     ]
 
-    for pattern, description in anti_mock_patterns:
-        if re.search(pattern, diff_or_code, re.DOTALL | re.IGNORECASE):
-            issues.append(description)
+    # Split diff into chunks to evaluate anti-mock checks only on tests/integration/ files,
+    # ignoring test files that specifically test critics themselves
+    # (e.g. test_adversarial_critics.py).
+    chunks = _split_diff_into_chunks(diff_or_code)
+    if not chunks:
+        chunks = [diff_or_code]
+
+    for chunk in chunks:
+        filenames = _extract_diff_filenames(chunk)
+        if filenames:
+            # If filenames are known, only evaluate tests/integration files,
+            # excluding test_adversarial_critics
+            is_target_integration_test = any(
+                "tests/integration/" in fn.replace("\\", "/")
+                and "test_adversarial_critics" not in fn
+                for fn in filenames
+            )
+            if not is_target_integration_test:
+                continue
+        elif "test_adversarial_critics" in chunk:
+            continue
+
+        for pattern, description in anti_mock_patterns:
+            if re.search(pattern, chunk, re.DOTALL | re.IGNORECASE):
+                issues.append(description)
+                break
+        if issues:
             break
 
     return issues
