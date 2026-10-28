@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import time
+from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 import yaml
@@ -17,12 +18,15 @@ from harness_agent.core.models import (
     AgentRole,
     AggregatedCriticReview,
     AgyConfig,
+    ArchitectureSpec,
+    DirectoryLayoutSpec,
     OrchestrationPlan,
     OrchestrationResult,
     RunResult,
     SubTask,
     Task,
     TaskStatus,
+    TechStackSpec,
     WorkerAgentConfig,
 )
 from harness_agent.core.runner import AgyRunner
@@ -1561,8 +1565,157 @@ class AgentOrchestrator:
 
         return default_base_ref
 
+    @staticmethod
+    def check_existing_architecture(repo_root: Optional[Path] = None) -> Optional[ArchitectureSpec]:
+        """Check if valid architecture spec or blueprint already exists in .ai/context/."""
+        root = Path(repo_root) if repo_root else Path.cwd()
+        json_path = root / ".ai" / "context" / "architecture_spec.json"
+        md_path = root / ".ai" / "context" / "architecture.md"
+
+        if json_path.is_file():
+            try:
+                content = json_path.read_text(encoding="utf-8")
+                return ArchitectureSpec.model_validate_json(content)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to parse existing architecture_spec.json at %s: %s", json_path, exc
+                )
+
+        if md_path.is_file():
+            try:
+                content = md_path.read_text(encoding="utf-8")
+                if content.strip():
+                    project_name = root.name or "project"
+                    for line in content.splitlines():
+                        if line.startswith("# Architecture Blueprint:"):
+                            project_name = line.replace("# Architecture Blueprint:", "").strip()
+                            break
+                    return ArchitectureSpec(
+                        project_name=project_name,
+                        description="Loaded from existing .ai/context/architecture.md",
+                        approved=True,
+                    )
+            except Exception as exc:
+                logger.warning("Failed to parse existing architecture.md at %s: %s", md_path, exc)
+
+        return None
+
+    @staticmethod
+    def save_architecture_blueprint(
+        spec: ArchitectureSpec,
+        repo_root: Optional[Path] = None,
+    ) -> Tuple[Path, Path]:
+        """Persist validated ArchitectureSpec to .ai/context/architecture_spec.json
+        and .ai/context/architecture.md.
+        """
+        root = Path(repo_root) if repo_root else Path.cwd()
+        context_dir = root / ".ai" / "context"
+        context_dir.mkdir(parents=True, exist_ok=True)
+
+        json_path = context_dir / "architecture_spec.json"
+        md_path = context_dir / "architecture.md"
+
+        json_path.write_text(spec.model_dump_json(indent=2), encoding="utf-8")
+        md_path.write_text(spec.to_markdown_blueprint(), encoding="utf-8")
+
+        logger.info("Persisted architecture spec to %s and blueprint to %s", json_path, md_path)
+        return json_path, md_path
+
+    def run_discovery_flow(
+        self,
+        repo_root: Optional[Path] = None,
+        project_name: Optional[str] = None,
+        description: Optional[str] = None,
+        frameworks: Optional[List[str]] = None,
+        persistence: Optional[str] = None,
+        vector_db: Optional[str] = None,
+        api_protocols: Optional[List[str]] = None,
+    ) -> ArchitectureSpec:
+        """Execute discovery flow to formulate and persist an ArchitectureSpec.
+
+        If a valid specification or markdown blueprint already exists in .ai/context/,
+        it is loaded and returned without mutation. Otherwise, a new ArchitectureSpec
+        is constructed from provided parameters (or sensible defaults conforming to
+        repository conventions), persisted to .ai/context/, and returned.
+        """
+        existing = self.check_existing_architecture(repo_root=repo_root)
+        if existing is not None:
+            logger.info(
+                "Existing architecture blueprint found and validated. Advancing to PLANNING."
+            )
+            return existing
+
+        root = Path(repo_root) if repo_root else Path.cwd()
+        p_name = project_name or root.name or "harness_agent_project"
+        p_desc = description or f"Architectural specification for {p_name}"
+
+        spec = ArchitectureSpec(
+            project_name=p_name,
+            description=p_desc,
+            layout=DirectoryLayoutSpec(
+                src_dir="src",
+                tests_unit_dir="tests/unit",
+                tests_integration_dir="tests/integration",
+                docs_dir="docs",
+            ),
+            tech_stack=TechStackSpec(
+                primary_language="python",
+                language_version=">=3.10",
+                frameworks=frameworks or [],
+                persistence=persistence,
+                vector_db=vector_db,
+                api_protocols=api_protocols or ["CLI"],
+            ),
+            approved=True,
+        )
+
+        self.save_architecture_blueprint(spec=spec, repo_root=repo_root)
+        return spec
+
+
+class ArchitectureDiscoveryEngine:
+    """Discovery engine interface wrapper for contract-first architecture discovery."""
+
+    @staticmethod
+    def check_existing_architecture(repo_root: Optional[Path] = None) -> Optional[ArchitectureSpec]:
+        """Check if valid architecture spec or blueprint already exists in .ai/context/."""
+        return AgentOrchestrator.check_existing_architecture(repo_root=repo_root)
+
+    @staticmethod
+    def save_architecture_blueprint(
+        spec: ArchitectureSpec,
+        repo_root: Optional[Path] = None,
+    ) -> Tuple[Path, Path]:
+        """Persist validated ArchitectureSpec to .ai/context/architecture_spec.json
+        and .ai/context/architecture.md.
+        """
+        return AgentOrchestrator.save_architecture_blueprint(spec=spec, repo_root=repo_root)
+
+    @staticmethod
+    def run_discovery_flow(
+        repo_root: Optional[Path] = None,
+        project_name: Optional[str] = None,
+        description: Optional[str] = None,
+        frameworks: Optional[List[str]] = None,
+        persistence: Optional[str] = None,
+        vector_db: Optional[str] = None,
+        api_protocols: Optional[List[str]] = None,
+    ) -> ArchitectureSpec:
+        """Run architecture discovery workflow."""
+        orch = AgentOrchestrator()
+        return orch.run_discovery_flow(
+            repo_root=repo_root,
+            project_name=project_name,
+            description=description,
+            frameworks=frameworks,
+            persistence=persistence,
+            vector_db=vector_db,
+            api_protocols=api_protocols,
+        )
+
 
 __all__ = [
     "AgentOrchestrator",
+    "ArchitectureDiscoveryEngine",
     "validate_output_artifacts",
 ]

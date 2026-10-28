@@ -44,6 +44,29 @@ def standard_toolset() -> List[Dict[str, Any]]:
 class TestLifecycleStateTransitions:
     """Test Case 1: Lifecycle State Transitions & Human Gate enforcement."""
 
+    def test_transition_discovery_to_planning_requires_architecture_spec(self):
+        """Verify transition from DISCOVERY to PLANNING requires valid architecture spec."""
+        # Blocked without architecture spec
+        allowed, state, reason = transition_lifecycle_state(
+            current_state=AgentLifecycleState.DISCOVERY,
+            target_state=AgentLifecycleState.PLANNING,
+            architecture_spec=None,
+            spec_validated=False,
+        )
+        assert allowed is False
+        assert state == AgentLifecycleState.DISCOVERY
+        assert "Architecture specification must be populated and validated" in reason
+
+        # Allowed with spec_validated=True
+        allowed, new_state, msg = transition_lifecycle_state(
+            current_state=AgentLifecycleState.DISCOVERY,
+            target_state=AgentLifecycleState.PLANNING,
+            spec_validated=True,
+        )
+        assert allowed is True
+        assert new_state == AgentLifecycleState.PLANNING
+        assert "Architecture specification validated" in msg
+
     def test_transition_planning_to_plan_review(self):
         """Verify transition from PLANNING to PLAN_REVIEW is valid."""
         allowed, new_state, msg = transition_lifecycle_state(
@@ -292,6 +315,18 @@ class TestPreToolUseHookHardDenial:
             "toolCall": {
                 "name": "write_file",
                 "args": {"Path": ".ai/plans/main/2026-10-27/main_test.md"},
+            }
+        }
+        res = self._invoke_hook(hook_script, payload)
+        assert res.get("decision") == "allow"
+        assert res.get("reason") is None
+
+    def test_pretooluse_hook_allows_ai_context(self, hook_script):
+        """Verify gate_tool_execution.py allows write operations on .ai/context path."""
+        payload = {
+            "toolCall": {
+                "name": "write_file",
+                "args": {"Path": ".ai/context/architecture.md"},
             }
         }
         res = self._invoke_hook(hook_script, payload)

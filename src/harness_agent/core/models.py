@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -85,6 +86,7 @@ class ToolCallRecord(BaseModel):
 class AgentLifecycleState(str, Enum):
     """Deterministic agent lifecycle states for dynamic tool gating."""
 
+    DISCOVERY = "discovery"
     PLANNING = "planning"
     PLAN_REVIEW = "plan_review"
     EXECUTION = "execution"
@@ -105,6 +107,15 @@ class AgentLifecycleState(str, Enum):
 
 # Mapping of agent lifecycle states to allowed tools
 STATE_TOOL_ALLOWLIST: Dict[AgentLifecycleState, List[str]] = {
+    AgentLifecycleState.DISCOVERY: [
+        "view_file",
+        "read_file",
+        "search_web",
+        "read_url_content",
+        "ask_question",
+        "write_to_file",  # Scoped strictly to .ai/context/** and .ai/plans/**
+        "write_file",  # Scoped strictly to .ai/context/** and .ai/plans/**
+    ],
     AgentLifecycleState.PLANNING: [
         "view_file",
         "read_file",
@@ -670,7 +681,129 @@ class OrchestrationResult(BaseModel):
     summary: str = ""
 
 
+class DirectoryLayoutSpec(BaseModel):
+    """Mandatory directory layout specification for repository structure."""
+
+    src_dir: str = Field(default="src", description="Source code root directory")
+    tests_unit_dir: str = Field(default="tests/unit", description="Unit tests directory")
+    tests_integration_dir: str = Field(
+        default="tests/integration", description="Integration tests directory"
+    )
+    docs_dir: Optional[str] = Field(default="docs", description="Documentation directory")
+    additional_dirs: List[str] = Field(
+        default_factory=list, description="Additional top-level directories"
+    )
+
+
+class TechStackSpec(BaseModel):
+    """Technology stack constraints and requirements."""
+
+    primary_language: str = Field(default="python", description="Primary programming language")
+    language_version: Optional[str] = Field(
+        default=">=3.10", description="Target language version or runtime"
+    )
+    frameworks: List[str] = Field(
+        default_factory=list, description="Target frameworks (e.g., FastAPI, Click, PyTorch)"
+    )
+    persistence: Optional[str] = Field(
+        default=None, description="Database or storage layer (e.g., SQLite, PostgreSQL)"
+    )
+    vector_db: Optional[str] = Field(
+        default=None, description="Vector database engine if applicable (e.g., Chroma, Qdrant)"
+    )
+    api_protocols: List[str] = Field(
+        default_factory=list, description="Communication protocols (e.g., REST, gRPC, CLI)"
+    )
+
+
+class ArchitectureSpec(BaseModel):
+    """Complete architecture specification produced during the discovery interview gate."""
+
+    project_name: str = Field(..., description="Project name")
+    description: str = Field(..., description="Brief project architectural overview")
+    layout: DirectoryLayoutSpec = Field(
+        default_factory=DirectoryLayoutSpec, description="Repository directory layout contract"
+    )
+    tech_stack: TechStackSpec = Field(
+        default_factory=TechStackSpec, description="Technology stack definitions"
+    )
+    coding_standards: List[str] = Field(
+        default_factory=lambda: [
+            "100% type safety with mypy/pyright strictness",
+            "Tests strictly segregated into tests/unit and tests/integration",
+            "Patch, never regenerate existing files",
+        ],
+        description="Core architectural and coding standards",
+    )
+    approved: bool = Field(
+        default=False, description="Flag indicating if the human user has approved the blueprint"
+    )
+    created_at: str = Field(
+        default_factory=lambda: datetime.utcnow().isoformat(),
+        description="ISO timestamp of blueprint creation",
+    )
+
+    def to_markdown_blueprint(self) -> str:
+        """Render the specification as a clean Markdown architecture blueprint."""
+        lines = [
+            f"# Architecture Blueprint: {self.project_name}",
+            "",
+            "## 1. Overview",
+            self.description,
+            "",
+            "## 2. Directory Layout Contract",
+            f"- **Source Directory:** `{self.layout.src_dir}`",
+            f"- **Unit Tests:** `{self.layout.tests_unit_dir}`",
+            f"- **Integration Tests:** `{self.layout.tests_integration_dir}`",
+        ]
+        if self.layout.docs_dir:
+            lines.append(f"- **Documentation:** `{self.layout.docs_dir}`")
+        if self.layout.additional_dirs:
+            dirs_str = ", ".join(f"`{d}`" for d in self.layout.additional_dirs)
+            lines.append(f"- **Additional Directories:** {dirs_str}")
+
+        lang_ver = self.tech_stack.language_version or "unspecified"
+        lines.extend(
+            [
+                "",
+                "## 3. Technology Stack",
+                f"- **Primary Language:** {self.tech_stack.primary_language} ({lang_ver})",
+            ]
+        )
+        if self.tech_stack.frameworks:
+            frameworks_str = ", ".join(self.tech_stack.frameworks)
+            lines.append(f"- **Frameworks:** {frameworks_str}")
+        if self.tech_stack.persistence:
+            lines.append(f"- **Persistence / Storage:** {self.tech_stack.persistence}")
+        if self.tech_stack.vector_db:
+            lines.append(f"- **Vector Database:** {self.tech_stack.vector_db}")
+        if self.tech_stack.api_protocols:
+            protocols_str = ", ".join(self.tech_stack.api_protocols)
+            lines.append(f"- **Communication Protocols:** {protocols_str}")
+
+        lines.extend(
+            [
+                "",
+                "## 4. Coding & Architecture Standards",
+            ]
+        )
+        for standard in self.coding_standards:
+            lines.append(f"- {standard}")
+
+        lines.extend(
+            [
+                "",
+                "## 5. Specification Status",
+                f"- **Approved:** {'Yes' if self.approved else 'Pending User Approval'}",
+                f"- **Created At:** {self.created_at}",
+                "",
+            ]
+        )
+        return "\n".join(lines)
+
+
 RunResult.model_rebuild()
 CriticFeedback.model_rebuild()
 AggregatedCriticReview.model_rebuild()
 OrchestrationResult.model_rebuild()
+ArchitectureSpec.model_rebuild()
