@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -86,6 +87,7 @@ class ToolCallRecord(BaseModel):
 class AgentLifecycleState(str, Enum):
     """Deterministic agent lifecycle states for dynamic tool gating."""
 
+    ROLE_SELECTION = "role_selection"
     DISCOVERY = "discovery"
     PLANNING = "planning"
     PLAN_REVIEW = "plan_review"
@@ -107,6 +109,13 @@ class AgentLifecycleState(str, Enum):
 
 # Mapping of agent lifecycle states to allowed tools
 STATE_TOOL_ALLOWLIST: Dict[AgentLifecycleState, List[str]] = {
+    AgentLifecycleState.ROLE_SELECTION: [
+        "view_file",
+        "read_file",
+        "ask_question",
+        "write_to_file",
+        "write_file",
+    ],
     AgentLifecycleState.DISCOVERY: [
         "view_file",
         "read_file",
@@ -194,6 +203,17 @@ class AgentRole(str, Enum):
     def _missing_(cls, value: object):
         if isinstance(value, str):
             normalized = value.replace("-", "_").lower()
+            aliases = {
+                "backend_engineer": cls.BACKEND,
+                "frontend_engineer": cls.FRONTEND,
+                "database_engineer": cls.DATABASE,
+                "devops_engineer": cls.DEVOPS,
+                "aiml": cls.AI_ML,
+                "ai": cls.AI_ML,
+                "ml": cls.AI_ML,
+            }
+            if normalized in aliases:
+                return aliases[normalized]
             for member in cls:
                 if member.value == normalized:
                     return member
@@ -201,119 +221,280 @@ class AgentRole(str, Enum):
 
 
 # Role-based tool schema filtering mappings
+class RoleContract(BaseModel):
+    """Explicit contract binding an agent role to required skills, tools, and model configs."""
+
+    role: AgentRole = Field(..., description="The agent role identifier")
+    description: str = Field(..., description="Role definition and operational scope")
+    core_skills: List[str] = Field(
+        default_factory=list, description="Mandatory baseline skills for this role"
+    )
+    optional_skills: List[str] = Field(
+        default_factory=list, description="Optional domain skills available for activation"
+    )
+    tool_allowlist: List[str] = Field(
+        default_factory=list, description="Permitted tool execution names for this role"
+    )
+    default_model: Optional[str] = Field(default=None, description="Preferred LLM model name")
+    default_effort: Optional[str] = Field(
+        default="low", description="Default reasoning effort level"
+    )
+
+
+class RoleSelectionResult(BaseModel):
+    """Persisted outcome of the role and skill selection phase."""
+
+    role: AgentRole = Field(..., description="Confirmed worker role")
+    confirmed_core_skills: List[str] = Field(
+        default_factory=list, description="Activated core skills"
+    )
+    confirmed_optional_skills: List[str] = Field(
+        default_factory=list, description="User-activated optional skills"
+    )
+    effective_tools: List[str] = Field(
+        default_factory=list,
+        description="Effective tool allowlist registered for worker",
+    )
+    timestamp: float = Field(default_factory=time.time, description="Selection epoch timestamp")
+
+
+ROLE_REGISTRY: Dict[AgentRole, RoleContract] = {
+    AgentRole.ORCHESTRATOR: RoleContract(
+        role=AgentRole.ORCHESTRATOR,
+        description="Coordinates planning, subtask dispatching, and quality gating across workers.",
+        core_skills=["sdlc-architecture-planner", "sdlc-subtask-specifier"],
+        optional_skills=["sdlc-pretask-checklist", "sdlc-posttask-quality-gate", "herdr-cli"],
+        tool_allowlist=[
+            "view_file",
+            "read_file",
+            "write_to_file",
+            "write_file",
+            "ask_question",
+            "schedule",
+            "send_message",
+            "manage_task",
+            "manage_subagents",
+            "read_url_content",
+            "search_web",
+        ],
+        default_model=None,
+        default_effort="medium",
+    ),
+    AgentRole.CODER: RoleContract(
+        role=AgentRole.CODER,
+        description="Implements feature code in isolated worktree using patch tools only.",
+        core_skills=["sdlc-clean-code-standards"],
+        optional_skills=["sdlc-conventional-commit", "sdlc-code-polish-hygiene"],
+        tool_allowlist=[
+            "view_file",
+            "replace_file_content",
+            "write_to_file",
+            "apply_patch",
+            "multi_replace_file_content",
+            "run_command",
+            "manage_task",
+            "ask_question",
+        ],
+        default_model=None,
+        default_effort="low",
+    ),
+    AgentRole.TESTER: RoleContract(
+        role=AgentRole.TESTER,
+        description="Writes unit and integration tests and validates test suite passes.",
+        core_skills=["sdlc-test-driven-development"],
+        optional_skills=["sdlc-clean-code-standards"],
+        tool_allowlist=[
+            "view_file",
+            "replace_file_content",
+            "write_to_file",
+            "apply_patch",
+            "run_command",
+            "manage_task",
+            "ask_question",
+        ],
+        default_model=None,
+        default_effort="low",
+    ),
+    AgentRole.REVIEWER: RoleContract(
+        role=AgentRole.REVIEWER,
+        description="General adversarial critic evaluating code diffs.",
+        core_skills=[],
+        optional_skills=["sdlc-clean-code-standards"],
+        tool_allowlist=[
+            "view_file",
+            "read_url_content",
+            "search_web",
+            "ask_question",
+        ],
+        default_model=None,
+        default_effort="low",
+    ),
+    AgentRole.SECURITY_REVIEWER: RoleContract(
+        role=AgentRole.SECURITY_REVIEWER,
+        description=(
+            "Read-only critic evaluating git diffs for vulnerabilities, "
+            "injections, and leaked secrets."
+        ),
+        core_skills=["sdlc-security-audit"],
+        optional_skills=[],
+        tool_allowlist=[
+            "view_file",
+            "read_url_content",
+            "search_web",
+            "ask_question",
+        ],
+        default_model=None,
+        default_effort="low",
+    ),
+    AgentRole.PERFORMANCE_REVIEWER: RoleContract(
+        role=AgentRole.PERFORMANCE_REVIEWER,
+        description=(
+            "Read-only critic evaluating git diffs for complexity, nested loops, "
+            "and performance bottlenecks."
+        ),
+        core_skills=[],
+        optional_skills=[],
+        tool_allowlist=[
+            "view_file",
+            "read_url_content",
+            "search_web",
+            "ask_question",
+        ],
+        default_model=None,
+        default_effort="low",
+    ),
+    AgentRole.REQUIREMENT_REVIEWER: RoleContract(
+        role=AgentRole.REQUIREMENT_REVIEWER,
+        description=(
+            "Read-only critic verifying git diffs against sub-spec contracts "
+            "and acceptance criteria."
+        ),
+        core_skills=[],
+        optional_skills=[],
+        tool_allowlist=[
+            "view_file",
+            "read_url_content",
+            "search_web",
+            "ask_question",
+        ],
+        default_model=None,
+        default_effort="low",
+    ),
+    AgentRole.RESEARCHER: RoleContract(
+        role=AgentRole.RESEARCHER,
+        description=(
+            "Explores codebase, dependencies, and architectures; writes blueprints and specs."
+        ),
+        core_skills=["sdlc-ai-paper-researcher"],
+        optional_skills=["sdlc-research-to-subagent-plan"],
+        tool_allowlist=[
+            "view_file",
+            "read_url_content",
+            "search_web",
+            "ask_question",
+        ],
+        default_model=None,
+        default_effort="low",
+    ),
+    AgentRole.DATABASE: RoleContract(
+        role=AgentRole.DATABASE,
+        description="Specialist in database migrations, ORM schemas, and data pipelines.",
+        core_skills=["sdlc-clean-code-standards"],
+        optional_skills=["sdlc-data-analyst"],
+        tool_allowlist=[
+            "view_file",
+            "replace_file_content",
+            "write_to_file",
+            "apply_patch",
+            "multi_replace_file_content",
+            "run_command",
+            "manage_task",
+            "ask_question",
+        ],
+        default_model=None,
+        default_effort="low",
+    ),
+    AgentRole.BACKEND: RoleContract(
+        role=AgentRole.BACKEND,
+        description="Specialist in server architecture, REST endpoints, and backend services.",
+        core_skills=["sdlc-api-interface-design", "sdlc-clean-code-standards"],
+        optional_skills=["sdlc-test-driven-development"],
+        tool_allowlist=[
+            "view_file",
+            "replace_file_content",
+            "write_to_file",
+            "apply_patch",
+            "multi_replace_file_content",
+            "run_command",
+            "manage_task",
+            "ask_question",
+        ],
+        default_model=None,
+        default_effort="low",
+    ),
+    AgentRole.FRONTEND: RoleContract(
+        role=AgentRole.FRONTEND,
+        description="Specialist in client-side UIs, layout, and component state management.",
+        core_skills=["sdlc-frontend-ui-engineering"],
+        optional_skills=["ui-ux-pro-max"],
+        tool_allowlist=[
+            "view_file",
+            "replace_file_content",
+            "write_to_file",
+            "apply_patch",
+            "multi_replace_file_content",
+            "run_command",
+            "manage_task",
+            "ask_question",
+        ],
+        default_model=None,
+        default_effort="low",
+    ),
+    AgentRole.DEVOPS: RoleContract(
+        role=AgentRole.DEVOPS,
+        description=(
+            "Specialist in CI/CD pipelines, containerization, and infrastructure deployment."
+        ),
+        core_skills=["sdlc-clean-code-standards"],
+        optional_skills=[],
+        tool_allowlist=[
+            "view_file",
+            "replace_file_content",
+            "write_to_file",
+            "apply_patch",
+            "multi_replace_file_content",
+            "run_command",
+            "manage_task",
+            "ask_question",
+        ],
+        default_model=None,
+        default_effort="low",
+    ),
+    AgentRole.AI_ML: RoleContract(
+        role=AgentRole.AI_ML,
+        description=(
+            "Specialist in machine learning models, training scripts, and PyTorch patterns."
+        ),
+        core_skills=["pytorch-patterns", "sdlc-clean-code-standards"],
+        optional_skills=["jupyter-notebook"],
+        tool_allowlist=[
+            "view_file",
+            "replace_file_content",
+            "write_to_file",
+            "apply_patch",
+            "multi_replace_file_content",
+            "run_command",
+            "manage_task",
+            "ask_question",
+        ],
+        default_model=None,
+        default_effort="low",
+    ),
+}
+
+# Role-based tool schema filtering mappings (derived from ROLE_REGISTRY)
 ROLE_TOOL_ALLOWLIST: Dict[AgentRole, List[str]] = {
-    AgentRole.CODER: [
-        "view_file",
-        "replace_file_content",
-        "write_to_file",
-        "apply_patch",
-        "multi_replace_file_content",
-        "run_command",
-        "manage_task",
-        "ask_question",
-    ],
-    AgentRole.TESTER: [
-        "view_file",
-        "replace_file_content",
-        "write_to_file",
-        "apply_patch",
-        "run_command",
-        "manage_task",
-        "ask_question",
-    ],
-    AgentRole.REVIEWER: [
-        "view_file",
-        "read_url_content",
-        "search_web",
-        "ask_question",
-    ],
-    AgentRole.SECURITY_REVIEWER: [
-        "view_file",
-        "read_url_content",
-        "search_web",
-        "ask_question",
-    ],
-    AgentRole.PERFORMANCE_REVIEWER: [
-        "view_file",
-        "read_url_content",
-        "search_web",
-        "ask_question",
-    ],
-    AgentRole.REQUIREMENT_REVIEWER: [
-        "view_file",
-        "read_url_content",
-        "search_web",
-        "ask_question",
-    ],
-    AgentRole.RESEARCHER: [
-        "view_file",
-        "read_url_content",
-        "search_web",
-        "ask_question",
-    ],
-    AgentRole.ORCHESTRATOR: [
-        "view_file",
-        "read_file",
-        "write_to_file",  # Note: Scoped only to .ai/plans/** by path gate
-        "write_file",  # Scoped only to .ai/plans/** by path gate
-        "ask_question",
-        "schedule",
-        "send_message",
-        "manage_task",
-        "manage_subagents",
-        "read_url_content",
-        "search_web",
-    ],
-    AgentRole.DATABASE: [
-        "view_file",
-        "replace_file_content",
-        "write_to_file",
-        "apply_patch",
-        "multi_replace_file_content",
-        "run_command",
-        "manage_task",
-        "ask_question",
-    ],
-    AgentRole.BACKEND: [
-        "view_file",
-        "replace_file_content",
-        "write_to_file",
-        "apply_patch",
-        "multi_replace_file_content",
-        "run_command",
-        "manage_task",
-        "ask_question",
-    ],
-    AgentRole.FRONTEND: [
-        "view_file",
-        "replace_file_content",
-        "write_to_file",
-        "apply_patch",
-        "multi_replace_file_content",
-        "run_command",
-        "manage_task",
-        "ask_question",
-    ],
-    AgentRole.DEVOPS: [
-        "view_file",
-        "replace_file_content",
-        "write_to_file",
-        "apply_patch",
-        "multi_replace_file_content",
-        "run_command",
-        "manage_task",
-        "ask_question",
-    ],
-    AgentRole.AI_ML: [
-        "view_file",
-        "replace_file_content",
-        "write_to_file",
-        "apply_patch",
-        "multi_replace_file_content",
-        "run_command",
-        "manage_task",
-        "ask_question",
-    ],
+    role: list(contract.tool_allowlist) for role, contract in ROLE_REGISTRY.items()
 }
 
 DOMAIN_PROFILES: Dict[AgentRole, List[str]] = {
@@ -324,12 +505,11 @@ DOMAIN_PROFILES: Dict[AgentRole, List[str]] = {
     AgentRole.AI_ML: ["training/", "models/", "pipelines/", "notebooks/"],
 }
 
+# Role default skills mapping (derived from ROLE_REGISTRY core_skills)
 ROLE_DEFAULT_SKILLS: Dict[AgentRole, List[str]] = {
-    AgentRole.BACKEND: ["sdlc-api-interface-design", "sdlc-clean-code-standards"],
-    AgentRole.FRONTEND: ["sdlc-frontend-ui-engineering"],
-    AgentRole.DATABASE: ["sdlc-clean-code-standards"],
-    AgentRole.DEVOPS: ["sdlc-clean-code-standards"],
-    AgentRole.AI_ML: ["pytorch-patterns", "sdlc-clean-code-standards"],
+    role: list(contract.core_skills)
+    for role, contract in ROLE_REGISTRY.items()
+    if contract.core_skills
 }
 
 # Critic roles share read-only tools
