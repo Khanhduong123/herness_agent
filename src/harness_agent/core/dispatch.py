@@ -21,6 +21,7 @@ from harness_agent.core.models import (
     AgentLifecycleState,
     AgentRole,
     ArchitectureSpec,
+    RoleSelectionResult,
 )
 from harness_agent.core.token_logger import TokenLogger, get_active_model
 
@@ -1374,6 +1375,11 @@ def transition_lifecycle_state(
     # Standard transitions
     VALID_TRANSITIONS = {
         AgentLifecycleState.DISCOVERY: {
+            AgentLifecycleState.ROLE_SELECTION,
+            AgentLifecycleState.PLANNING,
+            AgentLifecycleState.FAILED,
+        },
+        AgentLifecycleState.ROLE_SELECTION: {
             AgentLifecycleState.PLANNING,
             AgentLifecycleState.FAILED,
         },
@@ -1413,19 +1419,26 @@ def filter_tools_for_role_and_state(
     all_tools: List[Dict[str, Any]],
     role: AgentRole,
     state: Optional[AgentLifecycleState] = None,
+    role_selection: Optional[RoleSelectionResult] = None,
 ) -> List[Dict[str, Any]]:
     """Filters tool schemas based on the intersection of Role allowlist and State allowlist.
 
     If state is provided, the allowable tools are:
         allowed = ROLE_TOOL_ALLOWLIST[role] ∩ STATE_TOOL_ALLOWLIST[state]
+    When in EXECUTION state and role_selection is provided with effective_tools,
+    effective_tools overrides the role allowlist:
+        allowed = role_selection.effective_tools ∩ STATE_TOOL_ALLOWLIST[EXECUTION]
     """
     if not all_tools:
         return []
 
     # Get role allowlist
-    role_allowlist = set(
-        ROLE_TOOL_ALLOWLIST.get(role, ROLE_TOOL_ALLOWLIST.get(AgentRole.REVIEWER, []))
-    )
+    if state == AgentLifecycleState.EXECUTION and role_selection and role_selection.effective_tools:
+        role_allowlist = set(role_selection.effective_tools)
+    else:
+        role_allowlist = set(
+            ROLE_TOOL_ALLOWLIST.get(role, ROLE_TOOL_ALLOWLIST.get(AgentRole.REVIEWER, []))
+        )
 
     # If state is specified, intersect with state allowlist
     if state and state in STATE_TOOL_ALLOWLIST:
@@ -1472,6 +1485,39 @@ def filter_tools_for_role(
     return filter_tools_for_role_and_state(all_tools=all_tools, role=role, state=state)
 
 
+def build_worker_dispatch_contract_with_role(
+    task_id: str,
+    spec_path: str,
+    role_selection: RoleSelectionResult,
+    worktree_path: str,
+    prohibitions: Optional[List[str]] = None,
+    target: Optional[str] = None,
+    model: Optional[str] = None,
+) -> str:
+    """Builds the Herdr dispatch contract embedding confirmed skills and strict role constraints."""
+    role_title = f"Leaf {role_selection.role.value.capitalize()} Worker"
+    all_skills = list(role_selection.confirmed_core_skills) + list(
+        role_selection.confirmed_optional_skills
+    )
+    # Deduplicate skills while preserving order
+    deduped_skills: List[str] = []
+    for s in all_skills:
+        if s and s not in deduped_skills:
+            deduped_skills.append(s)
+
+    target_paths = [worktree_path] if worktree_path else None
+
+    return HerdrDispatcher.format_dispatch_payload(
+        role=role_title,
+        spec_path=spec_path,
+        prohibitions=prohibitions,
+        target=target,
+        model=model,
+        target_paths=target_paths,
+        required_skills=deduped_skills,
+    )
+
+
 # Module-level aliases
 wait_for_task = HerdrDispatcher.wait_for_task
 create_feature_branch = HerdrDispatcher.create_feature_branch
@@ -1491,6 +1537,7 @@ HerdrDispatcher.verify_and_load_agents_rule = staticmethod(verify_and_load_agent
 __all__ = [
     "HerdrDispatcher",
     "abort_task",
+    "build_worker_dispatch_contract_with_role",
     "cleanup_worktree",
     "create_feature_branch",
     "dispatch_interactive_critics",

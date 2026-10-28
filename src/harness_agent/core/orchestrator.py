@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Set, Tuple
 import yaml
 
 from harness_agent.core.models import (
+    ROLE_REGISTRY,
     ROLE_TOOL_ALLOWLIST,
     STATE_TOOL_ALLOWLIST,
     AgentLifecycleState,
@@ -22,6 +23,8 @@ from harness_agent.core.models import (
     DirectoryLayoutSpec,
     OrchestrationPlan,
     OrchestrationResult,
+    RoleContract,
+    RoleSelectionResult,
     RunResult,
     SubTask,
     Task,
@@ -31,6 +34,7 @@ from harness_agent.core.models import (
 )
 from harness_agent.core.runner import AgyRunner
 from harness_agent.core.security import wrap_untrusted_content
+from harness_agent.core.skills import ProjectSkillAutoScaffolder
 from harness_agent.core.state import (
     AtomicSessionStore,
     DAGStateStore,
@@ -1714,8 +1718,116 @@ class ArchitectureDiscoveryEngine:
         )
 
 
+def conduct_role_selection(
+    repo_root: Path,
+    target_role: Optional[AgentRole] = None,
+    interactive: bool = True,
+    additional_skills: Optional[List[str]] = None,
+) -> RoleSelectionResult:
+    """Coordinates role and skill selection:
+    1. Scans project via ProjectSkillAutoScaffolder to ensure stack-specific skills are generated.
+    2. Resolves candidate RoleContract from ROLE_REGISTRY.
+    3. If interactive, prompts user:
+       "Assigned Role: <role>.
+        Core Skills Loaded: <core_skills>.
+        Available Optional Skills: <optional_skills>.
+        Confirm or add additional skills before proceeding to Planning."
+    4. Persists RoleSelectionResult to .ai/context/role_selection.json.
+    5. Returns confirmed RoleSelectionResult.
+    """
+    root_path = Path(repo_root)
+
+    # 1. Project skill auto-scaffolding
+    try:
+        scaffolder = ProjectSkillAutoScaffolder(repo_root=root_path)
+        scaffolder.scan_and_scaffold()
+    except Exception as exc:
+        logger.warning("ProjectSkillAutoScaffolder encountered an issue: %s", exc)
+
+    # 2. Resolve candidate RoleContract
+    resolved_role = target_role or AgentRole.CODER
+    contract: RoleContract = ROLE_REGISTRY.get(
+        resolved_role,
+        ROLE_REGISTRY.get(
+            AgentRole.CODER,
+            RoleContract(
+                role=resolved_role,
+                description=f"Worker role {resolved_role.value}",
+                core_skills=[],
+                optional_skills=[],
+                tool_allowlist=ROLE_TOOL_ALLOWLIST.get(resolved_role, []),
+                default_model=None,
+                default_effort="low",
+            ),
+        ),
+    )
+
+    confirmed_core = list(contract.core_skills)
+    confirmed_opt = list(contract.optional_skills)
+
+    # Handle CI / Non-interactive / Headless check
+    is_headless = not interactive or os.environ.get("CI") is not None or not os.isatty(0)
+
+    # Check if role_selection.json already exists in context dir
+    context_dir = root_path / ".ai" / "context"
+    role_selection_path = context_dir / "role_selection.json"
+
+    if role_selection_path.is_file():
+        try:
+            existing_data = role_selection_path.read_text(encoding="utf-8")
+            existing_result = RoleSelectionResult.model_validate_json(existing_data)
+            logger.info("Found existing role_selection.json at %s; loading.", role_selection_path)
+            return existing_result
+        except Exception as exc:
+            logger.warning("Failed to load existing role_selection.json: %s", exc)
+
+    if not is_headless:
+        # Interactive prompt to user
+        core_str = ", ".join(confirmed_core) if confirmed_core else "(none)"
+        opt_str = ", ".join(confirmed_opt) if confirmed_opt else "(none)"
+        prompt_text = (
+            f"Assigned Role: {contract.role.value}.\n"
+            f"Core Skills Loaded: {core_str}.\n"
+            f"Available Optional Skills: {opt_str}.\n"
+            "Confirm or add additional skills before proceeding to Planning."
+        )
+        try:
+            user_response = input(f"{prompt_text}\n[Press Enter to confirm or type skills]: ")
+            if user_response and user_response.strip():
+                extra_tokens = [s.strip() for s in user_response.split(",") if s.strip()]
+                for token in extra_tokens:
+                    if token not in confirmed_opt:
+                        confirmed_opt.append(token)
+        except (EOFError, OSError):
+            logger.info("Interactive input unavailable, falling back to defaults.")
+
+    if additional_skills:
+        for sk in additional_skills:
+            if sk and sk.strip() and sk.strip() not in confirmed_opt:
+                confirmed_opt.append(sk.strip())
+
+    effective_tools = list(contract.tool_allowlist)
+    result = RoleSelectionResult(
+        role=contract.role,
+        confirmed_core_skills=confirmed_core,
+        confirmed_optional_skills=confirmed_opt,
+        effective_tools=effective_tools,
+        timestamp=time.time(),
+    )
+
+    try:
+        context_dir.mkdir(parents=True, exist_ok=True)
+        role_selection_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+        logger.info("Saved role selection result to %s", role_selection_path)
+    except Exception as exc:
+        logger.warning("Failed to persist role_selection.json at %s: %s", role_selection_path, exc)
+
+    return result
+
+
 __all__ = [
     "AgentOrchestrator",
     "ArchitectureDiscoveryEngine",
+    "conduct_role_selection",
     "validate_output_artifacts",
 ]
