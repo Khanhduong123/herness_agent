@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -21,6 +22,7 @@ from harness_agent.core.models import (
     AggregatedCriticReview,
     AgyConfig,
     ArchitectureSpec,
+    ContractFreezeManifest,
     DirectoryLayoutSpec,
     OrchestrationPlan,
     OrchestrationResult,
@@ -1162,6 +1164,134 @@ class AgentOrchestrator:
             initial_results=initial_results,
         )
 
+    def verify_and_freeze_contracts(
+        self,
+        plan: OrchestrationPlan,
+        workspace_dir: Optional[str] = None,
+    ) -> Optional[ContractFreezeManifest]:
+        """Verify interface contracts before parallel execution and freeze them.
+
+        Gathers interface_files across all tasks in the plan. If any exist, checks that
+        the files exist and are committed to the git branch without uncommitted changes.
+        Writes .ai/context/contract_freeze.json containing the list of frozen files.
+        """
+        enable_freeze = True
+        if hasattr(plan, "parallel_config") and plan.parallel_config:
+            enable_freeze = plan.parallel_config.enable_contract_freeze
+
+        if not enable_freeze:
+            return None
+
+        # Collect shared interface files and targeting tasks
+        all_interface_files: List[str] = []
+        target_tasks: List[str] = []
+        for task in plan.tasks:
+            task_has_contract = False
+            for f in task.interface_files:
+                f_clean = f.strip().replace("\\", "/")
+                if f_clean and f_clean not in all_interface_files:
+                    all_interface_files.append(f_clean)
+                    task_has_contract = True
+            if task_has_contract and task.id not in target_tasks:
+                target_tasks.append(task.id)
+
+        # Check if an existing contract freeze manifest exists
+        root_dir = Path(workspace_dir or Path.cwd()).resolve()
+        freeze_file = root_dir / ".ai" / "context" / "contract_freeze.json"
+
+        if not all_interface_files and freeze_file.exists():
+            try:
+                with open(freeze_file, "r", encoding="utf-8") as f:
+                    manifest_data = json.load(f)
+                loaded_manifest = ContractFreezeManifest(**manifest_data)
+                for f_path in loaded_manifest.contract_files:
+                    f_clean = str(f_path).strip().replace("\\", "/")
+                    if f_clean and f_clean not in all_interface_files:
+                        all_interface_files.append(f_clean)
+                for t_id in loaded_manifest.target_tasks:
+                    if t_id not in target_tasks:
+                        target_tasks.append(t_id)
+            except Exception as exc:
+                logger.warning("Failed to load existing contract freeze manifest: %s", exc)
+
+        if not all_interface_files:
+            return None
+
+        # Verify contracts are committed to git branch
+        head_commit: Optional[str] = None
+        try:
+            import subprocess
+
+            rev_proc = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(root_dir),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if rev_proc.returncode == 0:
+                head_commit = rev_proc.stdout.strip()
+
+            for contract_file in all_interface_files:
+                # 1. Verify file exists in tree
+                full_path = root_dir / contract_file
+                if not full_path.exists():
+                    raise FileNotFoundError(
+                        f"Interface contract file '{contract_file}' does not exist on disk at "
+                        f"{full_path}"
+                    )
+
+                # 2. Verify file is tracked in git HEAD
+                cat_proc = subprocess.run(
+                    ["git", "cat-file", "-e", f"HEAD:{contract_file}"],
+                    cwd=str(root_dir),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if cat_proc.returncode != 0:
+                    raise RuntimeError(
+                        f"Interface contract file '{contract_file}' is not committed to the "
+                        f"git branch (HEAD)"
+                    )
+
+                # 3. Verify file has no uncommitted changes
+                diff_proc = subprocess.run(
+                    ["git", "status", "--porcelain", "--", contract_file],
+                    cwd=str(root_dir),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if diff_proc.returncode == 0 and diff_proc.stdout.strip():
+                    raise RuntimeError(
+                        f"Interface contract file '{contract_file}' has uncommitted changes: "
+                        f"{diff_proc.stdout.strip()}"
+                    )
+        except (RuntimeError, FileNotFoundError):
+            raise
+        except Exception as exc:
+            logger.warning("Git check encountered unexpected error: %s", exc)
+
+        # Write .ai/context/contract_freeze.json
+        manifest = ContractFreezeManifest(
+            plan_id=plan.plan_id,
+            frozen_at_commit=head_commit,
+            contract_files=all_interface_files,
+            target_tasks=target_tasks,
+            locked=True,
+        )
+        freeze_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(freeze_file, "w", encoding="utf-8") as f:
+            f.write(manifest.model_dump_json(indent=2))
+
+        logger.info(
+            "Contract freeze manifest written to %s with %d contract files",
+            freeze_file,
+            len(all_interface_files),
+        )
+        return manifest
+
     async def run_plan_parallel(
         self,
         plan: OrchestrationPlan,
@@ -1219,6 +1349,23 @@ class AgentOrchestrator:
                 task_results=task_results,
                 status="running",
                 plan_file=plan_file,
+            )
+
+        # Execute Contract Freeze Verification Phase prior to parallel worker execution
+        try:
+            self.verify_and_freeze_contracts(plan=plan)
+        except Exception as freeze_err:
+            logger.error("Contract freeze verification failed: %s", freeze_err)
+            return OrchestrationResult(
+                plan_id=plan.plan_id,
+                success=False,
+                total_tasks=len(plan.tasks),
+                completed_tasks=0,
+                failed_tasks=1,
+                task_statuses={t.id: TaskStatus.FAILED for t in plan.tasks},
+                task_results={},
+                duration_seconds=time.time() - start_time,
+                error_message=f"Contract freeze verification failed: {freeze_err}",
             )
 
         # Build DAG structures
