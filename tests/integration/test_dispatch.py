@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 
 from harness_agent.cli import main
-from harness_agent.core.dispatch import HerdrDispatcher
+from harness_agent.core.dispatch import HerdrDispatcher, TaskWorktreeManager
 
 
 class TestHerdrDispatcher:
@@ -1174,3 +1174,192 @@ class TestLifecycleCliCommands:
             ".agents/skills/sdlc-api-interface-design/SKILL.md",
         ]
         assert resolved == expected
+
+
+class TestTaskWorktreeManager:
+    """Test suite for async TaskWorktreeManager context manager."""
+
+    import pytest
+
+    @pytest.mark.asyncio
+    async def test_worktree_lifecycle_success(self, tmp_path: Path) -> None:
+        """Test standard successful worktree provisioning and cleanup on exit."""
+        mock_path = tmp_path / ".worktrees" / "agent" / "subtask_02"
+        mock_path.mkdir(parents=True, exist_ok=True)
+
+        with (
+            patch.object(
+                HerdrDispatcher,
+                "create_agent_worktree",
+                return_value=(True, str(mock_path), "p_worker_1"),
+            ) as mock_create,
+            patch.object(
+                HerdrDispatcher,
+                "trust_workspace",
+                return_value=True,
+            ) as mock_trust,
+            patch.object(
+                HerdrDispatcher,
+                "setup_worktree_env",
+                return_value=[],
+            ) as mock_env,
+            patch.object(
+                HerdrDispatcher,
+                "stop_agent",
+                return_value=(True, "stopped"),
+            ) as mock_stop,
+            patch.object(
+                HerdrDispatcher,
+                "cleanup_worktree",
+                return_value=(True, "cleaned"),
+            ) as mock_clean,
+        ):
+            async with TaskWorktreeManager(
+                task_id="subtask_02",
+                base_ref="feat/branch",
+                repo_root=tmp_path,
+            ) as wt_path:
+                assert wt_path == mock_path.resolve()
+                mock_create.assert_called_once_with(
+                    task_id="subtask_02",
+                    base_ref="feat/branch",
+                    executable="herdr",
+                    repo_root=tmp_path,
+                )
+                mock_trust.assert_called_with(workspace_path=mock_path.resolve())
+                mock_env.assert_called_once_with(
+                    worktree_path=mock_path.resolve(),
+                    repo_root=tmp_path,
+                )
+
+            mock_stop.assert_called_once_with(task_id="subtask_02", executable="herdr")
+            mock_clean.assert_called_once_with(
+                task_id="subtask_02",
+                worktree_path=str(mock_path.resolve()),
+                force=True,
+                repo_root=tmp_path,
+                executable="herdr",
+            )
+
+    @pytest.mark.asyncio
+    async def test_worktree_lifecycle_exception_cleanup(self, tmp_path: Path) -> None:
+        """Test worktree cleanup occurs even if an exception occurs inside context."""
+        mock_path = tmp_path / ".worktrees" / "agent" / "subtask_fail"
+        mock_path.mkdir(parents=True, exist_ok=True)
+
+        with (
+            patch.object(
+                HerdrDispatcher,
+                "create_agent_worktree",
+                return_value=(True, str(mock_path), "p_worker_2"),
+            ),
+            patch.object(
+                HerdrDispatcher,
+                "trust_workspace",
+                return_value=True,
+            ),
+            patch.object(
+                HerdrDispatcher,
+                "setup_worktree_env",
+                return_value=[],
+            ),
+            patch.object(
+                HerdrDispatcher,
+                "stop_agent",
+                return_value=(True, "stopped"),
+            ) as mock_stop,
+            patch.object(
+                HerdrDispatcher,
+                "cleanup_worktree",
+                return_value=(True, "cleaned"),
+            ) as mock_clean,
+        ):
+            import pytest
+
+            with pytest.raises(ValueError, match="Subtask failed inside context"):
+                async with TaskWorktreeManager(
+                    task_id="subtask_fail",
+                    repo_root=tmp_path,
+                ):
+                    raise ValueError("Subtask failed inside context")
+
+            mock_stop.assert_called_once_with(task_id="subtask_fail", executable="herdr")
+            mock_clean.assert_called_once_with(
+                task_id="subtask_fail",
+                worktree_path=str(mock_path.resolve()),
+                force=True,
+                repo_root=tmp_path,
+                executable="herdr",
+            )
+
+    @pytest.mark.asyncio
+    async def test_worktree_lifecycle_auto_merge(self, tmp_path: Path) -> None:
+        """Test auto_merge executes when requested and no error occurs."""
+        mock_path = tmp_path / ".worktrees" / "agent" / "subtask_merge"
+        mock_path.mkdir(parents=True, exist_ok=True)
+
+        with (
+            patch.object(
+                HerdrDispatcher,
+                "create_agent_worktree",
+                return_value=(True, str(mock_path), "p_worker_3"),
+            ),
+            patch.object(
+                HerdrDispatcher,
+                "trust_workspace",
+                return_value=True,
+            ),
+            patch.object(
+                HerdrDispatcher,
+                "setup_worktree_env",
+                return_value=[],
+            ),
+            patch.object(
+                HerdrDispatcher,
+                "stop_agent",
+                return_value=(True, "stopped"),
+            ) as mock_stop,
+            patch.object(
+                HerdrDispatcher,
+                "merge_worktree_to_feature",
+                return_value=(True, "merged"),
+            ) as mock_merge,
+            patch.object(
+                HerdrDispatcher,
+                "cleanup_worktree",
+                return_value=(True, "cleaned"),
+            ) as mock_clean,
+        ):
+            async with TaskWorktreeManager(
+                task_id="subtask_merge",
+                auto_merge=True,
+                target_branch="feat/target",
+                repo_root=tmp_path,
+            ):
+                pass
+
+            mock_stop.assert_called_once_with(task_id="subtask_merge", executable="herdr")
+            mock_merge.assert_called_once_with(
+                task_id="subtask_merge",
+                target_branch="feat/target",
+                repo_root=tmp_path,
+                executable="herdr",
+            )
+            mock_clean.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_worktree_lifecycle_creation_failure(self, tmp_path: Path) -> None:
+        """Test RuntimeError is raised if worktree creation fails."""
+        with patch.object(
+            HerdrDispatcher,
+            "create_agent_worktree",
+            return_value=(False, "Git lock error", None),
+        ):
+            import pytest
+
+            with pytest.raises(RuntimeError, match="Failed to create worktree"):
+                async with TaskWorktreeManager(
+                    task_id="subtask_err",
+                    repo_root=tmp_path,
+                ):
+                    pass
