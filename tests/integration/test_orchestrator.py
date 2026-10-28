@@ -363,3 +363,89 @@ async def test_diamond_dag_failure_blocks_downstream_allows_independent(monkeypa
     assert result.task_statuses["task_c"] == TaskStatus.COMPLETED
     assert result.task_statuses["task_d"] in (TaskStatus.BLOCKED, TaskStatus.SKIPPED)
     assert "task_d" not in executed_tasks
+
+
+@pytest.mark.asyncio
+async def test_contract_freeze_verification_and_manifest_generation(tmp_path):
+    """Test contract freeze writes .ai/context/contract_freeze.json when contracts are committed."""
+    import subprocess
+
+    # Initialize a temporary git repository
+    subprocess.run(["git", "init"], cwd=str(tmp_path), capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(tmp_path), check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"], cwd=str(tmp_path), check=True
+    )
+
+    contract_file = tmp_path / "interfaces.py"
+    contract_file.write_text("class TestInterface:\n    pass\n", encoding="utf-8")
+    subprocess.run(["git", "add", "interfaces.py"], cwd=str(tmp_path), check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "chore: add interface contract"],
+        cwd=str(tmp_path),
+        check=True,
+    )
+
+    plan = OrchestrationPlan(
+        plan_id="plan_contracts",
+        goal="Test contract freeze",
+        tasks=[
+            SubTask(
+                id="task_contract_1",
+                name="Worker 1",
+                instruction="Do task 1",
+                interface_files=["interfaces.py"],
+            ),
+            SubTask(
+                id="task_contract_2",
+                name="Worker 2",
+                instruction="Do task 2",
+                interface_files=["interfaces.py"],
+            ),
+        ],
+    )
+
+    orchestrator = AgentOrchestrator()
+    manifest = orchestrator.verify_and_freeze_contracts(plan=plan, workspace_dir=str(tmp_path))
+
+    assert manifest is not None
+    assert manifest.plan_id == "plan_contracts"
+    assert "interfaces.py" in manifest.contract_files
+    assert manifest.locked is True
+    assert manifest.frozen_at_commit is not None
+
+    freeze_path = tmp_path / ".ai" / "context" / "contract_freeze.json"
+    assert freeze_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_contract_freeze_raises_on_uncommitted_contract(tmp_path):
+    """Test contract freeze verification raises RuntimeError when contract file is not committed."""
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=str(tmp_path), capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(tmp_path), check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"], cwd=str(tmp_path), check=True
+    )
+
+    contract_file = tmp_path / "interfaces.py"
+    contract_file.write_text("class TestInterface:\n    pass\n", encoding="utf-8")
+    # Not committed to git!
+
+    plan = OrchestrationPlan(
+        plan_id="plan_uncommitted",
+        goal="Test uncommitted contract",
+        tasks=[
+            SubTask(
+                id="task_1",
+                name="Worker 1",
+                instruction="Do task 1",
+                interface_files=["interfaces.py"],
+            ),
+        ],
+    )
+
+    orchestrator = AgentOrchestrator()
+    with pytest.raises(RuntimeError, match="is not committed to the git branch"):
+        orchestrator.verify_and_freeze_contracts(plan=plan, workspace_dir=str(tmp_path))

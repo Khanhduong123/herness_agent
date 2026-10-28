@@ -367,3 +367,59 @@ class TestPreToolUseHookHardDenial:
         }
         res = self._invoke_hook(hook_script, payload)
         assert res.get("decision") == "allow"
+
+    def test_denies_mutation_on_frozen_contract_file(self, hook_script, tmp_path):
+        """Verify pre-tool gating denies mutation if file is declared in contract freeze."""
+        freeze_manifest = tmp_path / ".ai" / "context" / "contract_freeze.json"
+        freeze_manifest.parent.mkdir(parents=True, exist_ok=True)
+        freeze_manifest.write_text(
+            json.dumps(
+                {
+                    "plan_id": "test_plan",
+                    "contract_files": ["src/harness_agent/core/interfaces.py"],
+                    "locked": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {"Path": "src/harness_agent/core/interfaces.py"},
+            },
+            "workspacePaths": [str(tmp_path)],
+        }
+        res = self._invoke_hook(hook_script, payload)
+        assert res.get("decision") == "deny"
+        assert "FROZEN_CONTRACT_VIOLATION" in res.get("reason", "")
+        assert "frozen interface contract" in res.get("reason", "")
+
+    def test_allows_mutation_on_non_frozen_file_in_worktree(self, hook_script, tmp_path):
+        """Verify worker worktree can mutate non-contract files when contract freeze is active."""
+        freeze_manifest = tmp_path / ".ai" / "context" / "contract_freeze.json"
+        freeze_manifest.parent.mkdir(parents=True, exist_ok=True)
+        freeze_manifest.write_text(
+            json.dumps(
+                {
+                    "plan_id": "test_plan",
+                    "contract_files": ["src/harness_agent/core/interfaces.py"],
+                    "locked": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        worker_worktree = tmp_path / ".worktrees" / "agent" / "worker_subtask_01"
+        worker_worktree.mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "toolCall": {
+                "name": "replace_file_content",
+                "args": {"Path": "src/harness_agent/worker.py"},
+            },
+            "workspacePaths": [str(worker_worktree), str(tmp_path)],
+        }
+        res = self._invoke_hook(hook_script, payload)
+        assert res.get("decision") == "allow"
+        assert res.get("reason") is None
