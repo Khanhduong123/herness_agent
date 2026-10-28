@@ -15,6 +15,7 @@ import click
 from harness_agent.core.dispatch import HerdrDispatcher
 from harness_agent.core.harness import AgentHarness
 from harness_agent.core.models import (
+    ROLE_REGISTRY,
     AgyConfig,
     ArchitectureSpec,
     DirectoryLayoutSpec,
@@ -23,8 +24,9 @@ from harness_agent.core.models import (
     TaskStatus,
     TechStackSpec,
 )
-from harness_agent.core.orchestrator import AgentOrchestrator
+from harness_agent.core.orchestrator import AgentOrchestrator, conduct_role_selection
 from harness_agent.core.runner import AgyRunner
+from harness_agent.core.skills import ProjectSkillAutoScaffolder
 from harness_agent.core.smoke import LiveSmokeProbe
 
 
@@ -378,11 +380,18 @@ run_group.add_command(resume_cmd, name="resume")
     default=False,
     help="Interactively formulate contract-first ArchitectureSpec into .ai/context/",
 )
+@click.option(
+    "--role-select",
+    is_flag=True,
+    default=False,
+    help="Trigger interactive role and skill selection during setup",
+)
 def init_cmd(
     project_name: Optional[str],
     target_dir: Optional[str],
     force: bool,
     interview: bool,
+    role_select: bool = False,
 ) -> None:
     """Initialize harness agent rules, AGENTS.md, and workflow templates in a target directory."""
     if not project_name and not target_dir:
@@ -528,6 +537,12 @@ def init_cmd(
             fg="green",
         )
         copied += 2
+
+    if role_select:
+        click.secho("\n--- Role and Skill Selection ---", fg="cyan", bold=True)
+        conduct_role_selection(repo_root=target_path, interactive=True)
+        click.secho("  [+] Configured .ai/context/role_selection.json", fg="green")
+        copied += 1
 
     _register_project(repo_root, target_path)
     click.secho(f"\n[OK] Successfully initialized {copied} items in {target_path}", fg="cyan")
@@ -1373,6 +1388,78 @@ def smoke_cmd(strict: bool) -> None:
         click.echo("[FAILED] One or more smoke probes failed.")
         if strict:
             sys.exit(1)
+
+
+@main.group()
+def skill() -> None:
+    """Inspect, manage, and auto-scaffold project skills."""
+    pass
+
+
+@skill.command(name="scaffold")
+@click.option("--force", is_flag=True, default=False, help="Overwrite existing skill files")
+def scaffold_skills_cmd(force: bool) -> None:
+    """Auto-scaffolds skills based on detected repository frameworks."""
+    repo_root = Path.cwd()
+    scaffolder = ProjectSkillAutoScaffolder(repo_root=repo_root)
+    detected = scaffolder.detect_technologies()
+    if not detected:
+        click.echo("No detectable frameworks or dependencies found in repository.")
+        return
+
+    click.echo(f"Detected {len(detected)} technologies/frameworks:")
+    for tech in detected:
+        click.echo(f"  - {tech.name} ({tech.category}, from {tech.source_file})")
+
+    created_paths: List[Path] = []
+    for tech in detected:
+        tech_dir = scaffolder.skills_dir / tech.name
+        skill_file = tech_dir / "SKILL.md"
+        if skill_file.exists() and force:
+            content = scaffolder._generate_skill_content(tech)
+            skill_file.write_text(content, encoding="utf-8")
+            created_paths.append(skill_file)
+            click.echo(f"  [+] Overwrote existing skill: {tech.name} -> {skill_file}")
+        elif not skill_file.exists():
+            path = scaffolder.scaffold_skill_if_missing(tech)
+            if path:
+                created_paths.append(path)
+                click.echo(f"  [+] Created new skill: {tech.name} -> {path}")
+        else:
+            click.echo(f"  [SKIP] Skill {tech.name} already exists (use --force to overwrite)")
+
+    click.secho(
+        f"\n[OK] Scaffolding complete. {len(created_paths)} skill file(s) generated/updated.",
+        fg="green",
+    )
+
+
+@skill.command(name="list")
+def list_skills_cmd() -> None:
+    """Lists available skills and their binding to roles."""
+    skills_dir = Path.cwd() / ".agents" / "skills"
+    available_skills: List[str] = []
+    if skills_dir.exists():
+        for item in sorted(skills_dir.iterdir()):
+            if item.is_dir() and (item / "SKILL.md").exists():
+                available_skills.append(item.name)
+
+    click.secho("=== Available Skills in Repository ===", fg="cyan", bold=True)
+    if available_skills:
+        for sk in available_skills:
+            click.echo(f"  * {sk}")
+    else:
+        click.echo("  (No skills found in .agents/skills/)")
+
+    click.echo("")
+    click.secho("=== Role-to-Skill Contract Mappings ===", fg="cyan", bold=True)
+    for role, contract in sorted(ROLE_REGISTRY.items(), key=lambda x: x[0].value):
+        role_label = role.value if hasattr(role, "value") else str(role)
+        core_list = ", ".join(contract.core_skills) if contract.core_skills else "(none)"
+        opt_list = ", ".join(contract.optional_skills) if contract.optional_skills else "(none)"
+        click.echo(f"Role: {role_label}")
+        click.echo(f"  Core Skills:     {core_list}")
+        click.echo(f"  Optional Skills: {opt_list}")
 
 
 if __name__ == "__main__":
