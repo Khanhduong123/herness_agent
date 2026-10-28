@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AgyConfig(BaseModel):
@@ -801,6 +801,10 @@ class SubTask(BaseModel):
         default_factory=list,
         description="File-scope boundary enforcement (directories or file globs)",
     )
+    input_artifacts: List[str] = Field(
+        default_factory=list,
+        description="Files or schemas required by this task as input",
+    )
     output_artifacts: List[str] = Field(
         default_factory=list,
         description="Files or contracts produced by this subtask (e.g., schema.sql, openapi.json)",
@@ -810,12 +814,43 @@ class SubTask(BaseModel):
         description="Artifact files consumed from upstream dependencies",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_input_artifacts(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            inp = data.get("input_artifacts")
+            inj = data.get("injected_context")
+            if inp is not None and inj is None:
+                data["injected_context"] = list(inp)
+            elif inj is not None and inp is None:
+                data["input_artifacts"] = list(inj)
+        return data
+
+
+class ContractFreezeManifest(BaseModel):
+    """Manifest of frozen interfaces before parallel task execution."""
+
+    plan_id: str
+    frozen_at_commit: Optional[str] = None
+    contract_files: List[str] = Field(default_factory=list)
+    target_tasks: List[str] = Field(default_factory=list)
+    locked: bool = Field(default=True)
+
+
+class ParallelExecutionConfig(BaseModel):
+    """Concurrency and scheduling settings for orchestration."""
+
+    max_workers: int = Field(default=3, ge=1, le=8, description="Maximum concurrent worker agents")
+    worktree_base_dir: str = Field(default=".worktrees/agent")
+    enable_contract_freeze: bool = Field(default=True)
+
 
 class OrchestrationPlan(BaseModel):
     """A master plan consisting of subtasks and worker configurations to achieve a goal."""
 
     plan_id: str = Field(..., description="Unique identifier for the orchestration plan")
     goal: str = Field(..., description="Overall goal or objective to be achieved")
+    parallel_config: ParallelExecutionConfig = Field(default_factory=ParallelExecutionConfig)
     tasks: List[SubTask] = Field(
         default_factory=list, description="List of subtasks in the execution graph"
     )
