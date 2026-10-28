@@ -296,6 +296,17 @@ def _print_orchestration_summary(result: OrchestrationResult, output: str) -> No
     "--resume", is_flag=True, help="Resume execution from existing disk state if available"
 )
 @click.option("--db", default=None, help="Path to SQLite state database")
+@click.option(
+    "--parallel/--no-parallel",
+    default=True,
+    help="Enable or disable concurrent subtask execution (default: --parallel)",
+)
+@click.option(
+    "--max-workers",
+    default=3,
+    type=int,
+    help="Maximum concurrent worker agents (default: 3)",
+)
 def orchestrate_cmd(
     plan_file: str,
     output: str,
@@ -303,6 +314,8 @@ def orchestrate_cmd(
     effort: Optional[str],
     resume: bool,
     db: Optional[str],
+    parallel: bool = True,
+    max_workers: int = 3,
 ) -> None:
     """Execute an orchestrator plan coordinating multi-agent subtasks."""
     config = AgyConfig(model=model, effort=effort)
@@ -313,7 +326,21 @@ def orchestrate_cmd(
     click.echo(f"Goal: {plan.goal}")
     click.echo(f"Total SubTasks: {len(plan.tasks)}")
 
-    result = asyncio.run(orchestrator.run_plan(plan, resume=resume, plan_file=plan_file))
+    # Respect CLI concurrency and parallelism flags
+    if hasattr(plan, "parallel_config") and plan.parallel_config:
+        plan.parallel_config.max_workers = max_workers if parallel else 1
+    elif not parallel:
+        max_workers = 1
+
+    effective_workers = max_workers if parallel else 1
+    result = asyncio.run(
+        orchestrator.run_plan_parallel(
+            plan=plan,
+            max_workers=effective_workers,
+            resume=resume,
+            plan_file=plan_file,
+        )
+    )
     orchestrator.save_result(result, output)
     _print_orchestration_summary(result, output)
 

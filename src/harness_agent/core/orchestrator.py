@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
 import re
@@ -20,6 +22,7 @@ from harness_agent.core.models import (
     AggregatedCriticReview,
     AgyConfig,
     ArchitectureSpec,
+    ContractFreezeManifest,
     DirectoryLayoutSpec,
     OrchestrationPlan,
     OrchestrationResult,
@@ -1147,9 +1150,165 @@ class AgentOrchestrator:
         Supports state persistence and crash recovery (resume capability).
         When a Coder subtask finishes, dispatches parallel adversarial critics if enabled.
         """
-        start_time = time.time()
-        ordered_tasks = self.resolve_execution_order(plan.tasks)
+        max_workers = (
+            plan.parallel_config.max_workers
+            if hasattr(plan, "parallel_config") and plan.parallel_config
+            else 3
+        )
+        return await self.run_plan_parallel(
+            plan=plan,
+            max_workers=max_workers,
+            resume=resume,
+            plan_file=plan_file,
+            initial_statuses=initial_statuses,
+            initial_results=initial_results,
+        )
 
+    def verify_and_freeze_contracts(
+        self,
+        plan: OrchestrationPlan,
+        workspace_dir: Optional[str] = None,
+    ) -> Optional[ContractFreezeManifest]:
+        """Verify interface contracts before parallel execution and freeze them.
+
+        Gathers interface_files across all tasks in the plan. If any exist, checks that
+        the files exist and are committed to the git branch without uncommitted changes.
+        Writes .ai/context/contract_freeze.json containing the list of frozen files.
+        """
+        enable_freeze = True
+        if hasattr(plan, "parallel_config") and plan.parallel_config:
+            enable_freeze = plan.parallel_config.enable_contract_freeze
+
+        if not enable_freeze:
+            return None
+
+        # Collect shared interface files and targeting tasks
+        all_interface_files: List[str] = []
+        target_tasks: List[str] = []
+        for task in plan.tasks:
+            task_has_contract = False
+            for f in task.interface_files:
+                f_clean = f.strip().replace("\\", "/")
+                if f_clean and f_clean not in all_interface_files:
+                    all_interface_files.append(f_clean)
+                    task_has_contract = True
+            if task_has_contract and task.id not in target_tasks:
+                target_tasks.append(task.id)
+
+        # Check if an existing contract freeze manifest exists
+        root_dir = Path(workspace_dir or Path.cwd()).resolve()
+        freeze_file = root_dir / ".ai" / "context" / "contract_freeze.json"
+
+        if not all_interface_files and freeze_file.exists():
+            try:
+                with open(freeze_file, "r", encoding="utf-8") as f:
+                    manifest_data = json.load(f)
+                loaded_manifest = ContractFreezeManifest(**manifest_data)
+                for f_path in loaded_manifest.contract_files:
+                    f_clean = str(f_path).strip().replace("\\", "/")
+                    if f_clean and f_clean not in all_interface_files:
+                        all_interface_files.append(f_clean)
+                for t_id in loaded_manifest.target_tasks:
+                    if t_id not in target_tasks:
+                        target_tasks.append(t_id)
+            except Exception as exc:
+                logger.warning("Failed to load existing contract freeze manifest: %s", exc)
+
+        if not all_interface_files:
+            return None
+
+        # Verify contracts are committed to git branch
+        head_commit: Optional[str] = None
+        try:
+            import subprocess
+
+            rev_proc = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(root_dir),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if rev_proc.returncode == 0:
+                head_commit = rev_proc.stdout.strip()
+
+            for contract_file in all_interface_files:
+                # 1. Verify file exists in tree
+                full_path = root_dir / contract_file
+                if not full_path.exists():
+                    raise FileNotFoundError(
+                        f"Interface contract file '{contract_file}' does not exist on disk at "
+                        f"{full_path}"
+                    )
+
+                # 2. Verify file is tracked in git HEAD
+                cat_proc = subprocess.run(
+                    ["git", "cat-file", "-e", f"HEAD:{contract_file}"],
+                    cwd=str(root_dir),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if cat_proc.returncode != 0:
+                    raise RuntimeError(
+                        f"Interface contract file '{contract_file}' is not committed to the "
+                        f"git branch (HEAD)"
+                    )
+
+                # 3. Verify file has no uncommitted changes
+                diff_proc = subprocess.run(
+                    ["git", "status", "--porcelain", "--", contract_file],
+                    cwd=str(root_dir),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if diff_proc.returncode == 0 and diff_proc.stdout.strip():
+                    raise RuntimeError(
+                        f"Interface contract file '{contract_file}' has uncommitted changes: "
+                        f"{diff_proc.stdout.strip()}"
+                    )
+        except (RuntimeError, FileNotFoundError):
+            raise
+        except Exception as exc:
+            logger.warning("Git check encountered unexpected error: %s", exc)
+
+        # Write .ai/context/contract_freeze.json
+        manifest = ContractFreezeManifest(
+            plan_id=plan.plan_id,
+            frozen_at_commit=head_commit,
+            contract_files=all_interface_files,
+            target_tasks=target_tasks,
+            locked=True,
+        )
+        freeze_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(freeze_file, "w", encoding="utf-8") as f:
+            f.write(manifest.model_dump_json(indent=2))
+
+        logger.info(
+            "Contract freeze manifest written to %s with %d contract files",
+            freeze_file,
+            len(all_interface_files),
+        )
+        return manifest
+
+    async def run_plan_parallel(
+        self,
+        plan: OrchestrationPlan,
+        max_workers: int = 3,
+        resume: bool = False,
+        plan_file: Optional[str] = None,
+        initial_statuses: Optional[Dict[str, TaskStatus]] = None,
+        initial_results: Optional[Dict[str, RunResult]] = None,
+    ) -> OrchestrationResult:
+        """Execute the complete orchestration plan concurrently according to the dependency DAG.
+
+        Uses an in-degree dependency resolver and asyncio.Semaphore to throttle concurrency
+        to max_workers. Safely coordinates status updates with an asyncio.Lock.
+        """
+        start_time = time.time()
+
+        task_map: Dict[str, SubTask] = {t.id: t for t in plan.tasks}
         task_results: Dict[str, RunResult] = {}
         task_statuses: Dict[str, TaskStatus] = {}
         critic_reviews: Dict[str, AggregatedCriticReview] = {}
@@ -1165,13 +1324,10 @@ class AgentOrchestrator:
                 task_statuses = dict(initial_statuses)
                 task_results = dict(initial_results or {})
 
-                # Ensure any newly declared tasks in plan are tracked as PENDING
                 for t in plan.tasks:
                     if t.id not in task_statuses:
                         task_statuses[t.id] = TaskStatus.PENDING
 
-                # Re-dispatch rule: tasks that were RUNNING, VALIDATING, BLOCKED, or SKIPPED
-                # when the orchestrator halted/crashed are reset to PENDING for re-dispatch
                 for tid, st in list(task_statuses.items()):
                     if st in (
                         TaskStatus.RUNNING,
@@ -1185,7 +1341,7 @@ class AgentOrchestrator:
         else:
             task_statuses = {t.id: TaskStatus.PENDING for t in plan.tasks}
 
-        # Continuously persist initial state to SQLite and Markdown
+        # Persist initial state
         if hasattr(self, "state_store") and self.state_store:
             self.state_store.save_run_state(
                 plan=plan,
@@ -1195,251 +1351,405 @@ class AgentOrchestrator:
                 plan_file=plan_file,
             )
 
-        completed_count = sum(1 for st in task_statuses.values() if st == TaskStatus.COMPLETED)
-        failed_count = sum(1 for st in task_statuses.values() if st == TaskStatus.FAILED)
+        # Execute Contract Freeze Verification Phase prior to parallel worker execution
+        try:
+            self.verify_and_freeze_contracts(plan=plan)
+        except Exception as freeze_err:
+            logger.error("Contract freeze verification failed: %s", freeze_err)
+            return OrchestrationResult(
+                plan_id=plan.plan_id,
+                success=False,
+                total_tasks=len(plan.tasks),
+                completed_tasks=0,
+                failed_tasks=1,
+                task_statuses={t.id: TaskStatus.FAILED for t in plan.tasks},
+                task_results={},
+                duration_seconds=time.time() - start_time,
+                error_message=f"Contract freeze verification failed: {freeze_err}",
+            )
+
+        # Build DAG structures
+        dependents: Dict[str, List[str]] = {t.id: [] for t in plan.tasks}
+        in_degree: Dict[str, int] = {t.id: 0 for t in plan.tasks}
+
+        for t in plan.tasks:
+            for dep_id in t.depends_on:
+                if dep_id in dependents:
+                    dependents[dep_id].append(t.id)
+
+        # Calculate initial in-degree considering already completed tasks
+        for t in plan.tasks:
+            unresolved = 0
+            for dep_id in t.depends_on:
+                if task_statuses.get(dep_id) != TaskStatus.COMPLETED:
+                    unresolved += 1
+            in_degree[t.id] = unresolved
+
+        semaphore = asyncio.Semaphore(max_workers)
+        ready_queue: asyncio.Queue[SubTask] = asyncio.Queue()
+        state_lock = asyncio.Lock()
         aborted = False
-
+        step_counter = 0
+        active_running_count = 0
+        first_fatal_exc: Optional[BaseException] = None
         accumulated_modified_files: List[str] = []
-        for step_idx, subtask in enumerate(ordered_tasks, start=1):
-            # Skip already completed tasks when resuming
-            if task_statuses.get(subtask.id) == TaskStatus.COMPLETED:
+
+        # Enqueue ready tasks that are not already completed
+        for t in plan.tasks:
+            if task_statuses.get(t.id) == TaskStatus.COMPLETED:
                 continue
+            if in_degree[t.id] == 0:
+                ready_queue.put_nowait(t)
 
-            if aborted:
-                task_statuses[subtask.id] = TaskStatus.SKIPPED
-                if hasattr(self, "state_store") and self.state_store:
-                    self.state_store.update_task_status(
-                        plan_id=plan.plan_id,
-                        task_id=subtask.id,
-                        status=TaskStatus.SKIPPED,
-                        plan_file=plan_file,
-                    )
-                continue
-
-            # Verify if any dependencies failed or are not completed
-            has_failed_dep = any(
-                task_statuses.get(dep_id) != TaskStatus.COMPLETED for dep_id in subtask.depends_on
-            )
-
-            if has_failed_dep:
-                task_statuses[subtask.id] = TaskStatus.BLOCKED
-                blocked_res = RunResult(
-                    task_id=subtask.id,
-                    success=False,
-                    exit_code=-1,
-                    duration_seconds=0.0,
-                    error_message=f"Blocked by upstream dependency failure in {subtask.depends_on}",
-                )
-                task_results[subtask.id] = blocked_res
-                failed_count += 1
-                if hasattr(self, "state_store") and self.state_store:
-                    self.state_store.update_task_status(
-                        plan_id=plan.plan_id,
-                        task_id=subtask.id,
-                        status=TaskStatus.BLOCKED,
-                        result=blocked_res,
-                        plan_file=plan_file,
-                    )
-                if plan.stop_on_failure:
-                    aborted = True
-                continue
-
-            # 1. State: RUNNING
-            task_statuses[subtask.id] = TaskStatus.RUNNING
-            if hasattr(self, "state_store") and self.state_store:
-                self.state_store.update_task_status(
-                    plan_id=plan.plan_id,
-                    task_id=subtask.id,
-                    status=TaskStatus.RUNNING,
-                    plan_file=plan_file,
-                )
-
-            # WAL: log subtask_start event
-            if self.state_coordinator and self.state_coordinator.wal:
+        async def worker_loop() -> None:
+            nonlocal aborted, step_counter, active_running_count, first_fatal_exc
+            while True:
                 try:
-                    self.state_coordinator.wal.append_event(
-                        WALEvent(
-                            session_id=plan.plan_id,
-                            step_index=step_idx,
-                            event_type="subtask_start",
-                            tool_name=subtask.id,
+                    subtask = ready_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+
+                async with state_lock:
+                    is_aborted = aborted
+
+                if is_aborted:
+                    async with state_lock:
+                        task_statuses[subtask.id] = TaskStatus.SKIPPED
+                        if hasattr(self, "state_store") and self.state_store:
+                            self.state_store.update_task_status(
+                                plan_id=plan.plan_id,
+                                task_id=subtask.id,
+                                status=TaskStatus.SKIPPED,
+                                plan_file=plan_file,
+                            )
+                    ready_queue.task_done()
+                    continue
+
+                async with semaphore:
+                    async with state_lock:
+                        step_counter += 1
+                        step_idx = step_counter
+                        active_running_count += 1
+                        task_statuses[subtask.id] = TaskStatus.RUNNING
+                        if hasattr(self, "state_store") and self.state_store:
+                            self.state_store.update_task_status(
+                                plan_id=plan.plan_id,
+                                task_id=subtask.id,
+                                status=TaskStatus.RUNNING,
+                                plan_file=plan_file,
+                            )
+
+                    # WAL: log subtask_start event
+                    if self.state_coordinator and self.state_coordinator.wal:
+                        try:
+                            self.state_coordinator.wal.append_event(
+                                WALEvent(
+                                    session_id=plan.plan_id,
+                                    step_index=step_idx,
+                                    event_type="subtask_start",
+                                    tool_name=subtask.id,
+                                )
+                            )
+                        except Exception:
+                            pass
+
+                    # Execute subtask
+                    workspace_dir = (
+                        os.path.dirname(os.path.abspath(plan_file)) if plan_file else None
+                    )
+                    async with state_lock:
+                        current_results = dict(task_results)
+
+                    try:
+                        result = await self.execute_subtask(
+                            plan=plan,
+                            subtask=subtask,
+                            task_results=current_results,
+                            workspace_dir=workspace_dir,
                         )
-                    )
-                except Exception:
-                    pass
+                    except (Exception, BaseException) as task_exc:
+                        async with state_lock:
+                            active_running_count -= 1
+                            if first_fatal_exc is None:
+                                first_fatal_exc = task_exc
+                        ready_queue.task_done()
+                        return
 
-            # 2. Execute subtask
-            result = await self.execute_subtask(
-                plan=plan,
-                subtask=subtask,
-                task_results=task_results,
-                workspace_dir=os.path.dirname(os.path.abspath(plan_file)) if plan_file else None,
-            )
+                    async with state_lock:
+                        active_running_count -= 1
+                        task_statuses[subtask.id] = TaskStatus.VALIDATING
+                        if hasattr(self, "state_store") and self.state_store:
+                            self.state_store.update_task_status(
+                                plan_id=plan.plan_id,
+                                task_id=subtask.id,
+                                status=TaskStatus.VALIDATING,
+                                result=result,
+                                plan_file=plan_file,
+                            )
+                        task_results[subtask.id] = result
 
-            # 3. State: VALIDATING
-            task_statuses[subtask.id] = TaskStatus.VALIDATING
-            if hasattr(self, "state_store") and self.state_store:
-                self.state_store.update_task_status(
-                    plan_id=plan.plan_id,
-                    task_id=subtask.id,
-                    status=TaskStatus.VALIDATING,
-                    result=result,
-                    plan_file=plan_file,
-                )
-
-            task_results[subtask.id] = result
-
-            # 4. State: COMPLETED or FAILED
-            if result.success:
-                # When a Coder finishes a task, dispatch diff/file to all 3 critics in parallel
-                should_dispatch_critics = (
-                    self.auto_dispatch_critics
-                    if self.auto_dispatch_critics is not None
-                    else plan.enable_adversarial_critics
-                )
-                if (
-                    should_dispatch_critics
-                    and subtask.role == AgentRole.CODER
-                    and result.output_text
-                ):
-                    review = await self.dispatch_adversarial_critics(
-                        diff_or_content=result.output_text,
-                        subtask=subtask,
-                        plan=plan,
-                        coder_result=result,
-                        task_results=task_results,
-                    )
-                    critic_reviews[subtask.id] = review
-
-            # Cumulative metric aggregation across worker and any dispatched critics
-            cum_prompt = result.prompt_tokens
-            cum_completion = result.completion_tokens
-            cum_cached = result.cached_tokens
-            cum_cost = result.estimated_cost_usd
-            cum_duration = result.duration_seconds
-            cum_truncated = getattr(result, "truncated_output_tokens", 0)
-
-            if subtask.id in critic_reviews:
-                review = critic_reviews[subtask.id]
-                for cf in review.critics_feedback.values():
-                    if cf.run_result:
-                        cum_prompt += cf.run_result.prompt_tokens
-                        cum_completion += cf.run_result.completion_tokens
-                        cum_cached += cf.run_result.cached_tokens
-                        cum_cost += cf.run_result.estimated_cost_usd
-                        cum_duration += cf.run_result.duration_seconds
-
-            if not result.success or (
-                subtask.id in critic_reviews and not critic_reviews[subtask.id].approved
-            ):
-                consolidated_status = "FAILED"
-                result.success = False
-            else:
-                consolidated_status = "COMPLETED"
-
-            result.prompt_tokens = cum_prompt
-            result.completion_tokens = cum_completion
-            result.cached_tokens = cum_cached
-            result.total_tokens = cum_prompt + cum_completion
-            result.estimated_cost_usd = round(cum_cost, 6)
-            result.duration_seconds = round(cum_duration, 2)
-
-            try:
-                TokenLogger.log_task_summary(
-                    task_id=subtask.id,
-                    plan_id=plan.plan_id,
-                    role=subtask.role.value,
-                    model=self.base_config.model,
-                    prompt_tokens=cum_prompt,
-                    completion_tokens=cum_completion,
-                    cached_tokens=cum_cached,
-                    total_tokens=cum_prompt + cum_completion,
-                    truncated_output_tokens=cum_truncated,
-                    duration_seconds=round(cum_duration, 2),
-                    status=consolidated_status,
-                )
-            except Exception:
-                pass
-
-            if consolidated_status == "COMPLETED":
-                task_statuses[subtask.id] = TaskStatus.COMPLETED
-                completed_count += 1
-                if hasattr(self, "state_store") and self.state_store:
-                    self.state_store.update_task_status(
-                        plan_id=plan.plan_id,
-                        task_id=subtask.id,
-                        status=TaskStatus.COMPLETED,
-                        result=result,
-                        plan_file=plan_file,
-                    )
-            else:
-                task_statuses[subtask.id] = TaskStatus.FAILED
-                failed_count += 1
-                if hasattr(self, "state_store") and self.state_store:
-                    self.state_store.update_task_status(
-                        plan_id=plan.plan_id,
-                        task_id=subtask.id,
-                        status=TaskStatus.FAILED,
-                        result=result,
-                        plan_file=plan_file,
-                    )
-                if plan.stop_on_failure:
-                    aborted = True
-
-            # WAL: log subtask_end event
-            if self.state_coordinator and self.state_coordinator.wal:
-                try:
-                    self.state_coordinator.wal.append_event(
-                        WALEvent(
-                            session_id=plan.plan_id,
-                            step_index=step_idx,
-                            event_type="subtask_end",
-                            tool_name=subtask.id,
-                            status_code=0 if result.success else 1,
-                            error_message=result.error_message or "",
+                    # Handle adversarial critics if coder subtask succeeded
+                    local_critic_review: Optional[AggregatedCriticReview] = None
+                    if result.success:
+                        should_dispatch_critics = (
+                            self.auto_dispatch_critics
+                            if self.auto_dispatch_critics is not None
+                            else plan.enable_adversarial_critics
                         )
-                    )
-                except Exception:
-                    pass
+                        if (
+                            should_dispatch_critics
+                            and subtask.role == AgentRole.CODER
+                            and result.output_text
+                        ):
+                            local_critic_review = await self.dispatch_adversarial_critics(
+                                diff_or_content=result.output_text,
+                                subtask=subtask,
+                                plan=plan,
+                                coder_result=result,
+                                task_results=current_results,
+                            )
+                            async with state_lock:
+                                critic_reviews[subtask.id] = local_critic_review
 
-            # Extract modified files if any
-            if hasattr(result, "tool_calls") and result.tool_calls:
-                for tc in result.tool_calls:
-                    target = (
-                        tc.args.get("path")
-                        or tc.args.get("file_path")
-                        or tc.args.get("target_file")
-                    )
-                    if target and isinstance(target, str):
-                        accumulated_modified_files.append(target)
+                    # Metric aggregation
+                    cum_prompt = result.prompt_tokens
+                    cum_completion = result.completion_tokens
+                    cum_cached = result.cached_tokens
+                    cum_cost = result.estimated_cost_usd
+                    cum_duration = result.duration_seconds
+                    cum_truncated = getattr(result, "truncated_output_tokens", 0)
 
-            # Save SessionState snapshot and sync context.md
-            if self.state_coordinator:
-                try:
-                    has_more = (step_idx < len(ordered_tasks)) and not aborted
-                    session_state = SessionState(
-                        task_id=subtask.id,
-                        session_id=plan.plan_id,
-                        goal=plan.goal,
-                        active_step=step_idx,
-                        status=(
-                            "running"
-                            if has_more
-                            else ("completed" if consolidated_status == "COMPLETED" else "failed")
-                        ),
-                        modified_files=list(set(accumulated_modified_files)),
+                    if local_critic_review:
+                        for cf in local_critic_review.critics_feedback.values():
+                            if cf.run_result:
+                                cum_prompt += cf.run_result.prompt_tokens
+                                cum_completion += cf.run_result.completion_tokens
+                                cum_cached += cf.run_result.cached_tokens
+                                cum_cost += cf.run_result.estimated_cost_usd
+                                cum_duration += cf.run_result.duration_seconds
+
+                    if not result.success or (
+                        local_critic_review and not local_critic_review.approved
+                    ):
+                        consolidated_status = "FAILED"
+                        result.success = False
+                    else:
+                        consolidated_status = "COMPLETED"
+
+                    result.prompt_tokens = cum_prompt
+                    result.completion_tokens = cum_completion
+                    result.cached_tokens = cum_cached
+                    result.total_tokens = cum_prompt + cum_completion
+                    result.estimated_cost_usd = round(cum_cost, 6)
+                    result.duration_seconds = round(cum_duration, 2)
+
+                    try:
+                        TokenLogger.log_task_summary(
+                            task_id=subtask.id,
+                            plan_id=plan.plan_id,
+                            role=subtask.role.value,
+                            model=self.base_config.model,
+                            prompt_tokens=cum_prompt,
+                            completion_tokens=cum_completion,
+                            cached_tokens=cum_cached,
+                            total_tokens=cum_prompt + cum_completion,
+                            truncated_output_tokens=cum_truncated,
+                            duration_seconds=round(cum_duration, 2),
+                            status=consolidated_status,
+                        )
+                    except Exception:
+                        pass
+
+                    async with state_lock:
+                        if consolidated_status == "COMPLETED":
+                            task_statuses[subtask.id] = TaskStatus.COMPLETED
+                            if hasattr(self, "state_store") and self.state_store:
+                                self.state_store.update_task_status(
+                                    plan_id=plan.plan_id,
+                                    task_id=subtask.id,
+                                    status=TaskStatus.COMPLETED,
+                                    result=result,
+                                    plan_file=plan_file,
+                                )
+                            # Decrement dependent in-degrees and enqueue newly ready tasks
+                            for dep_task_id in dependents.get(subtask.id, []):
+                                in_degree[dep_task_id] -= 1
+                                if in_degree[dep_task_id] == 0:
+                                    if task_statuses.get(dep_task_id) == TaskStatus.PENDING:
+                                        ready_queue.put_nowait(task_map[dep_task_id])
+                        else:
+                            task_statuses[subtask.id] = TaskStatus.FAILED
+                            if hasattr(self, "state_store") and self.state_store:
+                                self.state_store.update_task_status(
+                                    plan_id=plan.plan_id,
+                                    task_id=subtask.id,
+                                    status=TaskStatus.FAILED,
+                                    result=result,
+                                    plan_file=plan_file,
+                                )
+                            if plan.stop_on_failure:
+                                aborted = True
+                                downstream_to_block: List[str] = list(
+                                    dependents.get(subtask.id, [])
+                                )
+                                visited_block: Set[str] = set(downstream_to_block)
+                                while downstream_to_block:
+                                    curr_tid = downstream_to_block.pop(0)
+                                    if task_statuses.get(curr_tid) in (
+                                        TaskStatus.PENDING,
+                                        TaskStatus.BLOCKED,
+                                    ):
+                                        task_statuses[curr_tid] = TaskStatus.BLOCKED
+                                        blocked_res = RunResult(
+                                            task_id=curr_tid,
+                                            success=False,
+                                            exit_code=-1,
+                                            duration_seconds=0.0,
+                                            error_message=(
+                                                f"Blocked by upstream failure in {subtask.id}"
+                                            ),
+                                        )
+                                        task_results[curr_tid] = blocked_res
+                                        if hasattr(self, "state_store") and self.state_store:
+                                            self.state_store.update_task_status(
+                                                plan_id=plan.plan_id,
+                                                task_id=curr_tid,
+                                                status=TaskStatus.BLOCKED,
+                                                result=blocked_res,
+                                                plan_file=plan_file,
+                                            )
+                                    for next_tid in dependents.get(curr_tid, []):
+                                        if next_tid not in visited_block:
+                                            visited_block.add(next_tid)
+                                            downstream_to_block.append(next_tid)
+
+                    # WAL: log subtask_end event
+                    if self.state_coordinator and self.state_coordinator.wal:
+                        try:
+                            self.state_coordinator.wal.append_event(
+                                WALEvent(
+                                    session_id=plan.plan_id,
+                                    step_index=step_idx,
+                                    event_type="subtask_end",
+                                    tool_name=subtask.id,
+                                    status_code=0 if result.success else 1,
+                                    error_message=result.error_message or "",
+                                )
+                            )
+                        except Exception:
+                            pass
+
+                    # Extract modified files
+                    if hasattr(result, "tool_calls") and result.tool_calls:
+                        for tc in result.tool_calls:
+                            target = (
+                                tc.args.get("path")
+                                or tc.args.get("file_path")
+                                or tc.args.get("target_file")
+                            )
+                            if target and isinstance(target, str):
+                                accumulated_modified_files.append(target)
+
+                    # Save SessionState snapshot and sync context.md
+                    if self.state_coordinator:
+                        try:
+                            has_more = (step_idx < len(plan.tasks)) and not aborted
+                            session_state = SessionState(
+                                task_id=subtask.id,
+                                session_id=plan.plan_id,
+                                goal=plan.goal,
+                                active_step=step_idx,
+                                status=(
+                                    "running"
+                                    if has_more
+                                    else (
+                                        "completed"
+                                        if consolidated_status == "COMPLETED"
+                                        else "failed"
+                                    )
+                                ),
+                                modified_files=list(set(accumulated_modified_files)),
+                            )
+                            AtomicSessionStore.save_snapshot(
+                                session_state, self.state_coordinator.session_path
+                            )
+                            recent_events = self.state_coordinator.wal.read_all_events()[-5:]
+                            sync_context_markdown(
+                                session_state,
+                                target_path=self.state_coordinator.context_md_path,
+                                recent_events=recent_events,
+                            )
+                        except Exception:
+                            pass
+
+                ready_queue.task_done()
+
+        # Dynamic loop driving concurrent workers
+        running_tasks: Set[asyncio.Task] = set()
+
+        while True:
+            # Check if any task failed fatally with an unhandled exception
+            if first_fatal_exc is not None:
+                for t in running_tasks:
+                    t.cancel()
+                await asyncio.gather(*running_tasks, return_exceptions=True)
+                raise first_fatal_exc
+
+            # Clean up finished tasks
+            finished = {t for t in running_tasks if t.done()}
+            for t in finished:
+                running_tasks.remove(t)
+                exc = t.exception()
+                if exc:
+                    first_fatal_exc = exc
+                    for rem in running_tasks:
+                        rem.cancel()
+                    await asyncio.gather(*running_tasks, return_exceptions=True)
+                    raise exc
+
+            # Spawn new workers if queue has items and we have capacity
+            while len(running_tasks) < max_workers and not ready_queue.empty():
+                t = asyncio.create_task(worker_loop())
+                running_tasks.add(t)
+
+            # If no tasks are running and queue is empty, execution is complete
+            if not running_tasks and ready_queue.empty():
+                break
+
+            # Sleep briefly or wait for any running task to complete
+            if running_tasks:
+                done, _ = await asyncio.wait(
+                    running_tasks,
+                    return_when=asyncio.FIRST_COMPLETED,
+                    timeout=0.05,
+                )
+
+        # Mark any remaining PENDING tasks as SKIPPED or BLOCKED
+        for t in plan.tasks:
+            if task_statuses.get(t.id) == TaskStatus.PENDING:
+                final_unresolved_status = TaskStatus.SKIPPED if aborted else TaskStatus.BLOCKED
+                task_statuses[t.id] = final_unresolved_status
+                if final_unresolved_status == TaskStatus.BLOCKED and t.id not in task_results:
+                    task_results[t.id] = RunResult(
+                        task_id=t.id,
+                        success=False,
+                        exit_code=-1,
+                        duration_seconds=0.0,
+                        error_message=f"Blocked by upstream dependency failure in {t.depends_on}",
                     )
-                    AtomicSessionStore.save_snapshot(
-                        session_state, self.state_coordinator.session_path
+                if hasattr(self, "state_store") and self.state_store:
+                    self.state_store.update_task_status(
+                        plan_id=plan.plan_id,
+                        task_id=t.id,
+                        status=final_unresolved_status,
+                        result=task_results.get(t.id),
+                        plan_file=plan_file,
                     )
-                    recent_events = self.state_coordinator.wal.read_all_events()[-5:]
-                    sync_context_markdown(
-                        session_state,
-                        target_path=self.state_coordinator.context_md_path,
-                        recent_events=recent_events,
-                    )
-                except Exception:
-                    pass
+
+        completed_count = sum(1 for st in task_statuses.values() if st == TaskStatus.COMPLETED)
+        failed_count = sum(
+            1 for st in task_statuses.values() if st in (TaskStatus.FAILED, TaskStatus.BLOCKED)
+        )
 
         total_duration = round(time.time() - start_time, 2)
         overall_success = (failed_count == 0) and (completed_count == len(plan.tasks))

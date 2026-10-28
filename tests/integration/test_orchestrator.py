@@ -192,3 +192,260 @@ tasks:
     orchestrator = AgentOrchestrator()
     with pytest.raises(ValueError, match="missing mandatory 'plan_id'"):
         orchestrator.load_plan(str(plan_file))
+
+
+@pytest.mark.asyncio
+async def test_diamond_dag_parallel_execution(monkeypatch):
+    """Verify diamond DAG (A -> B, C -> D) executes B and C concurrently with max_workers >= 2."""
+    plan = OrchestrationPlan(
+        plan_id="plan_diamond",
+        goal="Test diamond DAG concurrent execution",
+        tasks=[
+            SubTask(id="task_a", name="Task A", instruction="Init"),
+            SubTask(id="task_b", name="Task B", instruction="Branch 1", depends_on=["task_a"]),
+            SubTask(id="task_c", name="Task C", instruction="Branch 2", depends_on=["task_a"]),
+            SubTask(
+                id="task_d",
+                name="Task D",
+                instruction="Join",
+                depends_on=["task_b", "task_c"],
+            ),
+        ],
+    )
+
+    import asyncio
+
+    running_concurrent = 0
+    max_observed_concurrency = 0
+
+    async def mock_execute(task_def):
+        nonlocal running_concurrent, max_observed_concurrency
+        running_concurrent += 1
+        if running_concurrent > max_observed_concurrency:
+            max_observed_concurrency = running_concurrent
+
+        # Sleep briefly to ensure tasks B and C overlap if executed concurrently
+        await asyncio.sleep(0.05)
+
+        running_concurrent -= 1
+        return RunResult(
+            task_id=task_def.id,
+            success=True,
+            exit_code=0,
+            duration_seconds=0.05,
+            output_text=f"{task_def.id} done",
+        )
+
+    mock_runner = AsyncMock()
+    mock_runner.execute_task.side_effect = mock_execute
+
+    monkeypatch.setattr(
+        "harness_agent.core.orchestrator.AgyRunner.execute_task",
+        mock_runner.execute_task,
+    )
+
+    orchestrator = AgentOrchestrator()
+    result = await orchestrator.run_plan_parallel(plan, max_workers=3)
+
+    assert result.success is True
+    assert result.completed_tasks == 4
+    assert result.failed_tasks == 0
+    assert max_observed_concurrency >= 2
+
+
+@pytest.mark.asyncio
+async def test_concurrency_throttled_to_max_workers(monkeypatch):
+    """Verify concurrency never exceeds max_workers limit."""
+    plan = OrchestrationPlan(
+        plan_id="plan_fanout",
+        goal="Test throttling concurrency limit",
+        tasks=[
+            SubTask(id=f"task_{i}", name=f"Task {i}", instruction=f"Task {i}") for i in range(6)
+        ],
+    )
+
+    import asyncio
+
+    running_concurrent = 0
+    max_observed_concurrency = 0
+
+    async def mock_execute(task_def):
+        nonlocal running_concurrent, max_observed_concurrency
+        running_concurrent += 1
+        if running_concurrent > max_observed_concurrency:
+            max_observed_concurrency = running_concurrent
+
+        await asyncio.sleep(0.05)
+
+        running_concurrent -= 1
+        return RunResult(
+            task_id=task_def.id,
+            success=True,
+            exit_code=0,
+            duration_seconds=0.05,
+            output_text=f"{task_def.id} done",
+        )
+
+    mock_runner = AsyncMock()
+    mock_runner.execute_task.side_effect = mock_execute
+
+    monkeypatch.setattr(
+        "harness_agent.core.orchestrator.AgyRunner.execute_task",
+        mock_runner.execute_task,
+    )
+
+    orchestrator = AgentOrchestrator()
+    result = await orchestrator.run_plan_parallel(plan, max_workers=3)
+
+    assert result.success is True
+    assert result.completed_tasks == 6
+    assert max_observed_concurrency <= 3
+
+
+@pytest.mark.asyncio
+async def test_diamond_dag_failure_blocks_downstream_allows_independent(monkeypatch):
+    """Verify failure in B marks D as BLOCKED while C finishes independently."""
+    plan = OrchestrationPlan(
+        plan_id="plan_diamond_fail",
+        goal="Test failure isolation in DAG",
+        tasks=[
+            SubTask(id="task_a", name="Task A", instruction="Init"),
+            SubTask(id="task_b", name="Task B", instruction="Fails", depends_on=["task_a"]),
+            SubTask(id="task_c", name="Task C", instruction="Succeeds", depends_on=["task_a"]),
+            SubTask(
+                id="task_d",
+                name="Task D",
+                instruction="Join",
+                depends_on=["task_b", "task_c"],
+            ),
+        ],
+        stop_on_failure=True,
+    )
+
+    import asyncio
+
+    executed_tasks = []
+
+    async def mock_execute(task_def):
+        executed_tasks.append(task_def.id)
+        if task_def.id == "task_b":
+            await asyncio.sleep(0.02)
+            return RunResult(
+                task_id="task_b",
+                success=False,
+                exit_code=1,
+                duration_seconds=0.02,
+                error_message="Task B failed",
+            )
+        await asyncio.sleep(0.04)
+        return RunResult(
+            task_id=task_def.id,
+            success=True,
+            exit_code=0,
+            duration_seconds=0.04,
+            output_text=f"{task_def.id} done",
+        )
+
+    mock_runner = AsyncMock()
+    mock_runner.execute_task.side_effect = mock_execute
+
+    monkeypatch.setattr(
+        "harness_agent.core.orchestrator.AgyRunner.execute_task",
+        mock_runner.execute_task,
+    )
+
+    orchestrator = AgentOrchestrator()
+    result = await orchestrator.run_plan_parallel(plan, max_workers=3)
+
+    assert result.success is False
+    assert result.task_statuses["task_a"] == TaskStatus.COMPLETED
+    assert result.task_statuses["task_b"] == TaskStatus.FAILED
+    assert result.task_statuses["task_c"] == TaskStatus.COMPLETED
+    assert result.task_statuses["task_d"] in (TaskStatus.BLOCKED, TaskStatus.SKIPPED)
+    assert "task_d" not in executed_tasks
+
+
+@pytest.mark.asyncio
+async def test_contract_freeze_verification_and_manifest_generation(tmp_path):
+    """Test contract freeze writes .ai/context/contract_freeze.json when contracts are committed."""
+    import subprocess
+
+    # Initialize a temporary git repository
+    subprocess.run(["git", "init"], cwd=str(tmp_path), capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(tmp_path), check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"], cwd=str(tmp_path), check=True
+    )
+
+    contract_file = tmp_path / "interfaces.py"
+    contract_file.write_text("class TestInterface:\n    pass\n", encoding="utf-8")
+    subprocess.run(["git", "add", "interfaces.py"], cwd=str(tmp_path), check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "chore: add interface contract"],
+        cwd=str(tmp_path),
+        check=True,
+    )
+
+    plan = OrchestrationPlan(
+        plan_id="plan_contracts",
+        goal="Test contract freeze",
+        tasks=[
+            SubTask(
+                id="task_contract_1",
+                name="Worker 1",
+                instruction="Do task 1",
+                interface_files=["interfaces.py"],
+            ),
+            SubTask(
+                id="task_contract_2",
+                name="Worker 2",
+                instruction="Do task 2",
+                interface_files=["interfaces.py"],
+            ),
+        ],
+    )
+
+    orchestrator = AgentOrchestrator()
+    manifest = orchestrator.verify_and_freeze_contracts(plan=plan, workspace_dir=str(tmp_path))
+
+    assert manifest is not None
+    assert manifest.plan_id == "plan_contracts"
+    assert "interfaces.py" in manifest.contract_files
+    assert manifest.locked is True
+    assert manifest.frozen_at_commit is not None
+
+    freeze_path = tmp_path / ".ai" / "context" / "contract_freeze.json"
+    assert freeze_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_contract_freeze_raises_on_uncommitted_contract(tmp_path):
+    """Test contract freeze verification raises RuntimeError when contract file is not committed."""
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=str(tmp_path), capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(tmp_path), check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"], cwd=str(tmp_path), check=True
+    )
+
+    contract_file = tmp_path / "interfaces.py"
+    contract_file.write_text("class TestInterface:\n    pass\n", encoding="utf-8")
+    # Not committed to git!
+
+    plan = OrchestrationPlan(
+        plan_id="plan_uncommitted",
+        goal="Test uncommitted contract",
+        tasks=[
+            SubTask(
+                id="task_1",
+                name="Worker 1",
+                instruction="Do task 1",
+                interface_files=["interfaces.py"],
+            ),
+        ],
+    )
+
+    orchestrator = AgentOrchestrator()
+    with pytest.raises(RuntimeError, match="is not committed to the git branch"):
+        orchestrator.verify_and_freeze_contracts(plan=plan, workspace_dir=str(tmp_path))

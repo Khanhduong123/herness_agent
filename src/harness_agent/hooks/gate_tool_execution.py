@@ -24,6 +24,8 @@ RULE_0_CODE_MUTATION_REASON = (
     "Launch a Coder Agent via Herdr in an isolated worktree."
 )
 
+CONTRACT_FREEZE_PATH = ".ai/context/contract_freeze.json"
+
 FORBIDDEN_SUBAGENT_TOOLS = frozenset({"invoke_subagent", "define_subagent"})
 
 MUTATION_TOOLS = frozenset(
@@ -161,6 +163,108 @@ def is_path_forbidden(
     return False, ""
 
 
+def get_frozen_files(workspace_paths: Optional[List[str]] = None) -> List[str]:
+    """Read list of frozen contract files from contract freeze manifest if present."""
+    candidate_paths: List[Path] = [Path(CONTRACT_FREEZE_PATH)]
+
+    cwd = Path.cwd()
+    candidate_paths.append(cwd / CONTRACT_FREEZE_PATH)
+
+    # If inside worktree or child directory, check parent directories up to git root
+    curr = cwd
+    for _ in range(5):
+        candidate_paths.append(curr / CONTRACT_FREEZE_PATH)
+        if (curr / ".git").exists():
+            break
+        parent = curr.parent
+        if parent == curr:
+            break
+        curr = parent
+
+    if workspace_paths:
+        for ws in workspace_paths:
+            ws_path = Path(ws)
+            candidate_paths.append(ws_path / CONTRACT_FREEZE_PATH)
+
+    for p in candidate_paths:
+        try:
+            if p.is_file():
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                files = data.get("contract_files") or data.get("frozen_files") or []
+                if isinstance(files, list):
+                    return [str(item).replace("\\", "/").strip() for item in files if item]
+        except Exception:
+            continue
+
+    return []
+
+
+def is_frozen_contract_violation(
+    target_path_str: str,
+    frozen_files: List[str],
+    workspace_paths: Optional[List[str]] = None,
+) -> Tuple[bool, str]:
+    """Check if target file path matches any frozen contract file."""
+    if not frozen_files:
+        return False, ""
+
+    norm_target = target_path_str.replace("\\", "/").strip()
+    norm_target_clean = norm_target
+    while norm_target_clean.startswith("./") or norm_target_clean.startswith("/"):
+        if norm_target_clean.startswith("./"):
+            norm_target_clean = norm_target_clean[2:]
+        elif norm_target_clean.startswith("/"):
+            norm_target_clean = norm_target_clean[1:]
+
+    # Also resolve target path relative to workspaces or cwd
+    candidate_target_rels = [norm_target_clean]
+    if workspace_paths:
+        for ws in workspace_paths:
+            ws_norm = ws.replace("\\", "/").rstrip("/")
+            if norm_target.lower().startswith(ws_norm.lower() + "/"):
+                candidate_target_rels.append(norm_target[len(ws_norm) + 1 :])
+
+    try:
+        target_obj = Path(target_path_str)
+        if target_obj.is_absolute():
+            try:
+                rel = str(target_obj.relative_to(Path.cwd())).replace("\\", "/")
+                candidate_target_rels.append(rel)
+            except ValueError:
+                pass
+    except Exception:
+        pass
+
+    for frozen in frozen_files:
+        norm_frozen = frozen.replace("\\", "/").strip()
+        while norm_frozen.startswith("./") or norm_frozen.startswith("/"):
+            if norm_frozen.startswith("./"):
+                norm_frozen = norm_frozen[2:]
+            elif norm_frozen.startswith("/"):
+                norm_frozen = norm_frozen[1:]
+
+        for cand in candidate_target_rels:
+            cand_clean = cand
+            while cand_clean.startswith("./") or cand_clean.startswith("/"):
+                if cand_clean.startswith("./"):
+                    cand_clean = cand_clean[2:]
+                elif cand_clean.startswith("/"):
+                    cand_clean = cand_clean[1:]
+
+            if cand_clean.lower() == norm_frozen.lower() or cand_clean.lower().endswith(
+                "/" + norm_frozen.lower()
+            ):
+                reason = (
+                    f"FROZEN_CONTRACT_VIOLATION: File '{target_path_str}' is a frozen interface "
+                    f"contract. Modifying shared contracts during parallel worker execution "
+                    f"is strictly prohibited."
+                )
+                return True, reason
+
+    return False, ""
+
+
 def is_in_worker_worktree(workspace_paths: Optional[List[str]] = None) -> bool:
     """Check if the execution environment is inside an isolated agent worktree."""
     cwd_str = str(Path.cwd()).replace("\\", "/").lower()
@@ -179,10 +283,7 @@ def evaluate_tool_call(
     tool_args: Dict[str, Any],
     workspace_paths: Optional[List[str]] = None,
 ) -> PreToolUseDecision:
-    # 0. Allow mutation tools if running inside isolated worktree
-    if tool_name in MUTATION_TOOLS and is_in_worker_worktree(workspace_paths):
-        return PreToolUseDecision(decision="allow")
-    """Evaluate a tool execution request against Rule 0 and tool gating rules."""
+    """Evaluate a tool execution request against Rule 0, contract freeze, and gating rules."""
     # 1. Deny forbidden background subagent tools
     if tool_name in FORBIDDEN_SUBAGENT_TOOLS:
         return PreToolUseDecision(
@@ -190,7 +291,25 @@ def evaluate_tool_call(
             reason=RULE_0_TOOL_DENIAL_REASON,
         )
 
-    # 2. Check code mutation tools
+    # 2. Check contract freeze violation for mutation tools (orchestrator and workers)
+    if tool_name in MUTATION_TOOLS:
+        target_path = extract_target_path(tool_args)
+        if target_path:
+            frozen_files = get_frozen_files(workspace_paths)
+            violation, freeze_reason = is_frozen_contract_violation(
+                target_path, frozen_files, workspace_paths
+            )
+            if violation:
+                return PreToolUseDecision(
+                    decision="deny",
+                    reason=freeze_reason,
+                )
+
+    # 3. Allow mutation tools if running inside isolated worktree (not violating freeze)
+    if tool_name in MUTATION_TOOLS and is_in_worker_worktree(workspace_paths):
+        return PreToolUseDecision(decision="allow")
+
+    # 4. Check Orchestrator code mutation tools (Rule 0)
     if tool_name in MUTATION_TOOLS:
         target_path = extract_target_path(tool_args)
         if target_path:
