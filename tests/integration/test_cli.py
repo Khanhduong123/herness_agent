@@ -1,5 +1,7 @@
 """Tests for CLI default options and command configurations."""
 
+from pathlib import Path
+
 import pytest
 from click.testing import CliRunner
 
@@ -131,3 +133,81 @@ def test_cli_runner_smoke_command() -> None:
     assert result.exit_code == 0
     assert "[SMOKE PROBE]" in result.output
     assert "[PASSED] All smoke probes succeeded" in result.output
+
+
+def test_cli_skill_scaffold(tmp_path) -> None:
+    """Verifies harness-agent skill scaffold detects frameworks and generates skills."""
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        # Setup dummy project with pyproject.toml containing fastapi
+        pyproject = Path("pyproject.toml")
+        pyproject.write_text(
+            '[project]\nname = "test-pkg"\ndependencies = ["fastapi>=0.100.0"]\n',
+            encoding="utf-8",
+        )
+        result = runner.invoke(main, ["skill", "scaffold"])
+        assert result.exit_code == 0
+        assert "Detected" in result.output
+        assert "fastapi" in result.output
+        assert "[OK] Scaffolding complete" in result.output
+        fastapi_skill = Path(".agents") / "skills" / "fastapi" / "SKILL.md"
+        assert fastapi_skill.is_file()
+        assert "name: fastapi" in fastapi_skill.read_text(encoding="utf-8")
+
+        # Running again without force should skip
+        result_skip = runner.invoke(main, ["skill", "scaffold"])
+        assert result_skip.exit_code == 0
+        assert "[SKIP]" in result_skip.output
+
+        # Running with --force should overwrite
+        result_force = runner.invoke(main, ["skill", "scaffold", "--force"])
+        assert result_force.exit_code == 0
+        assert "[+] Overwrote existing skill" in result_force.output
+
+
+def test_cli_skill_list(tmp_path) -> None:
+    """Verifies harness-agent skill list displays available skills and role contracts."""
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        dummy_skill_dir = Path(".agents") / "skills" / "test-skill"
+        dummy_skill_dir.mkdir(parents=True)
+        (dummy_skill_dir / "SKILL.md").write_text(
+            "---\nname: test-skill\ndescription: demo\n---\n",
+            encoding="utf-8",
+        )
+        result = runner.invoke(main, ["skill", "list"])
+        assert result.exit_code == 0
+        assert "=== Available Skills in Repository ===" in result.output
+        assert "test-skill" in result.output
+        assert "=== Role-to-Skill Contract Mappings ===" in result.output
+        assert "Role: coder" in result.output
+        assert "sdlc-clean-code-standards" in result.output
+
+
+def test_gate_tool_execution_allows_role_selection_and_skills() -> None:
+    """Verifies gate_tool_execution permits writes to .agents/skills/ and role_selection.json."""
+    from harness_agent.hooks.gate_tool_execution import is_path_forbidden
+
+    is_forbidden, reason = is_path_forbidden(".agents/skills/fastapi/SKILL.md")
+    assert not is_forbidden
+    assert reason == ""
+
+    is_forbidden_context, reason_ctx = is_path_forbidden(".ai/context/role_selection.json")
+    assert not is_forbidden_context
+    assert reason_ctx == ""
+
+    # Normal application code should still be forbidden
+    is_forbidden_src, _ = is_path_forbidden("src/harness_agent/cli.py")
+    assert is_forbidden_src
+
+
+def test_cli_init_role_select(tmp_path) -> None:
+    """Verifies harness-agent init --role-select flag option is recognized and executed."""
+    runner = CliRunner()
+    init_dir = tmp_path / "new_proj"
+    result = runner.invoke(
+        main,
+        ["init", "test-project", "--target-dir", str(init_dir), "--force", "--role-select"],
+    )
+    assert result.exit_code == 0
+    assert (init_dir / ".ai" / "context" / "role_selection.json").is_file()
