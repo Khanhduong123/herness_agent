@@ -42,6 +42,7 @@ ALLOWED_PATH_PREFIXES = (
     ".ai/status/",
     ".ai/context/",
     ".runs/",
+    ".agents/skills/",
 )
 
 FORBIDDEN_PATH_PREFIXES = (
