@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -1295,6 +1296,115 @@ class HerdrDispatcher:
         return True, f"Task {task_id} aborted. Failure log archived to {log_file}"
 
 
+class TaskWorktreeManager:
+    """Async context manager managing git worktree provisioning and teardown."""
+
+    _git_lock: asyncio.Lock = asyncio.Lock()
+
+    def __init__(
+        self,
+        task_id: str,
+        base_ref: Optional[str] = None,
+        repo_root: Optional[Path] = None,
+        auto_merge: bool = False,
+        target_branch: Optional[str] = None,
+        executable: str = "herdr",
+    ) -> None:
+        self.task_id = task_id
+        self.base_ref = base_ref
+        self.repo_root = repo_root or Path.cwd()
+        self.auto_merge = auto_merge
+        self.target_branch = target_branch
+        self.executable = executable
+        self.worktree_path: Optional[Path] = None
+        self.pane_id: Optional[str] = None
+
+    async def __aenter__(self) -> Path:
+        """Provision isolated worktree, configure environment, and return path."""
+        async with self._git_lock:
+            # Run worktree creation in thread to avoid blocking event loop
+            ok, path_or_err, pane_id = await asyncio.to_thread(
+                HerdrDispatcher.create_agent_worktree,
+                task_id=self.task_id,
+                base_ref=self.base_ref,
+                executable=self.executable,
+                repo_root=self.repo_root,
+            )
+
+        if not ok:
+            raise RuntimeError(f"Failed to create worktree for task {self.task_id}: {path_or_err}")
+
+        self.pane_id = pane_id
+        self.worktree_path = Path(path_or_err).resolve()
+
+        # Ensure trusted workspace and environment files copied
+        await asyncio.to_thread(
+            HerdrDispatcher.trust_workspace,
+            workspace_path=self.worktree_path,
+        )
+        await asyncio.to_thread(
+            HerdrDispatcher.setup_worktree_env,
+            worktree_path=self.worktree_path,
+            repo_root=self.repo_root,
+        )
+
+        return self.worktree_path
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Teardown worktree, stop worker, optionally merge, and clean up."""
+        # 1. Stop worker agent if running
+        try:
+            await asyncio.to_thread(
+                HerdrDispatcher.stop_agent,
+                task_id=self.task_id,
+                executable=self.executable,
+            )
+        except Exception as stop_err:
+            logger.warning(
+                "Error stopping worker for task %s in __aexit__: %s",
+                self.task_id,
+                stop_err,
+            )
+
+        # 2. If auto_merge is requested and no exception occurred, merge worktree
+        if self.auto_merge and exc_type is None and self.target_branch:
+            async with self._git_lock:
+                try:
+                    await asyncio.to_thread(
+                        HerdrDispatcher.merge_worktree_to_feature,
+                        task_id=self.task_id,
+                        target_branch=self.target_branch,
+                        repo_root=self.repo_root,
+                        executable=self.executable,
+                    )
+                except Exception as merge_err:
+                    logger.error(
+                        "Failed to auto-merge worktree for task %s into %s: %s",
+                        self.task_id,
+                        self.target_branch,
+                        merge_err,
+                    )
+                    raise merge_err
+        else:
+            # 3. Always clean up worktree safely in finally / non-merged path
+            async with self._git_lock:
+                try:
+                    await asyncio.to_thread(
+                        HerdrDispatcher.cleanup_worktree,
+                        task_id=self.task_id,
+                        worktree_path=str(self.worktree_path) if self.worktree_path else None,
+                        force=True,
+                        repo_root=self.repo_root,
+                        executable=self.executable,
+                    )
+                except Exception as cleanup_err:
+                    logger.warning(
+                        "Error cleaning up worktree for task %s in __aexit__: %s",
+                        self.task_id,
+                        cleanup_err,
+                    )
+
+
 def is_approval_command(command_text: str) -> bool:
     """Checks if a user input string contains an explicit approval token."""
     if not command_text:
@@ -1536,6 +1646,7 @@ HerdrDispatcher.verify_and_load_agents_rule = staticmethod(verify_and_load_agent
 
 __all__ = [
     "HerdrDispatcher",
+    "TaskWorktreeManager",
     "abort_task",
     "build_worker_dispatch_contract_with_role",
     "cleanup_worktree",
