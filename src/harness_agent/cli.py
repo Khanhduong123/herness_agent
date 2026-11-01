@@ -1496,5 +1496,129 @@ def list_skills_cmd() -> None:
         click.echo(f"  Optional Skills: {opt_list}")
 
 
+@main.group(name="learn")
+def learn_group() -> None:
+    """Autonomous learning, reflection, and cognitive memory commands."""
+    pass
+
+
+@learn_group.command(name="reflect")
+@click.option("--output-dir", default=".ai/learned", help="Target directory for semantic memory")
+@click.option(
+    "--skills-dir",
+    default=".agents/skills",
+    help="Target directory for generated procedural skills",
+)
+@click.option(
+    "--model",
+    default="gemini-3.8-flash-low",
+    help="Model name (default: gemini-3.8-flash-low)",
+)
+@click.option("--effort", default="low", help="Effort setting (default: low)")
+@click.option("--dry-run", is_flag=True, help="Preview extracted rules without writing files")
+@click.option(
+    "--background",
+    is_flag=True,
+    help="Run reflection detached in the background",
+)
+def learn_reflect_cmd(
+    output_dir: str,
+    skills_dir: str,
+    model: str,
+    effort: str,
+    dry_run: bool,
+    background: bool,
+) -> None:
+    """Harvest WAL events and synthesize rules, anti-patterns, and reusable skills via agy."""
+    if background:
+        cmd = [
+            sys.executable,
+            "-m",
+            "harness_agent.cli",
+            "learn",
+            "reflect",
+            "--output-dir",
+            output_dir,
+            "--skills-dir",
+            skills_dir,
+            "--model",
+            model,
+            "--effort",
+            effort,
+        ]
+        if dry_run:
+            cmd.append("--dry-run")
+
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            close_fds=(sys.platform != "win32"),
+            creationflags=creationflags,
+        )
+        click.echo("[OK] Detached background reflection triggered successfully.")
+        return
+
+    from harness_agent.learning.harvester import TelemetryHarvester
+    from harness_agent.learning.reflector import KnowledgeReflector
+
+    reflector = KnowledgeReflector(
+        output_dir=output_dir,
+        skills_dir=skills_dir,
+        model=model,
+        effort=effort,
+    )
+    existing_rules = reflector.load_rules()
+    harvester = TelemetryHarvester(existing_rules=existing_rules)
+
+    # Harvest from current session WAL events
+    wal_events = []
+    session_id = "default"
+    wal_file = Path(".ai/context/wal_actions.log")
+    if wal_file.is_file():
+        try:
+            from harness_agent.core.state import ActionWAL
+
+            wal = ActionWAL(wal_file)
+            wal_events = wal.read_all_events()
+            if wal_events:
+                session_id = getattr(wal_events[-1], "session_id", session_id)
+        except Exception:
+            pass
+
+    trajectories = harvester.harvest(
+        session_id=session_id,
+        wal_events=wal_events,
+    )
+
+    if not trajectories:
+        click.echo("[OK] No error incidents found to reflect upon (0 tokens consumed).")
+        return
+
+    click.echo(f"Harvested {len(trajectories)} incident trajectory(ies).")
+
+    if dry_run:
+        click.echo("[DRY-RUN] Extracted trajectories:")
+        for t in trajectories:
+            det_flag = "[DETERMINISTIC]" if t.is_deterministic else "[LLM-MICRO-PROMPT]"
+            msg = (
+                f"  - {det_flag} {t.incident_type.value}: "
+                f"{t.trigger_error[:50]} -> {t.resolution[:50]}"
+            )
+            click.echo(msg)
+        return
+
+    res = reflector.reflect_and_learn(trajectories)
+    click.echo(
+        f"[OK] Reflection complete: {len(res.get('added_rules', []))} rules, "
+        f"{len(res.get('added_anti_patterns', []))} anti-patterns synthesized."
+    )
+
+
 if __name__ == "__main__":
     main()
