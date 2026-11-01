@@ -1620,5 +1620,29 @@ def learn_reflect_cmd(
     )
 
 
+@main.command(name="update")
+@click.option("--remote", default="origin", help="Git remote (default: origin)")
+@click.option("--branch", default=None, help="Target branch to pull (default: active branch)")
+@click.option(
+    "--force",
+    "-f",
+    is_flag=True,
+    help="Force update even if working tree has untracked/dirty changes",
+)
+@click.option("--skip-pip", is_flag=True, help="Skip editable pip re-install")
+def update_cmd(remote: str, branch: Optional[str], force: bool, skip_pip: bool) -> None:
+    """Update harness-agent codebase and CLI via git pull and re-sync environment."""
+    from harness_agent.core.updater import GitCLIUpdater
+
+    updater = GitCLIUpdater()
+    result = updater.update(remote=remote, branch=branch, force=force, skip_pip=skip_pip)
+
+    if result.success:
+        click.echo(f"[OK] {result.message}")
+    else:
+        click.echo(f"[ERROR] {result.message}", err=True)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     main()
