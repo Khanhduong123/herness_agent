@@ -149,12 +149,18 @@ if (Test-Path $SourceAgents) {
     Write-Host "  [+] Copied SDLC Skills to .agents\skills\" -ForegroundColor Green
 }
 
-# 4a. Copy Lifecycle Hooks Configuration
+# 4a. Copy Lifecycle Hooks Configuration and Dispatcher
 $SourceHooks = Join-Path $ScriptDir ".agents\hooks.json"
 $TargetHooks = Join-Path $ResolvedTarget ".agents\hooks.json"
 if (Test-Path $SourceHooks) {
     Copy-Item -Path $SourceHooks -Destination $TargetHooks -Force
     Write-Host "  [+] Created .agents\hooks.json (Lifecycle Hooks config)" -ForegroundColor Green
+}
+$SourceRunHook = Join-Path $ScriptDir ".agents\run_hook.py"
+$TargetRunHook = Join-Path $ResolvedTarget ".agents\run_hook.py"
+if (Test-Path $SourceRunHook) {
+    Copy-Item -Path $SourceRunHook -Destination $TargetRunHook -Force
+    Write-Host "  [+] Created .agents\run_hook.py (Hook Dispatcher)" -ForegroundColor Green
 }
 
 # 4b. Copy Orchestrator Hooks Script to .agents\hooks\

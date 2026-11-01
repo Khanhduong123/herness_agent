@@ -1,4 +1,12 @@
 {
+  "bootstrap-session-context": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python run_hook.py bootstrap_context.py"
+      }
+    ]
+  },
   "enforce-orchestrator-role": {
     "PreInvocation": [
       {
