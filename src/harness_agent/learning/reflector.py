@@ -29,24 +29,24 @@ MICRO_PROMPT_TEMPLATE = (
     "You are an autonomous cognitive reflector. Analyze this incident trajectory and return ONLY "
     "a strict JSON object (no markdown, no code fences, no commentary).\n"
     "Format:\n"
-    "{\n"
-    '  "rule": {\n'
+    "{{\n"
+    '  "rule": {{\n'
     '    "id": "rule_<short_snake_case_id>",\n'
     '    "title": "<Concise descriptive title>",\n'
     '    "trigger_context": "<Specific trigger keywords/conditions, comma separated>",\n'
     '    "directive": "<Clear mandatory instruction on how to avoid or handle this>",\n'
     '    "tags": ["tag1", "tag2"]\n'
-    "  },\n"
-    '  "anti_pattern": {\n'
+    "  }},\n"
+    '  "anti_pattern": {{\n'
     '    "id": "ap_<short_snake_case_id>",\n'
     '    "pattern_name": "<Pattern name>",\n'
     '    "forbidden_behavior": "<Specific action/code pattern that fails>",\n'
     '    "reason": "<Why it causes an error>",\n'
     '    "alternative": "<What should be done instead>",\n'
     '    "tags": ["tag1", "tag2"]\n'
-    "  },\n"
+    "  }},\n"
     '  "procedural_skill": null\n'
-    "}\n"
+    "}}\n"
     "Incident Data:\n"
     "- Session: {session_id}\n"
     "- Type: {incident_type}\n"

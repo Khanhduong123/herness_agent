@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import sys
 import threading
 from pathlib import Path
@@ -20,6 +21,131 @@ MAX_LINES = 40
 MAX_MILESTONES = 3
 MAX_MODIFIED_FILES = 5
 MAX_ESTIMATED_TOKENS = 800
+MAX_LEARNED_TOKENS = 200
+MAX_LEARNED_RULES = 3
+
+
+def select_relevant_rules(
+    rules: List[Any],
+    context_keywords: List[str],
+    max_rules: int = 3,
+) -> List[Any]:
+    """Select Top-1 anchor rule and Top-(max_rules-1) contextually matched rules.
+
+    Selection strategy:
+    1. Top-1 Anchor: Highest priority rule by calculate_priority_score().
+    2. Contextual Matches: Scored by keyword/tag overlap against context_keywords
+       (e.g., file extensions, goal words). Pick top matches to fill up to max_rules.
+    """
+    if not rules:
+        return []
+
+    # Sort all rules descending by priority score
+    scored_rules = sorted(
+        rules,
+        key=lambda r: (
+            r.calculate_priority_score()
+            if hasattr(r, "calculate_priority_score")
+            else (r.get("hit_count", 1) if isinstance(r, dict) else getattr(r, "hit_count", 1))
+        ),
+        reverse=True,
+    )
+
+    if max_rules <= 0:
+        return []
+
+    selected: List[Any] = [scored_rules[0]]
+    if len(selected) >= max_rules or len(scored_rules) == 1:
+        return selected
+
+    remaining = scored_rules[1:]
+    clean_keywords = {kw.lower().strip() for kw in context_keywords if kw and kw.strip()}
+
+    def _match_score(rule: Any) -> float:
+        score = 0.0
+        rule_tags = rule.get("tags", []) if isinstance(rule, dict) else getattr(rule, "tags", [])
+        rule_tags_clean = [str(t).lower().strip() for t in rule_tags]
+
+        rule_trigger = str(
+            rule.get("trigger_context", "")
+            if isinstance(rule, dict)
+            else getattr(rule, "trigger_context", "")
+        ).lower()
+        rule_title = str(
+            rule.get("title", "") if isinstance(rule, dict) else getattr(rule, "title", "")
+        ).lower()
+        rule_directive = str(
+            rule.get("directive", "") if isinstance(rule, dict) else getattr(rule, "directive", "")
+        ).lower()
+
+        for kw in clean_keywords:
+            if not kw:
+                continue
+            # Exact tag match gets highest boost
+            if kw in rule_tags_clean:
+                score += 3.0
+            # Extension or word match in trigger context
+            if kw in rule_trigger:
+                score += 2.0
+            # Word match in title or directive
+            if kw in rule_title or kw in rule_directive:
+                score += 1.0
+
+        # Tie-breaker with decayed priority score
+        p_score = (
+            rule.calculate_priority_score()
+            if hasattr(rule, "calculate_priority_score")
+            else (
+                rule.get("hit_count", 1)
+                if isinstance(rule, dict)
+                else getattr(rule, "hit_count", 1)
+            )
+        )
+        return score * 100.0 + float(p_score)
+
+    remaining_sorted = sorted(remaining, key=_match_score, reverse=True)
+    needed = max_rules - len(selected)
+    selected.extend(remaining_sorted[:needed])
+    return selected
+
+
+def _load_learned_rules_pure_python(base_dir: Path) -> List[Dict[str, Any]]:
+    """Pure-Python loader for .ai/learned/rules.json."""
+    rules_json_path = base_dir / ".ai" / "learned" / "rules.json"
+    if not rules_json_path.is_file():
+        return []
+    try:
+        data = json.loads(rules_json_path.read_text(encoding="utf-8", errors="replace"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _format_learned_directives_section(
+    rules: List[Any], max_tokens: int = MAX_LEARNED_TOKENS
+) -> List[str]:
+    """Format selected learned rules under '#### Learned Project Directives' with token cap."""
+    if not rules:
+        return []
+
+    header = ["", "#### Learned Project Directives"]
+    body_lines: List[str] = []
+
+    for r in rules:
+        title = getattr(r, "title", None) or (r.get("title") if isinstance(r, dict) else "Rule")
+        directive = getattr(r, "directive", None) or (
+            r.get("directive") if isinstance(r, dict) else ""
+        )
+        line = f"- **{title}**: {directive.strip()}"
+        candidate = header + body_lines + [line]
+        if estimate_tokens("\n".join(candidate)) > max_tokens:
+            break
+        body_lines.append(line)
+
+    if not body_lines:
+        return []
+
+    return header + body_lines
 
 
 def _configure_utf8_streams() -> None:
@@ -216,6 +342,23 @@ def build_context_from_pure_python(base_dir: Path) -> str:
         for mf in modified_files[:MAX_MODIFIED_FILES]:
             lines.append(f"- `{mf}`")
 
+    # Dynamic learned rules matching (<200 tokens budget)
+    raw_rules = _load_learned_rules_pure_python(base_dir)
+    if raw_rules:
+        # Extract keywords from goal and file extensions from modified_files
+        keywords = set(re.findall(r"[a-zA-Z0-9_-]+", goal.lower()))
+        for mf in modified_files:
+            suffix = Path(mf).suffix.lower()
+            if suffix:
+                keywords.add(suffix)
+                keywords.add(suffix.lstrip("."))
+        selected = select_relevant_rules(raw_rules, list(keywords), max_rules=MAX_LEARNED_RULES)
+        directives_lines = _format_learned_directives_section(
+            selected, max_tokens=MAX_LEARNED_TOKENS
+        )
+        if directives_lines:
+            lines.extend(directives_lines)
+
     return apply_budget(lines)
 
 
@@ -277,6 +420,30 @@ def get_hydrated_context(workspace_root: Optional[Path] = None) -> str:
             lines.append("#### Modified Files")
             for mf in state.modified_files[:MAX_MODIFIED_FILES]:
                 lines.append(f"- `{mf}`")
+
+        # Dynamic learned rules matching (<200 tokens budget)
+        try:
+            from harness_agent.learning.reflector import KnowledgeReflector
+
+            reflector = KnowledgeReflector(output_dir=root / ".ai" / "learned")
+            rules = reflector.load_rules()
+        except Exception:
+            raw_rules = _load_learned_rules_pure_python(root)
+            rules = raw_rules
+
+        if rules:
+            keywords = set(re.findall(r"[a-zA-Z0-9_-]+", state.goal.lower()))
+            for mf in state.modified_files:
+                suffix = Path(mf).suffix.lower()
+                if suffix:
+                    keywords.add(suffix)
+                    keywords.add(suffix.lstrip("."))
+            selected = select_relevant_rules(rules, list(keywords), max_rules=MAX_LEARNED_RULES)
+            directives_lines = _format_learned_directives_section(
+                selected, max_tokens=MAX_LEARNED_TOKENS
+            )
+            if directives_lines:
+                lines.extend(directives_lines)
 
         return apply_budget(lines)
 
