@@ -754,6 +754,13 @@ def _sync_single_project(repo_root: Path, target_path: Path, link: bool = False)
             click.secho("  [+] Synced .agents/hooks.json (Lifecycle Hooks config)", fg="green")
             copied += 1
 
+        run_hook_file = agents_src / "run_hook.py"
+        if run_hook_file.exists():
+            target_agents.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(run_hook_file, target_agents / "run_hook.py")
+            click.secho("  [+] Synced .agents/run_hook.py (Hook Dispatcher)", fg="green")
+            copied += 1
+
     hooks_src = repo_root / ".agents" / "hooks"
     if not hooks_src.exists():
         hooks_src = repo_root / "src" / "harness_agent" / "hooks"
