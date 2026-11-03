@@ -1582,9 +1582,9 @@ def learn_reflect_cmd(
     wal_file = Path(".ai/context/wal_actions.log")
     if wal_file.is_file():
         try:
-            from harness_agent.core.state import ActionWAL
+            from harness_agent.core.state import EventWAL
 
-            wal = ActionWAL(wal_file)
+            wal = EventWAL(wal_file)
             wal_events = wal.read_all_events()
             if wal_events:
                 session_id = getattr(wal_events[-1], "session_id", session_id)

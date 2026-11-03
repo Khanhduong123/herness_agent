@@ -690,6 +690,10 @@ class ReconciliationResult(BaseModel):
     recovery_action: str = "none"
 
 
+# Alias for backwards compatibility
+ActionWAL = EventWAL
+
+
 class StateCoordinator:
     """Coordinates crash recovery and consistency validation between
     session snapshot and event WAL.
