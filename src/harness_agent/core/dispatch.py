@@ -8,6 +8,7 @@ import logging
 import re
 import shutil
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -81,6 +82,56 @@ def verify_and_load_agents_rule(
             time.sleep(delay)
 
     raise RuntimeError("Pre-flight bootstrap failed: AGENTS.md not accessible after retries")
+
+
+def trigger_background_reflection(
+    repo_root: Optional[Union[str, Path]] = None,
+    output_dir: Optional[Union[str, Path]] = None,
+    skills_dir: Optional[Union[str, Path]] = None,
+) -> Optional[subprocess.Popen]:
+    """Spawns a detached background process executing 'harness-agent learn reflect --background'.
+
+    Parameters:
+        repo_root: Optional repository root (defaults to cwd / git root).
+        output_dir: Optional target directory for learned rules (defaults to .ai/learned).
+        skills_dir: Optional target directory for learned skills (defaults to .agents/skills).
+
+    Guaranteed Non-Blocking:
+        Returns immediately (<0.01s) so caller / CLI is never delayed.
+        Uses DETACHED_PROCESS on Windows and close_fds on Unix.
+    """
+    root = Path(repo_root) if repo_root else Path.cwd()
+    cmd = [
+        sys.executable,
+        "-m",
+        "harness_agent.cli",
+        "learn",
+        "reflect",
+        "--background",
+    ]
+    if output_dir:
+        cmd.extend(["--output-dir", str(output_dir)])
+    if skills_dir:
+        cmd.extend(["--skills-dir", str(skills_dir)])
+
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            close_fds=(sys.platform != "win32"),
+            creationflags=creationflags,
+        )
+        return proc
+    except Exception as exc:
+        logger.warning(f"Failed to trigger background reflection: {exc}")
+        return None
 
 
 class HerdrDispatcher:
@@ -950,10 +1001,13 @@ class HerdrDispatcher:
                                 f"Failed to log task summary telemetry for {task_id}: {log_exc}"
                             )
 
+                        trigger_background_reflection(repo_root=repo_root)
+
                         return True, content or "[WORKER_COMPLETED]"
 
             elapsed = time.time() - start_time
             if elapsed >= timeout_seconds:
+                trigger_background_reflection(repo_root=repo_root)
                 return False, f"Task {task_id} timed out after {timeout_seconds}s"
 
             sleep_time = min(poll_interval, max(0.01, timeout_seconds - elapsed))
@@ -1292,6 +1346,8 @@ class HerdrDispatcher:
             text=True,
             check=False,
         )
+
+        trigger_background_reflection(repo_root=repo_root)
 
         return True, f"Task {task_id} aborted. Failure log archived to {log_file}"
 
@@ -1663,6 +1719,7 @@ __all__ = [
     "start_agent",
     "stop_agent",
     "transition_lifecycle_state",
+    "trigger_background_reflection",
     "verify_and_load_agents_rule",
     "wait_for_task",
 ]

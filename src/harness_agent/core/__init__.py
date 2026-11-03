@@ -11,6 +11,7 @@ from harness_agent.core.dispatch import (
     merge_worktree_to_feature,
     setup_worktree_env,
     stop_agent,
+    trigger_background_reflection,
     wait_for_task,
 )
 from harness_agent.core.harness import AgentHarness
@@ -69,6 +70,7 @@ __all__ = [
     "merge_worktree_to_feature",
     "setup_worktree_env",
     "stop_agent",
+    "trigger_background_reflection",
     "wait_for_task",
     "OrchestrationPlan",
     "OrchestrationResult",
