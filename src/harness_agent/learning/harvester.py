@@ -58,6 +58,21 @@ KNOWN_TOOL_PATTERNS = [
         "resolution": "Ensure directory exists or create parent path before accessing file",
         "incident_type": IncidentType.TOOL_ERROR_RECOVERY,
     },
+    {
+        "pattern": re.compile(
+            r"Tool-locking violation: Tool '([^']+)' is not permitted",
+            re.IGNORECASE,
+        ),
+        "failing_tool": "write_to_file",
+        "recovery_tool": "apply_patch",
+        "root_cause": (
+            "Attempted prohibited file write or creation when only patch tools are permitted"
+        ),
+        "resolution": (
+            "Use apply_patch or replace_file_content instead of overwriting existing files"
+        ),
+        "incident_type": IncidentType.TOOL_ERROR_RECOVERY,
+    },
 ]
 
 
