@@ -32,6 +32,7 @@ from harness_agent.core import (
     dispatch_interactive_critics,
     extract_untrusted_content,
     sanitize_delimiters,
+    trigger_background_reflection,
     wrap_untrusted_content,
 )
 from harness_agent.evaluation import (
@@ -137,6 +138,7 @@ __all__ = [
     "ToolCallRecord",
     "ToolLockEvaluator",
     "ToolLockViolationError",
+    "trigger_background_reflection",
     "UNTRUSTED_SOURCE_INSTRUCTION",
     "UntrustedSource",
     "WebResult",
