@@ -1551,7 +1551,11 @@ def learn_reflect_cmd(
 
         creationflags = 0
         if sys.platform == "win32":
-            creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            creationflags = (
+                subprocess.DETACHED_PROCESS
+                | subprocess.CREATE_NEW_PROCESS_GROUP
+                | subprocess.CREATE_NO_WINDOW
+            )
 
         subprocess.Popen(
             cmd,
@@ -1582,9 +1586,9 @@ def learn_reflect_cmd(
     wal_file = Path(".ai/context/wal_actions.log")
     if wal_file.is_file():
         try:
-            from harness_agent.core.state import ActionWAL
+            from harness_agent.core.state import EventWAL
 
-            wal = ActionWAL(wal_file)
+            wal = EventWAL(wal_file)
             wal_events = wal.read_all_events()
             if wal_events:
                 session_id = getattr(wal_events[-1], "session_id", session_id)

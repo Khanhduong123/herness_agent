@@ -15,6 +15,8 @@ Covers:
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -23,7 +25,8 @@ import yaml
 from click.testing import CliRunner
 
 from harness_agent.cli import main
-from harness_agent.core.state import WALEvent
+from harness_agent.core.dispatch import HerdrDispatcher, trigger_background_reflection
+from harness_agent.core.state import EventWAL, WALEvent
 from harness_agent.hooks.bootstrap_context import select_relevant_rules
 from harness_agent.learning.harvester import TelemetryHarvester
 from harness_agent.learning.models import IncidentTrajectory, IncidentType, LearnedRule
@@ -444,3 +447,238 @@ def test_cli_learn_reflect_command(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "[OK]" in result.output or "[DRY-RUN]" in result.output
+
+
+def test_eventwal_telemetry_harvesting(tmp_path: Path) -> None:
+    """Verify EventWAL logs with status code 1 are parsed by TelemetryHarvester."""
+    wal_file = tmp_path / "wal_actions.log"
+    wal = EventWAL(wal_file)
+
+    # Append a successful event and an error event (status_code != 0)
+    wal.append_event(
+        WALEvent(
+            session_id="session_wal_test",
+            step_index=1,
+            event_type="action_start",
+            tool_name="read_file",
+            status_code=0,
+            latency_ms=10.0,
+            error_message="",
+        )
+    )
+    wal.append_event(
+        WALEvent(
+            session_id="session_wal_test",
+            step_index=2,
+            event_type="action_error",
+            tool_name="replace_file_content",
+            status_code=1,
+            latency_ms=25.0,
+            error_message="FileNotFoundError: [Errno 2] No such file or directory: 'missing.py'",
+        )
+    )
+
+    events = wal.read_all_events()
+    assert len(events) == 2
+
+    harvester = TelemetryHarvester()
+    trajectories = harvester.harvest(
+        session_id="session_wal_test",
+        wal_events=events,
+        critic_issues=[],
+    )
+
+    assert len(trajectories) == 1
+    traj = trajectories[0]
+    assert traj.is_deterministic is True
+    assert traj.failing_tool == "replace_file_content"
+    assert "No such file or directory" in traj.trigger_error
+
+
+def test_tool_locking_violation_deterministic_match() -> None:
+    """Verify tool-locking error message matches KNOWN_TOOL_PATTERNS regex and produces
+
+    an IncidentTrajectory with is_deterministic=True (0 tokens).
+    """
+    harvester = TelemetryHarvester()
+    tool_lock_event = WALEvent(
+        session_id="session_tool_lock",
+        step_index=4,
+        event_type="action_error",
+        tool_name="write_to_file",
+        status_code=1,
+        latency_ms=8.0,
+        error_message=(
+            "Tool-locking violation: Tool 'write_to_file' is not permitted. "
+            "Only patch-based modification tools ('apply_patch', 'replace_file_content') "
+            "are allowed."
+        ),
+    )
+
+    trajectories = harvester.harvest(
+        session_id="session_tool_lock",
+        wal_events=[tool_lock_event],
+        critic_issues=[],
+    )
+
+    assert len(trajectories) == 1
+    traj = trajectories[0]
+    assert traj.is_deterministic is True
+    assert traj.incident_type == IncidentType.TOOL_ERROR_RECOVERY
+    assert traj.recovery_tool == "apply_patch"
+    assert "apply_patch" in traj.resolution
+    assert "prohibited file write" in traj.root_cause_hypothesis
+
+
+def test_trigger_background_reflection_invocation(tmp_path: Path) -> None:
+    """Mock subprocess.Popen and verify trigger_background_reflection() invokes
+
+    'harness-agent learn reflect' without --background, with correct flags.
+    """
+    with patch("subprocess.Popen") as mock_popen:
+        mock_proc = MagicMock()
+        mock_popen.return_value = mock_proc
+
+        output_dir = tmp_path / "learned"
+        skills_dir = tmp_path / "skills"
+
+        proc = trigger_background_reflection(
+            repo_root=tmp_path,
+            output_dir=output_dir,
+            skills_dir=skills_dir,
+        )
+
+        assert proc is mock_proc
+        assert mock_popen.called
+        call_args, call_kwargs = mock_popen.call_args
+
+        cmd = call_args[0]
+        assert cmd[0] == sys.executable
+        assert "-m" in cmd
+        assert "harness_agent.cli" in cmd
+        assert "learn" in cmd
+        assert "reflect" in cmd
+        assert "--background" not in cmd
+        assert "--output-dir" in cmd
+        assert str(output_dir) in cmd
+        assert "--skills-dir" in cmd
+        assert str(skills_dir) in cmd
+
+        assert call_kwargs.get("cwd") == str(tmp_path)
+        assert call_kwargs.get("stdout") == subprocess.DEVNULL
+        assert call_kwargs.get("stderr") == subprocess.DEVNULL
+        assert call_kwargs.get("stdin") == subprocess.DEVNULL
+
+        if sys.platform == "win32":
+            expected_flags = (
+                subprocess.DETACHED_PROCESS
+                | subprocess.CREATE_NEW_PROCESS_GROUP
+                | subprocess.CREATE_NO_WINDOW
+            )
+            assert call_kwargs.get("creationflags") == expected_flags
+            assert call_kwargs.get("close_fds") is False
+        else:
+            assert call_kwargs.get("close_fds") is True
+
+
+def test_trigger_background_reflection_in_wait_for_task(tmp_path: Path) -> None:
+    """Verify wait_for_task triggers background reflection upon task completion."""
+    status_dir = tmp_path / ".ai" / "status"
+    status_dir.mkdir(parents=True, exist_ok=True)
+    flag_file = status_dir / "task_done.complete"
+    flag_file.write_text("status: COMPLETED\nmodel: gemini-3.8-flash-low\n", encoding="utf-8")
+
+    with patch("harness_agent.core.dispatch.trigger_background_reflection") as mock_trigger:
+        ok, msg = HerdrDispatcher.wait_for_task(
+            task_id="task_done",
+            timeout_seconds=5,
+            status_dir=status_dir,
+            repo_root=tmp_path,
+        )
+        assert ok is True
+        assert mock_trigger.called
+        mock_trigger.assert_called_with(repo_root=tmp_path)
+
+
+def test_trigger_background_reflection_in_abort_task(tmp_path: Path) -> None:
+    """Verify abort_task triggers background reflection upon task abort."""
+    with (
+        patch("harness_agent.core.dispatch.trigger_background_reflection") as mock_trigger,
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+
+        ok, msg = HerdrDispatcher.abort_task(
+            task_id="task_fail",
+            reason="Explicit test abort",
+            repo_root=tmp_path,
+        )
+        assert ok is True
+        assert mock_trigger.called
+        mock_trigger.assert_called_with(repo_root=tmp_path)
+
+
+def test_harvest_skips_empty_or_whitespace_error_messages() -> None:
+    """Verify harvester skips error events with empty or whitespace-only error messages."""
+    harvester = TelemetryHarvester()
+
+    events = [
+        WALEvent(
+            session_id="session_empty_err",
+            step_index=1,
+            event_type="action_error",
+            tool_name="read_file",
+            status_code=1,
+            latency_ms=5.0,
+            error_message="",
+        ),
+        WALEvent(
+            session_id="session_whitespace_err",
+            step_index=2,
+            event_type="action_error",
+            tool_name="run_command",
+            status_code=1,
+            latency_ms=5.0,
+            error_message="   \n\t  ",
+        ),
+    ]
+
+    trajectories = harvester.harvest(
+        session_id="session_empty_whitespace",
+        wal_events=events,
+        critic_issues=[],
+    )
+    assert len(trajectories) == 0
+
+
+def test_execute_native_reflection_passes_create_no_window_on_windows() -> None:
+    """Verify execute_native_reflection passes CREATE_NO_WINDOW on Windows platform."""
+    reflector = KnowledgeReflector(model="gemini-3.8-flash-low", effort="low")
+    traj = IncidentTrajectory(
+        session_id="session_win",
+        incident_type=IncidentType.TOOL_ERROR_RECOVERY,
+        trigger_error="Test error",
+        failing_tool="custom_tool",
+        recovery_tool="",
+        root_cause_hypothesis="Root cause",
+        resolution="Fix",
+        is_deterministic=False,
+    )
+
+    with patch("subprocess.run") as mock_run:
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = "{}"
+        mock_run.return_value = mock_proc
+
+        with patch("sys.platform", "win32"):
+            reflector.execute_native_reflection(traj)
+            assert mock_run.called
+            call_kwargs = mock_run.call_args[1]
+            creationflags = call_kwargs.get("creationflags", 0)
+            assert creationflags & subprocess.CREATE_NO_WINDOW == subprocess.CREATE_NO_WINDOW
+
+        with patch("sys.platform", "linux"):
+            reflector.execute_native_reflection(traj)
+            call_kwargs = mock_run.call_args[1]
+            assert "creationflags" not in call_kwargs or call_kwargs.get("creationflags") == 0
