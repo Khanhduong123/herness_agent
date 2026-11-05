@@ -1551,7 +1551,11 @@ def learn_reflect_cmd(
 
         creationflags = 0
         if sys.platform == "win32":
-            creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            creationflags = (
+                subprocess.DETACHED_PROCESS
+                | subprocess.CREATE_NEW_PROCESS_GROUP
+                | subprocess.CREATE_NO_WINDOW
+            )
 
         subprocess.Popen(
             cmd,

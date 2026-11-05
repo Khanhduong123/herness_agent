@@ -533,7 +533,7 @@ def test_tool_locking_violation_deterministic_match() -> None:
 def test_trigger_background_reflection_invocation(tmp_path: Path) -> None:
     """Mock subprocess.Popen and verify trigger_background_reflection() invokes
 
-    'harness-agent learn reflect' with --background, correct flags, and non-blocking process flags.
+    'harness-agent learn reflect' without --background, with correct flags.
     """
     with patch("subprocess.Popen") as mock_popen:
         mock_proc = MagicMock()
@@ -558,7 +558,7 @@ def test_trigger_background_reflection_invocation(tmp_path: Path) -> None:
         assert "harness_agent.cli" in cmd
         assert "learn" in cmd
         assert "reflect" in cmd
-        assert "--background" in cmd
+        assert "--background" not in cmd
         assert "--output-dir" in cmd
         assert str(output_dir) in cmd
         assert "--skills-dir" in cmd
@@ -570,7 +570,11 @@ def test_trigger_background_reflection_invocation(tmp_path: Path) -> None:
         assert call_kwargs.get("stdin") == subprocess.DEVNULL
 
         if sys.platform == "win32":
-            expected_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            expected_flags = (
+                subprocess.DETACHED_PROCESS
+                | subprocess.CREATE_NEW_PROCESS_GROUP
+                | subprocess.CREATE_NO_WINDOW
+            )
             assert call_kwargs.get("creationflags") == expected_flags
             assert call_kwargs.get("close_fds") is False
         else:
