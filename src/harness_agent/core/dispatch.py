@@ -107,7 +107,6 @@ def trigger_background_reflection(
         "harness_agent.cli",
         "learn",
         "reflect",
-        "--background",
     ]
     if output_dir:
         cmd.extend(["--output-dir", str(output_dir)])
@@ -116,7 +115,11 @@ def trigger_background_reflection(
 
     creationflags = 0
     if sys.platform == "win32":
-        creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        creationflags = (
+            subprocess.DETACHED_PROCESS
+            | subprocess.CREATE_NEW_PROCESS_GROUP
+            | subprocess.CREATE_NO_WINDOW
+        )
 
     try:
         proc = subprocess.Popen(
