@@ -112,6 +112,8 @@ class TelemetryHarvester:
         error_events = [e for e in wal_events if getattr(e, "status_code", 0) != 0]
         for event in error_events:
             error_msg = getattr(event, "error_message", "") or ""
+            if not error_msg.strip():
+                continue
             tool_name = getattr(event, "tool_name", "") or ""
 
             # Check if this error is already covered by existing rules (Tier 3)

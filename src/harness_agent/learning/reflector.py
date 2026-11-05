@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -396,13 +397,19 @@ class KnowledgeReflector:
             self.effort,
         ]
 
+        kwargs: Dict[str, Any] = {
+            "capture_output": True,
+            "text": True,
+            "check": False,
+            "timeout": 45,
+        }
+        if sys.platform == "win32":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
         try:
             res = subprocess.run(
                 cmd,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=45,
+                **kwargs,
             )
             if res.returncode != 0:
                 logger.warning(
