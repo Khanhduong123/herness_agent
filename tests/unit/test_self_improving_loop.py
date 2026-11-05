@@ -612,3 +612,69 @@ def test_trigger_background_reflection_in_abort_task(tmp_path: Path) -> None:
         assert ok is True
         assert mock_trigger.called
         mock_trigger.assert_called_with(repo_root=tmp_path)
+
+
+def test_harvest_skips_empty_or_whitespace_error_messages() -> None:
+    """Verify harvester skips error events with empty or whitespace-only error messages."""
+    harvester = TelemetryHarvester()
+
+    events = [
+        WALEvent(
+            session_id="session_empty_err",
+            step_index=1,
+            event_type="action_error",
+            tool_name="read_file",
+            status_code=1,
+            latency_ms=5.0,
+            error_message="",
+        ),
+        WALEvent(
+            session_id="session_whitespace_err",
+            step_index=2,
+            event_type="action_error",
+            tool_name="run_command",
+            status_code=1,
+            latency_ms=5.0,
+            error_message="   \n\t  ",
+        ),
+    ]
+
+    trajectories = harvester.harvest(
+        session_id="session_empty_whitespace",
+        wal_events=events,
+        critic_issues=[],
+    )
+    assert len(trajectories) == 0
+
+
+def test_execute_native_reflection_passes_create_no_window_on_windows() -> None:
+    """Verify execute_native_reflection passes CREATE_NO_WINDOW on Windows platform."""
+    reflector = KnowledgeReflector(model="gemini-3.8-flash-low", effort="low")
+    traj = IncidentTrajectory(
+        session_id="session_win",
+        incident_type=IncidentType.TOOL_ERROR_RECOVERY,
+        trigger_error="Test error",
+        failing_tool="custom_tool",
+        recovery_tool="",
+        root_cause_hypothesis="Root cause",
+        resolution="Fix",
+        is_deterministic=False,
+    )
+
+    with patch("subprocess.run") as mock_run:
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = "{}"
+        mock_run.return_value = mock_proc
+
+        with patch("sys.platform", "win32"):
+            reflector.execute_native_reflection(traj)
+            assert mock_run.called
+            call_kwargs = mock_run.call_args[1]
+            creationflags = call_kwargs.get("creationflags", 0)
+            assert creationflags & subprocess.CREATE_NO_WINDOW == subprocess.CREATE_NO_WINDOW
+
+        with patch("sys.platform", "linux"):
+            reflector.execute_native_reflection(traj)
+            call_kwargs = mock_run.call_args[1]
+            assert "creationflags" not in call_kwargs or call_kwargs.get("creationflags") == 0
